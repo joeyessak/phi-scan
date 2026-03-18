@@ -1,0 +1,143 @@
+"""
+Claude automated PR review script.
+
+Reads the PR diff, sends it to Claude with PhiScan code standards as context,
+and writes the review to review_comment.txt for posting as a PR comment.
+"""
+
+import os
+import sys
+
+import anthropic
+
+MAX_DIFF_CHARACTERS = 30_000
+REVIEW_OUTPUT_FILE = "review_comment.txt"
+DIFF_INPUT_FILE = "pr_diff.txt"
+
+SYSTEM_PROMPT = """You are a senior software engineer reviewing a pull request for PhiScan,
+a HIPAA & FHIR compliant PHI/PII scanner for CI/CD pipelines built in Python 3.12.
+
+Review the diff against these non-negotiable code standards:
+
+NAMING:
+- Variables and functions: snake_case
+- Classes: PascalCase (nouns only)
+- Constants: UPPER_SNAKE_CASE
+- Booleans must start with: is_, has_, can_, should_, was_
+- Function names must be verb-noun pairs (e.g. calculate_tax_total, not process)
+- No abbreviations — write the full word (no usr, cfg, tmp, val, res)
+- No class names ending in: Manager, Handler, Processor, Helper, Util
+
+FUNCTIONS:
+- Maximum 30 lines per function
+- Maximum 3 arguments (use @dataclass for 4+)
+- Single responsibility — describable in one sentence with no "and"
+- Guard clauses over nested conditionals — return early
+
+NO MAGIC VALUES:
+- Zero numeric or string literals in logic code
+- All literals in named constants at module level or constants.py
+- Enums for any finite set of string values
+
+ERROR HANDLING:
+- Never catch bare Exception without re-raising
+- Custom exceptions for domain errors
+- Never silence errors with pass or empty except blocks
+
+SECURITY (critical for a PHI scanner):
+- Never store raw PHI values — always SHA-256 hash
+- Never send PHI to any external API
+- Never follow symlinks during traversal
+
+BANNED:
+- Magic numbers or strings in logic
+- Functions named: handle, process, do, run, manage, data, info
+- Nested conditionals deeper than 2 levels
+- Mutable default arguments
+- Bare except: clauses
+- Commented-out code
+- Vague variable names: data, info, result, temp, value, obj, item, thing
+
+Provide a concise, constructive review. Format your response as markdown.
+Start with a one-line summary, then list specific issues found (if any) with file:line references.
+If the code looks good, say so clearly. Be direct and specific — not vague."""
+
+
+def load_diff() -> str:
+    """Load the PR diff from file, truncating if over token limit."""
+    if not os.path.exists(DIFF_INPUT_FILE):
+        return ""
+
+    with open(DIFF_INPUT_FILE, encoding="utf-8") as diff_file:
+        diff_content = diff_file.read()
+
+    if len(diff_content) > MAX_DIFF_CHARACTERS:
+        truncation_notice = f"\n\n[Diff truncated at {MAX_DIFF_CHARACTERS} characters]"
+        return diff_content[:MAX_DIFF_CHARACTERS] + truncation_notice
+
+    return diff_content
+
+
+def build_review_prompt(pr_title: str, diff: str) -> str:
+    """Build the user prompt combining PR context and diff."""
+    return f"""PR Title: {pr_title}
+
+Diff:
+```
+{diff}
+```
+
+Review this PR against the PhiScan code standards. Be specific about any violations found."""
+
+
+def request_claude_review(pr_title: str, diff: str) -> str:
+    """Send the diff to Claude and return the review text."""
+    client = anthropic.Anthropic()
+
+    message = client.messages.create(
+        model="claude-sonnet-4-6",
+        max_tokens=1024,
+        system=SYSTEM_PROMPT,
+        messages=[
+            {
+                "role": "user",
+                "content": build_review_prompt(pr_title, diff),
+            }
+        ],
+    )
+
+    return message.content[0].text
+
+
+def write_review_comment(review_text: str) -> None:
+    """Write the review to the output file for the workflow to post."""
+    header = "## Claude Code Review\n\n"
+
+    with open(REVIEW_OUTPUT_FILE, "w", encoding="utf-8") as output_file:
+        output_file.write(header + review_text)
+
+
+def run_review() -> None:
+    """Orchestrate the full review flow."""
+    pr_title = os.environ.get("PR_TITLE", "Untitled PR")
+    diff = load_diff()
+
+    if not diff:
+        print("No diff found — skipping review.")
+        return
+
+    print(f"Reviewing PR: {pr_title}")
+    print(f"Diff size: {len(diff)} characters")
+
+    review_text = request_claude_review(pr_title, diff)
+    write_review_comment(review_text)
+
+    print(f"Review written to {REVIEW_OUTPUT_FILE}")
+
+
+if __name__ == "__main__":
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        print("ERROR: ANTHROPIC_API_KEY not set.")
+        sys.exit(1)
+
+    run_review()
