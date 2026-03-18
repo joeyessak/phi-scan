@@ -30,7 +30,7 @@ jobs:
         run: uv python install ${{ matrix.python-version }}
 
       - name: Install dependencies
-        run: uv sync --extra dev
+        run: uv sync --group dev
 
       - name: Lint — ruff check
         run: uv run ruff check .
@@ -39,22 +39,12 @@ jobs:
         run: uv run ruff format --check .
 
       - name: Type check — mypy
-        shell: bash
-        run: |
-          if [ -d "phi_scan" ]; then
-            uv run mypy phi_scan/
-          else
-            echo "phi_scan/ not yet created — skipping mypy"
-          fi
+        continue-on-error: false
+        run: uv run mypy phi_scan/
 
       - name: Tests — pytest
-        shell: bash
-        run: |
-          if [ -d "tests" ]; then
-            uv run pytest tests/ -v --cov=phi_scan --cov-report=xml --cov-report=term-missing
-          else
-            echo "tests/ not yet created — skipping pytest"
-          fi
+        continue-on-error: false
+        run: uv run pytest tests/ -v --cov=phi_scan --cov-report=xml --cov-report=term-missing
 
       - name: Upload coverage report
         if: matrix.os == 'ubuntu-latest' && hashFiles('coverage.xml') != ''
