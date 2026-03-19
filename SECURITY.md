@@ -14,9 +14,9 @@ If you discover a security vulnerability in PhiScan, please report it responsibl
 public release)
 
 **PGP encryption:** for sensitive reports, you may encrypt your email using our
-PGP public key available at [SECURITY-PGP.asc](SECURITY-PGP.asc) in this
-repository (will also be published at https://phiscan.dev/.well-known/pgp-key.txt
-at first public release).
+PGP public key (will be added to this repository as `SECURITY-PGP.asc` and
+published at https://phiscan.dev/.well-known/pgp-key.txt prior to first public
+release).
 
 **What to include:**
 
