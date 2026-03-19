@@ -10,11 +10,12 @@
 
 If you discover a security vulnerability in PhiScan, please report it responsibly.
 
-**Email:** security@phiscan.dev
+**Email:** joey.essak@gmail.com (will migrate to security@phiscan.dev when the
+domain is live)
 
 **PGP encryption:** for sensitive reports, you may encrypt your email using our
-PGP public key (published at https://phiscan.dev/.well-known/pgp-key.txt once
-the project is public).
+PGP public key (will be published at https://phiscan.dev/.well-known/pgp-key.txt
+once the project is public).
 
 **What to include:**
 
