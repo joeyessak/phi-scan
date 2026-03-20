@@ -117,10 +117,10 @@ and explain commands deferred to Phase 2).
 - [x] **1A.5** `uv add` core deps: `typer[all]`, `rich`, `pyyaml`, `python-dotenv`, `pyfiglet`, `watchdog`, `httpx`, `pathspec`
 - [x] **1A.6** `uv add --dev` dev deps: `pytest`, `pytest-cov`, `ruff`, `mypy`
 - [x] **1A.7** `uv sync` — generate `uv.lock` (commit it)
-- [ ] **1A.8** Delete `main.py` — replaced by `phi_scan/cli.py` entry point
-- [ ] **1A.9** Create `phi_scan/` package directory with all module files
-- [ ] **1A.10** Create `phi_scan/py.typed` — PEP 561 type checking marker file
-- [ ] **1A.11** Create `tests/` directory with `conftest.py`
+- [x] **1A.8** Delete `main.py` — replaced by `phi_scan/cli.py` entry point
+- [x] **1A.9** Create `phi_scan/` package directory with all module files
+- [x] **1A.10** Create `phi_scan/py.typed` — PEP 561 type checking marker file
+- [x] **1A.11** Create `tests/` directory with `conftest.py`
 - [ ] **1A.12** Create `Makefile` — targets: `install`, `lint`, `typecheck`, `test`, `scan`, `help`
 - [ ] **1A.13** Create `.phi-scanner.yml` — default scanner configuration
 - [ ] **1A.14** Create `.phi-scanignore` — default exclusion patterns (see Ignore Format Spec below)
