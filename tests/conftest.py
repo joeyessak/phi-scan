@@ -4,6 +4,8 @@ from pathlib import Path
 
 import pytest
 
+SAMPLE_FILE_CONTENT = 'greeting = "hello world"\n'
+
 
 @pytest.fixture()
 def tmp_project(tmp_path: Path) -> Path:
@@ -11,5 +13,5 @@ def tmp_project(tmp_path: Path) -> Path:
     source_dir = tmp_path / "src"
     source_dir.mkdir()
     sample_file = source_dir / "example.py"
-    sample_file.write_text('greeting = "hello world"\n')
+    sample_file.write_text(SAMPLE_FILE_CONTENT)
     return tmp_path

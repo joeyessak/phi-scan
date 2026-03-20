@@ -8,6 +8,9 @@ import typer
 import phi_scan
 from phi_scan.cli import app
 
+EXPECTED_VERSION = "0.1.0"
+EXPECTED_APP_NAME = "phi-scan"
+
 PHASE_ONE_MODULES = [
     "phi_scan.constants",
     "phi_scan.exceptions",
@@ -40,7 +43,7 @@ def test_phase_one_module_is_importable(module_name: str) -> None:
     """Each Phase 1 module must import without error."""
     imported_module = importlib.import_module(module_name)
 
-    assert imported_module is not None
+    assert hasattr(imported_module, "__name__")
 
 
 @pytest.mark.parametrize("module_name", FUTURE_PHASE_MODULES)
@@ -48,7 +51,7 @@ def test_future_phase_module_is_importable(module_name: str) -> None:
     """Each future-phase stub module must import without error."""
     imported_module = importlib.import_module(module_name)
 
-    assert imported_module is not None
+    assert hasattr(imported_module, "__name__")
 
 
 def test_cli_app_is_typer_instance() -> None:
@@ -58,9 +61,9 @@ def test_cli_app_is_typer_instance() -> None:
 
 def test_package_version_matches_pyproject() -> None:
     """Package version must stay consistent with pyproject.toml."""
-    assert phi_scan.__version__ == "0.1.0"
+    assert phi_scan.__version__ == EXPECTED_VERSION
 
 
 def test_package_app_name_is_defined() -> None:
     """Package app name must be the CLI command name."""
-    assert phi_scan.__app_name__ == "phi-scan"
+    assert phi_scan.__app_name__ == EXPECTED_APP_NAME
