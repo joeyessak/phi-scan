@@ -2,15 +2,20 @@
 
 # HEAD~1 assumes full clone depth — shallow clones (e.g. actions/checkout default)
 # must override: make scan DIFF_BASE=origin/main
+# DIFF_BASE is trusted input — do not pass values from untrusted external sources
 DIFF_BASE ?= HEAD~1
 
-.PHONY: install lint typecheck test scan clean help
+.PHONY: install lint format typecheck test scan clean help
 
 install: ## Install dependencies and download spaCy model (hash-verified)
 	uv sync
 	uv pip install --require-hashes -r constraints/spacy-model.txt
 
-lint: ## Run Ruff linter and formatter
+lint: ## Check code style without modifying files (CI-safe)
+	uv run ruff check . --no-fix
+	uv run ruff format --check .
+
+format: ## Apply Ruff auto-fixes and formatting
 	uv run ruff check . --fix
 	uv run ruff format .
 
@@ -24,12 +29,12 @@ scan: ## Scan files changed since DIFF_BASE (default: HEAD~1)
 	uv run phi-scan scan --diff "$(DIFF_BASE)"
 
 clean: ## Remove cache and coverage artifacts
-	find . -P -type d -name __pycache__ -prune -exec rm -rf --one-file-system {} \; || true
-	find . -P -type d -name .mypy_cache -prune -exec rm -rf --one-file-system {} \; || true
-	find . -P -type d -name .ruff_cache -prune -exec rm -rf --one-file-system {} \; || true
-	find . -P -maxdepth 1 -name .coverage ! -type l -exec rm -rf {} \; || true
-	find . -P -maxdepth 1 -name htmlcov ! -type l -exec rm -rf {} \; || true
-	find . -P -maxdepth 1 -name .pytest_cache ! -type l -exec rm -rf {} \; || true
+	-find . -P -type d -name __pycache__ -prune -exec rm -rf --one-file-system {} \;
+	-find . -P -type d -name .mypy_cache -prune -exec rm -rf --one-file-system {} \;
+	-find . -P -type d -name .ruff_cache -prune -exec rm -rf --one-file-system {} \;
+	-find . -P -maxdepth 1 -name .coverage ! -type l -exec rm -rf {} \;
+	-find . -P -maxdepth 1 -name htmlcov ! -type l -exec rm -rf {} \;
+	-find . -P -maxdepth 1 -name .pytest_cache ! -type l -exec rm -rf {} \;
 
 help: ## List all available targets
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
