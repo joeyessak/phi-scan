@@ -1,13 +1,14 @@
 .DEFAULT_GOAL := help
 
-DIFF_BASE    ?= HEAD~1
-SPACY_MODEL  ?= en_core_web_lg==3.7.0
+DIFF_BASE           ?= HEAD~1
+SPACY_MODEL_NAME    ?= en_core_web_lg
+SPACY_MODEL_VERSION ?= 3.7.0
 
 .PHONY: install lint typecheck test scan clean help
 
 install: ## Install dependencies and download spaCy model
 	uv sync
-	uv run python -m spacy download $(SPACY_MODEL)
+	uv pip install "$(SPACY_MODEL_NAME)==$(SPACY_MODEL_VERSION)"
 
 lint: ## Run Ruff linter and formatter
 	uv run ruff check . --fix
