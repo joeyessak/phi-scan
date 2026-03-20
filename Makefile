@@ -1,6 +1,9 @@
 .DEFAULT_GOAL := help
 
-.PHONY: install lint typecheck test scan help
+DIFF_BASE ?= HEAD~1
+COVERAGE_FLOOR := 80
+
+.PHONY: install lint typecheck test scan clean help
 
 install: ## Install dependencies and download spaCy model
 	uv sync
@@ -13,11 +16,17 @@ lint: ## Run Ruff linter and formatter
 typecheck: ## Run mypy — zero errors required
 	uv run mypy phi_scan/
 
-test: ## Run pytest with coverage
-	uv run pytest tests/ -v --cov=phi_scan
+test: ## Run pytest with coverage (fails below 80%)
+	uv run pytest tests/ -v --cov=phi_scan --cov-fail-under=$(COVERAGE_FLOOR)
 
-scan: ## Scan files changed since last commit
-	uv run phi-scan scan --diff HEAD~1
+scan: ## Scan files changed since DIFF_BASE (default: HEAD~1)
+	uv run phi-scan scan --diff $(DIFF_BASE)
+
+clean: ## Remove cache and coverage artifacts
+	find . -type d -name __pycache__ -exec rm -rf {} +
+	find . -type d -name .mypy_cache -exec rm -rf {} +
+	find . -type d -name .ruff_cache -exec rm -rf {} +
+	rm -rf .coverage htmlcov/ .pytest_cache/
 
 help: ## List all available targets
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
