@@ -5,9 +5,11 @@
 # SECURITY: DIFF_BASE must never be sourced from untrusted CI input (e.g. PR branch
 # names or fork metadata). Make interpolates the value before the shell validation
 # guard runs, so a malicious value could escape the regex check via Make expansion.
+# Mitigation: CI policy — DIFF_BASE is only set by trusted pipeline config, never
+# from PR metadata. This will be documented in CONTRIBUTING.md (Phase 4).
 DIFF_BASE ?= HEAD~1
 
-.PHONY: install lint format typecheck test scan clean help
+.PHONY: install lint format typecheck test ci scan clean help
 
 install: ## Install dependencies and download spaCy model (hash-verified)
 	uv sync
@@ -25,7 +27,10 @@ typecheck: ## Run mypy — zero errors required
 	uv run mypy phi_scan/
 
 test: ## Run pytest with coverage (fails below 80% — enforced in pyproject.toml)
+	@echo "Running: uv run pytest tests/ (addopts from pyproject.toml)"
 	uv run pytest tests/
+
+ci: lint typecheck test ## Run full CI gate: lint, typecheck, test
 
 scan: ## Scan files changed since DIFF_BASE (default: HEAD~1)
 	@echo "$(DIFF_BASE)" | grep -qE '^[a-zA-Z0-9_.~^/:@-]+$$' \
