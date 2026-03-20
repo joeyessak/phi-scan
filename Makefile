@@ -31,12 +31,13 @@ scan: ## Scan files changed since DIFF_BASE (default: HEAD~1)
 	uv run phi-scan scan --diff "$(DIFF_BASE)"
 
 clean: ## Remove cache and coverage artifacts
-	-find . -P -type d -name __pycache__ -prune -exec rm -rf --one-file-system {} \;
-	-find . -P -type d -name .mypy_cache -prune -exec rm -rf --one-file-system {} \;
-	-find . -P -type d -name .ruff_cache -prune -exec rm -rf --one-file-system {} \;
-	-find . -P -maxdepth 1 -name .coverage ! -type l -exec rm -rf {} \;
-	-find . -P -maxdepth 1 -name htmlcov ! -type l -exec rm -rf {} \;
-	-find . -P -maxdepth 1 -name .pytest_cache ! -type l -exec rm -rf {} \;
+	-find -P . -type d -name __pycache__ -prune -exec rm -rf --one-file-system {} \;
+	-find -P . -type d -name .mypy_cache -prune -exec rm -rf --one-file-system {} \;
+	-find -P . -type d -name .ruff_cache -prune -exec rm -rf --one-file-system {} \;
+	-find -P . -maxdepth 1 -name .coverage ! -type l -exec rm -rf {} \;
+	-find -P . -maxdepth 1 -name coverage.xml ! -type l -exec rm -rf {} \;
+	-find -P . -maxdepth 1 -name htmlcov ! -type l -exec rm -rf {} \;
+	-find -P . -maxdepth 1 -name .pytest_cache ! -type l -exec rm -rf {} \;
 
 help: ## List all available targets
 	@# $$ below escapes $ in Make — the shell receives a single $ for awk field refs
