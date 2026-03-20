@@ -121,8 +121,8 @@ and explain commands deferred to Phase 2).
 - [x] **1A.9** Create `phi_scan/` package directory with all module files
 - [x] **1A.10** Create `phi_scan/py.typed` — PEP 561 type checking marker file
 - [x] **1A.11** Create `tests/` directory with `conftest.py`
-- [ ] **1A.12** Create `Makefile` — targets: `install`, `lint`, `typecheck`, `test`, `scan`, `help`
-- [ ] **1A.13** Create `.phi-scanner.yml` — default scanner configuration
+- [x] **1A.12** Create `Makefile` — targets: `install`, `lint`, `typecheck`, `test`, `scan`, `help`
+- [x] **1A.13** Create `.phi-scanner.yml` — default scanner configuration
 - [ ] **1A.14** Create `.phi-scanignore` — default exclusion patterns (see Ignore Format Spec below)
 - [ ] **1A.15** Update `.gitignore` — add `.env`, `*.db`, `*.sqlite3`, `.phi-scanner/`, `phi-report.json`, `dist/`, `*.egg-info`
 - [ ] **1A.16** Update `README.md` — project name, install instructions, basic usage, license badge
