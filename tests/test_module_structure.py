@@ -40,18 +40,18 @@ FUTURE_PHASE_MODULES = [
 
 @pytest.mark.parametrize("module_name", PHASE_ONE_MODULES)
 def test_phase_one_module_is_importable(module_name: str) -> None:
-    """Each Phase 1 module must import without error."""
+    """Each Phase 1 module must import without error and have a docstring."""
     imported_module = importlib.import_module(module_name)
 
-    assert hasattr(imported_module, "__name__")
+    assert imported_module.__doc__ is not None, f"{module_name} is missing a module-level docstring"
 
 
 @pytest.mark.parametrize("module_name", FUTURE_PHASE_MODULES)
 def test_future_phase_module_is_importable(module_name: str) -> None:
-    """Each future-phase stub module must import without error."""
+    """Each future-phase stub module must import without error and have a docstring."""
     imported_module = importlib.import_module(module_name)
 
-    assert hasattr(imported_module, "__name__")
+    assert imported_module.__doc__ is not None, f"{module_name} is missing a module-level docstring"
 
 
 def test_cli_app_is_typer_instance() -> None:
