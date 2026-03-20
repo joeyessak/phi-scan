@@ -1,7 +1,6 @@
 .DEFAULT_GOAL := help
 
 DIFF_BASE ?= HEAD~1
-COVERAGE_FLOOR := 80
 
 .PHONY: install lint typecheck test scan clean help
 
@@ -16,16 +15,16 @@ lint: ## Run Ruff linter and formatter
 typecheck: ## Run mypy — zero errors required
 	uv run mypy phi_scan/
 
-test: ## Run pytest with coverage (fails below 80%)
-	uv run pytest tests/ -v --cov=phi_scan --cov-fail-under=$(COVERAGE_FLOOR)
+test: ## Run pytest with coverage (fails below 80% — enforced in pyproject.toml)
+	uv run pytest tests/ -v --cov=phi_scan
 
 scan: ## Scan files changed since DIFF_BASE (default: HEAD~1)
 	uv run phi-scan scan --diff $(DIFF_BASE)
 
 clean: ## Remove cache and coverage artifacts
-	find . -type d -name __pycache__ -exec rm -rf {} +
-	find . -type d -name .mypy_cache -exec rm -rf {} +
-	find . -type d -name .ruff_cache -exec rm -rf {} +
+	find -P . -type d -name __pycache__ -exec rm -rf {} +
+	find -P . -type d -name .mypy_cache -exec rm -rf {} +
+	find -P . -type d -name .ruff_cache -exec rm -rf {} +
 	rm -rf .coverage htmlcov/ .pytest_cache/
 
 help: ## List all available targets
