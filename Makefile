@@ -6,7 +6,7 @@ DIFF_BASE ?= HEAD~1
 
 install: ## Install dependencies and download spaCy model
 	uv sync
-	uv run python -m spacy download en_core_web_lg
+	uv run python -m spacy download en_core_web_lg==3.7.0
 
 lint: ## Run Ruff linter and formatter
 	uv run ruff check . --fix
@@ -25,7 +25,9 @@ clean: ## Remove cache and coverage artifacts
 	find . -P -type d -name __pycache__ -exec rm -rf {} \; 2>/dev/null
 	find . -P -type d -name .mypy_cache -exec rm -rf {} \; 2>/dev/null
 	find . -P -type d -name .ruff_cache -exec rm -rf {} \; 2>/dev/null
-	rm -rf .coverage htmlcov/ .pytest_cache/
+	find . -P -maxdepth 1 -name .coverage ! -type l -exec rm -rf {} \; 2>/dev/null
+	find . -P -maxdepth 1 -name htmlcov ! -type l -exec rm -rf {} \; 2>/dev/null
+	find . -P -maxdepth 1 -name .pytest_cache ! -type l -exec rm -rf {} \; 2>/dev/null
 
 help: ## List all available targets
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) \
