@@ -45,8 +45,7 @@ scan:
 
 output:
   # Default output format when --output flag is not specified.
-  # Phase 1 implemented: table, json, sarif, csv
-  # Planned (later phases): pdf, html, junit, codequality, gitlab-sast
+  # Accepted values: table, json, sarif, csv, pdf, html, junit, codequality, gitlab-sast
   format: table
 
   # Suppress all Rich terminal output. Findings still written to audit log.
@@ -60,7 +59,7 @@ audit:
   database_path: ~/.phi-scanner/audit.db
 
   # HIPAA 45 CFR §164.530(j) requires audit records for a minimum of 6 years.
-  retention_days: 2190  # 6 years × 365 days = 2190
+  retention_days: 2192  # 6 years × 365 days + 2 leap days = 2192 (conservative upper bound)
 
 ai:
   # Claude API review is disabled by default — all scanning is local.

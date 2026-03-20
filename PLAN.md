@@ -146,7 +146,7 @@ and explain commands deferred to Phase 2).
     - NLP/NER (Layer 2): 0.50–0.90 (context-dependent, model uncertainty)
     - FHIR (Layer 3): 0.80–0.95 (schema-based structural match)
     - AI (Layer 4): adjusts existing scores ±0.15 (second-opinion refinement)
-  - `AUDIT_RETENTION_DAYS = 2190` (HIPAA 6-year minimum)
+  - `AUDIT_RETENTION_DAYS = 2192` (HIPAA 6-year minimum — conservative, accounts for leap years)
   - `EXIT_CODE_CLEAN = 0`, `EXIT_CODE_VIOLATION = 1`
   - Enums: `OutputFormat` (TABLE, JSON, SARIF, CSV, PDF, HTML, JUNIT, CODEQUALITY, GITLAB_SAST), `SeverityLevel` (LOW, MEDIUM, HIGH)
   - Enum: `RiskLevel` (CRITICAL, HIGH, MODERATE, LOW, CLEAN)
@@ -1031,7 +1031,7 @@ SQLite audit log with HIPAA-compliant retention and immutability.
 - [ ] **5C.3** Audit log entry schema matches PDF spec:
   - timestamp, scanner_version, event_type, repository, branch, pr_number
   - committer (name, email), pipeline, findings array, action_taken, notifications_sent
-- [ ] **5C.4** Log rotation — retention policy respecting `AUDIT_RETENTION_DAYS` (2190 days / 6 years)
+- [ ] **5C.4** Log rotation — retention policy respecting `AUDIT_RETENTION_DAYS` (2192 days / 6 years)
 - [ ] **5C.5** `phi-scan history` command — query by date range, repo, violation-only filter
 - [ ] **5C.6** `phi-scan report` command — display last scan with Rich formatting
 - [ ] **5C.7** Trend analysis queries — supply data for trend charts (findings over time, by repo, by category)
