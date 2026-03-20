@@ -15,8 +15,10 @@ scan:
   # Maximum file size to scan. Files exceeding this limit are skipped and logged.
   max_file_size_mb: 10
 
-  # Never follow symlinks during traversal — required to prevent infinite loops
-  # and escape-from-repo attacks in CI/CD environments.
+  # SECURITY: Symlink following is disabled and must remain false.
+  # Setting this to true is a security violation — it allows traversal to escape
+  # the repository boundary and cause infinite loops in CI/CD environments.
+  # The runtime enforces false regardless of this value as a safety backstop.
   follow_symlinks: false
 
   # Optional allowlist of file extensions to scan.
@@ -43,7 +45,8 @@ scan:
 
 output:
   # Default output format when --output flag is not specified.
-  # Accepted values: table, json, sarif, csv, pdf, html, junit, codequality, gitlab-sast
+  # Phase 1 implemented: table, json, sarif, csv
+  # Planned (later phases): pdf, html, junit, codequality, gitlab-sast
   format: table
 
   # Suppress all Rich terminal output. Findings still written to audit log.
@@ -52,10 +55,12 @@ output:
 audit:
   # Path to the SQLite audit database.
   # Audit logs are immutable — never DELETE or UPDATE rows (HIPAA 45 CFR §164.530(j)).
+  # Note: ~ is expanded via Path(database_path).expanduser() at runtime — not by the
+  # YAML parser. Ensure the runtime handles this before using the value as a file path.
   database_path: ~/.phi-scanner/audit.db
 
-  # HIPAA requires audit records to be retained for a minimum of 6 years.
-  retention_days: 2190
+  # HIPAA 45 CFR §164.530(j) requires audit records for a minimum of 6 years.
+  retention_days: 2190  # 6 years × 365 days = 2190
 
 ai:
   # Claude API review is disabled by default — all scanning is local.
