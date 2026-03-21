@@ -39,8 +39,7 @@ target/
 # Compiled and binary artifacts
 # These are binary files — they contain no scannable plaintext and cannot hold PHI.
 *.pyc
-*.pyo  # Python 2 optimised bytecode — obsolete in Python 3.12 but included for
-       # completeness when PhiScan is run against legacy or polyglot repositories.
+*.pyo
 *.class
 *.jar
 *.war
@@ -50,8 +49,7 @@ target/
 .vscode/
 *.sw?
 \#*#
-.*~  # Matches any dotfile backup (e.g. .bashrc~). Will also match .phi-scanner~
-     # if one exists, but .phi-scanner/ (the directory) is excluded separately above.
+.*~
 .DS_Store
 
 # Version control
