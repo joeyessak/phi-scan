@@ -36,10 +36,13 @@ build/
 *.egg-info/
 target/
 
-# Compiled files
-# Binary artifacts — contain no scannable text and cannot hold PHI as plaintext.
+# Compiled and binary artifacts
+# These are binary files — they contain no scannable plaintext and cannot hold PHI.
 *.pyc
 *.pyo
+*.class
+*.jar
+*.war
 
 # IDE and editor
 .idea/
@@ -49,6 +52,8 @@ target/
 .DS_Store
 
 # Version control
+# .git/ is listed explicitly for clarity — pathspec does not skip hidden
+# directories automatically, so this ensures git internals are never scanned.
 .git/
 
 # Binary and database files
@@ -57,9 +62,12 @@ target/
 # PhiScan skips binary files automatically, but this exclusion prevents even
 # attempting to open them. Remove these lines if you store PHI in SQLite files
 # and want PhiScan to flag the presence of the database itself.
-.phi-scanner/
 *.db
 *.sqlite3
+
+# PhiScan internal
+# Audit database and runtime state written by PhiScan itself.
+.phi-scanner/
 
 # Common non-code directories
 .terraform/
