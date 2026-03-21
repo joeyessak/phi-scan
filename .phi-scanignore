@@ -57,17 +57,12 @@ target/
 # directories automatically, so this ensures git internals are never scanned.
 .git/
 
-# Binary and database files
-# WARNING: *.db and *.sqlite3 suppress scanning of ALL SQLite files in the repo,
-# including third-party or application databases that may contain PHI.
-# PhiScan skips binary files automatically, but this exclusion prevents even
-# attempting to open them. Remove these lines if you store PHI in SQLite files
-# and want PhiScan to flag the presence of the database itself.
-*.db
-*.sqlite3
-
 # PhiScan internal
-# Audit database and runtime state written by PhiScan itself.
+# PhiScan writes SHA-256 hashes of detected values here — never raw PHI.
+# Excluded because scanning PhiScan's own output is always a false-positive.
+# Note: *.db and *.sqlite3 are intentionally NOT excluded at the global level.
+# SQLite databases in a repo may contain PHI; the scanner's binary-file
+# detection skips unreadable files automatically without this exclusion.
 .phi-scanner/
 
 # Infrastructure directories
