@@ -49,11 +49,13 @@ scan:
 
 output:
   # Default output format when --output flag is not specified.
-  # See: phi-scan explain config — output.format for the current accepted values list.
+  # Accepted values: table, json, sarif, csv, pdf, html, junit, codequality, gitlab-sast
+  # Run: phi-scan explain config for authoritative descriptions of each format.
   format: table
 
-  # Suppress all Rich terminal output. Findings still written to audit log.
-  # Exit code is NOT affected — violations still produce a non-zero exit code
+  # Suppress all Rich terminal output.
+  # Spec: findings must still be written to the audit log when quiet: true.
+  # Exit code is NOT affected — violations must still produce a non-zero exit code
   # when quiet: true, ensuring CI gates continue to work correctly.
   quiet: false
 
