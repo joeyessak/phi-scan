@@ -39,7 +39,6 @@ target/
 # Compiled and binary artifacts
 # These are binary files — they contain no scannable plaintext and cannot hold PHI.
 *.pyc
-*.pyo
 *.class
 *.jar
 *.war
@@ -47,8 +46,7 @@ target/
 # IDE and editor
 .idea/
 .vscode/
-*.swp
-*.swo
+*.sw?
 .DS_Store
 
 # Version control
