@@ -647,6 +647,12 @@ and can be wired in before or alongside the detection engine.
   - SQL files (.sql) → scan string literals and comments
   - Notebooks (.ipynb) → parse JSON, scan cell outputs and source
   - All other text files → full-text line-by-line scan
+- [ ] **2E.3a** Archive inspection — scan embedded plaintext resources in Java archives:
+  - File types: .jar, .war, .zip (unzip in-memory, never write to disk)
+  - Scan embedded text resources: .properties, .xml, .yaml, .yml, .json, .conf
+  - Skip embedded .class files (compiled bytecode — safe to ignore within archives)
+  - Remove .jar and .war from KNOWN_BINARY_EXTENSIONS in constants.py when this ships
+  - Graceful degradation: if zipfile extraction fails, log warning and skip the archive
 - [ ] **2E.4** Variable-name contextual boosting — boost confidence when value is assigned to a PHI-suggestive variable:
   - Pattern match variable names containing: `patient`, `ssn`, `mrn`, `dob`, `birth`, `name`, `address`, `phone`, `email`, `diagnosis`, `insurance`, `beneficiary`
   - Boost: +0.15 confidence when PHI-suggestive variable name + detected entity type align

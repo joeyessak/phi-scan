@@ -15,13 +15,19 @@
 # Full syntax reference: phi-scan explain ignore (available Phase 2+)
 #
 # Intentional omissions (not excluded by default):
-#   *.log  — Log files are a primary PHI leak vector in healthcare systems.
-#            Excluding them would silently suppress detections in application logs.
-#            Add *.log to your own .phi-scanignore if you are certain your logs
-#            contain no PHI (e.g. build logs in a non-clinical repo).
-#   .env   — .env files may contain hardcoded credentials or PHI values.
-#            If a .env file exists in the repo it should be scanned.
-#            Add .env to .gitignore to keep it out of the repo entirely.
+#   *.log        — Log files are a primary PHI leak vector in healthcare systems.
+#                  Excluding them would silently suppress detections in application
+#                  logs. Add *.log to your own .phi-scanignore if you are certain
+#                  your logs contain no PHI (e.g. build logs in a non-clinical repo).
+#   .env         — .env files may contain hardcoded credentials or PHI values.
+#                  If a .env file exists in the repo it should be scanned.
+#                  Add .env to .gitignore to keep it out of the repo entirely.
+#   *.jar / *.war — Java archives bundle compiled bytecode AND plaintext resources
+#                  (e.g. application.properties, web.xml, Spring configs) that may
+#                  contain PHI. Archive inspection is tracked in PLAN.md Phase 2E.
+#                  Until implemented, the scanner skips them as binary but does not
+#                  suppress them via this file — preserving the option to flag or
+#                  inspect them when that capability ships.
 
 # Dependencies
 node_modules/
@@ -36,13 +42,11 @@ build/
 *.egg-info/
 target/
 
-# Compiled and binary artifacts
-# These are binary files — they contain no scannable plaintext and cannot hold PHI.
+# Compiled bytecode
+# Pure binary bytecode — no readable text, cannot hold PHI as plaintext.
 *.pyc
 *.pyo
 *.class
-*.jar
-*.war
 
 # IDE and editor
 .idea/
