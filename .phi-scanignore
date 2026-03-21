@@ -1,0 +1,46 @@
+# .phi-scanignore — PhiScan exclusion patterns
+# Syntax: gitignore-style (via Python pathspec library)
+#
+# Rules:
+#   - Lines starting with # are comments
+#   - Blank lines are ignored
+#   - Patterns match relative to the repository root
+#   - Trailing / matches directories only: node_modules/
+#   - * matches anything except /: *.pyc
+#   - ** matches any number of directories: **/test_data/
+#   - ! prefix negates a pattern (re-include): !important_config.yml
+#   - Leading / anchors to repo root: /build/ matches only root-level build/
+#   - No leading / matches at any depth: __pycache__/ at depth 1 or depth 10
+#
+# Reference: phi-scan explain ignore
+
+# Dependencies
+node_modules/
+.venv/
+venv/
+__pycache__/
+.tox/
+
+# Build outputs
+dist/
+build/
+*.egg-info/
+target/
+
+# IDE and editor
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Version control
+.git/
+
+# PhiScan's own files
+.phi-scanner/
+*.db
+*.sqlite3
+
+# Common non-code directories
+.terraform/
+.serverless/
