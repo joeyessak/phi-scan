@@ -430,6 +430,8 @@ polished, informative, and visually striking. Users should enjoy running this to
   - Test: text files with unusual extensions (.conf, .cfg, .properties) are included
   - Test: files with no extension are scanned if text content detected
 - [ ] **1F.3** `tests/test_config.py` — loads valid YAML, defaults when missing, raises on invalid
+  - `test_audit_retention_days_matches_config_default` — asserts `AUDIT_RETENTION_DAYS == 2192`
+    to prevent silent drift between `constants.py` and `.phi-scanner.yml`
 - [ ] **1F.4** `tests/test_cli.py` — CLI smoke tests: `--version`, `scan <path>`, `--help`
 - [ ] **1F.5** `tests/test_ignore.py` — `.phi-scanignore` pattern matching at any depth (see Ignore Format Spec)
 - [ ] **1F.6** `tests/test_output.py` — visual output tests:

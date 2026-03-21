@@ -13,9 +13,9 @@ scan:
 
   # Minimum severity level to include in output and exit-code evaluation.
   # Maps to the SeverityLevel enum (not RiskLevel — that is per-scan aggregate).
-  # Accepted values: low, medium, high
-  # Spec: the config loader must raise ConfigurationError on any unknown value —
-  # never silently fall back to a default.
+  # Accepted values (lowercase): low, medium, high
+  # The config loader maps lowercase → enum: low → SeverityLevel.LOW, etc.
+  # ConfigurationError is raised on any value not in this set.
   severity_threshold: low
 
   # Maximum file size to scan. Files exceeding this limit are skipped and logged.
@@ -53,10 +53,10 @@ scan:
 output:
   # Default output format when --output flag is not specified.
   # Accepted values: table, json, sarif, csv, pdf, html, junit, codequality, gitlab-sast
-  # Note: gitlab-sast maps to OutputFormat.GITLAB_SAST — the config loader must
-  # handle this mapping explicitly (not via a generic replace/upper transform).
-  # Spec: the config loader must raise ConfigurationError on any unknown value —
-  # never silently fall back to table.
+  # All values map directly by name to OutputFormat (e.g., table → OutputFormat.TABLE),
+  # except gitlab-sast which must be mapped explicitly to OutputFormat.GITLAB_SAST —
+  # not via a generic replace/upper transform.
+  # ConfigurationError is raised on any value not in this set.
   # Run: phi-scan explain config for authoritative descriptions of each format.
   format: table
 
