@@ -39,6 +39,7 @@ target/
 # Compiled and binary artifacts
 # These are binary files — they contain no scannable plaintext and cannot hold PHI.
 *.pyc
+*.pyo
 *.class
 *.jar
 *.war
@@ -47,7 +48,7 @@ target/
 .idea/
 .vscode/
 *.sw?
-#*#
+\#*#
 .*~
 .DS_Store
 
@@ -70,9 +71,11 @@ target/
 .phi-scanner/
 
 # Infrastructure directories
-# WARNING: .terraform/ suppresses scanning of the entire Terraform working
-# directory, including .tfstate files which are known to contain secrets and
-# occasionally PHI (e.g. resource names, IDs, tags with patient identifiers).
-# Remove .terraform/ from this file if your Terraform state may contain PHI.
-.terraform/
+# .terraform/providers/ and .terraform/modules/ contain provider binaries and
+# downloaded module code — binary artifacts with no PHI risk.
+# WARNING: Do NOT add *.tfstate or terraform.tfstate here. Terraform state files
+# live at the repo root (not inside .terraform/) and are known to contain secrets
+# and occasionally PHI. Leave them unexcluded so PhiScan can flag them.
+.terraform/providers/
+.terraform/modules/
 .serverless/
