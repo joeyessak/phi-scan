@@ -121,8 +121,8 @@ and explain commands deferred to Phase 2).
 - [x] **1A.9** Create `phi_scan/` package directory with all module files
 - [x] **1A.10** Create `phi_scan/py.typed` — PEP 561 type checking marker file
 - [x] **1A.11** Create `tests/` directory with `conftest.py`
-- [ ] **1A.12** Create `Makefile` — targets: `install`, `lint`, `typecheck`, `test`, `scan`, `help`
-- [ ] **1A.13** Create `.phi-scanner.yml` — default scanner configuration
+- [x] **1A.12** Create `Makefile` — targets: `install`, `lint`, `typecheck`, `test`, `scan`, `help`
+- [x] **1A.13** Create `.phi-scanner.yml` — default scanner configuration
 - [ ] **1A.14** Create `.phi-scanignore` — default exclusion patterns (see Ignore Format Spec below)
 - [ ] **1A.15** Update `.gitignore` — add `.env`, `*.db`, `*.sqlite3`, `.phi-scanner/`, `phi-report.json`, `dist/`, `*.egg-info`
 - [ ] **1A.16** Update `README.md` — project name, install instructions, basic usage, license badge
@@ -146,7 +146,7 @@ and explain commands deferred to Phase 2).
     - NLP/NER (Layer 2): 0.50–0.90 (context-dependent, model uncertainty)
     - FHIR (Layer 3): 0.80–0.95 (schema-based structural match)
     - AI (Layer 4): adjusts existing scores ±0.15 (second-opinion refinement)
-  - `AUDIT_RETENTION_DAYS = 2190` (HIPAA 6-year minimum)
+  - `AUDIT_RETENTION_DAYS = 2192` (HIPAA 6-year minimum — 4×365 + 2×366, the mathematical maximum for a 6-year span; must match `.phi-scanner.yml` default)
   - `EXIT_CODE_CLEAN = 0`, `EXIT_CODE_VIOLATION = 1`
   - Enums: `OutputFormat` (TABLE, JSON, SARIF, CSV, PDF, HTML, JUNIT, CODEQUALITY, GITLAB_SAST), `SeverityLevel` (LOW, MEDIUM, HIGH)
   - Enum: `RiskLevel` (CRITICAL, HIGH, MODERATE, LOW, CLEAN)
@@ -170,7 +170,11 @@ and explain commands deferred to Phase 2).
 - [ ] **1B.6** `config.py` — YAML config loading
   - `load_config(config_path)` → `ScanConfig`
   - `create_default_config(output_path)` — writes default `.phi-scanner.yml`
-  - Validation raises `ConfigurationError` on invalid values
+  - Validation raises `ConfigurationError` on invalid values — never silently fall back
+  - Map `gitlab-sast` → `OutputFormat.GITLAB_SAST` explicitly (not via generic replace/upper)
+  - Call `Path(database_path).expanduser()` before any file I/O — never pass raw `~` string
+  - Raise `ConfigurationError` (not `ValueError`) if `follow_symlinks: true` is set;
+    use `if scan_config.follow_symlinks:` (boolean check — no magic string `"true"` in logic)
 - [ ] **1B.7** `scanner.py` — recursive file traversal (NO detection yet)
   - `collect_scan_targets(root_path, excluded_patterns, config)` → `list[Path]` via `pathlib.rglob("*")`
   - `is_path_excluded(file_path, excluded_patterns)` → bool
@@ -427,6 +431,8 @@ polished, informative, and visually striking. Users should enjoy running this to
   - Test: text files with unusual extensions (.conf, .cfg, .properties) are included
   - Test: files with no extension are scanned if text content detected
 - [ ] **1F.3** `tests/test_config.py` — loads valid YAML, defaults when missing, raises on invalid
+  - `test_audit_retention_days_matches_config_default` — asserts `AUDIT_RETENTION_DAYS == 2192`
+    to prevent silent drift between `constants.py` and `.phi-scanner.yml`
 - [ ] **1F.4** `tests/test_cli.py` — CLI smoke tests: `--version`, `scan <path>`, `--help`
 - [ ] **1F.5** `tests/test_ignore.py` — `.phi-scanignore` pattern matching at any depth (see Ignore Format Spec)
 - [ ] **1F.6** `tests/test_output.py` — visual output tests:
@@ -1031,7 +1037,7 @@ SQLite audit log with HIPAA-compliant retention and immutability.
 - [ ] **5C.3** Audit log entry schema matches PDF spec:
   - timestamp, scanner_version, event_type, repository, branch, pr_number
   - committer (name, email), pipeline, findings array, action_taken, notifications_sent
-- [ ] **5C.4** Log rotation — retention policy respecting `AUDIT_RETENTION_DAYS` (2190 days / 6 years)
+- [ ] **5C.4** Log rotation — retention policy respecting `AUDIT_RETENTION_DAYS` (2192 days / 6 years)
 - [ ] **5C.5** `phi-scan history` command — query by date range, repo, violation-only filter
 - [ ] **5C.6** `phi-scan report` command — display last scan with Rich formatting
 - [ ] **5C.7** Trend analysis queries — supply data for trend charts (findings over time, by repo, by category)
