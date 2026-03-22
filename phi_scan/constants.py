@@ -22,11 +22,12 @@ __all__ = [
     "DEFAULT_IGNORE_FILENAME",
     "EXIT_CODE_CLEAN",
     "EXIT_CODE_VIOLATION",
+    "AUDIT_SCHEMA_VERSION",
     "HIPAA_REMEDIATION_GUIDANCE",
     "KNOWN_BINARY_EXTENSIONS",
     "MAX_FILE_SIZE_MB",
-    "SCHEMA_VERSION",
     "OutputFormat",
+    "PhiCategory",
     "RiskLevel",
     "SeverityLevel",
 ]
@@ -92,11 +93,10 @@ BINARY_CHECK_BYTE_COUNT = 8192
 # ---------------------------------------------------------------------------
 
 # Default minimum confidence for a finding to be reported.
-# 0.6 sits in the middle of the MEDIUM band (0.70 floor exclusive), catching
-# findings that are likely PHI while still filtering very weak signals.
-# This value is intentionally below CONFIDENCE_MEDIUM_FLOOR so that findings
-# in the upper half of the LOW band are surfaced but can be filtered by
-# adjusting this threshold in .phi-scanner.yml.
+# 0.6 falls in the upper half of the LOW band (CONFIDENCE_LOW_FLOOR=0.40 to
+# CONFIDENCE_MEDIUM_FLOOR=0.70), surfacing findings that are plausibly PHI
+# while discarding very weak signals. Callers can raise this in .phi-scanner.yml
+# to reduce noise at the cost of missing lower-confidence matches.
 DEFAULT_CONFIDENCE_THRESHOLD = 0.6
 
 # Confidence floor that separates HIGH severity from MEDIUM.
@@ -174,7 +174,7 @@ EXIT_CODE_VIOLATION = 1
 # ---------------------------------------------------------------------------
 
 # Increment when the audit SQLite schema changes; triggers migration logic.
-SCHEMA_VERSION = 1
+AUDIT_SCHEMA_VERSION = 1
 
 # Increment when the scan-cache SQLite schema changes; triggers migration logic.
 CACHE_SCHEMA_VERSION = 1
@@ -221,80 +221,103 @@ class RiskLevel(StrEnum):
     CLEAN = "clean"
 
 
+class PhiCategory(StrEnum):
+    """The 18 HIPAA-defined PHI identifier categories (45 CFR §164.514(b)(2))."""
+
+    NAME = "name"
+    GEOGRAPHIC = "geographic"
+    DATE = "date"
+    PHONE = "phone"
+    FAX = "fax"
+    EMAIL = "email"
+    SSN = "ssn"
+    MRN = "mrn"
+    HEALTH_PLAN = "health_plan"
+    ACCOUNT = "account"
+    CERTIFICATE = "certificate"
+    VEHICLE = "vehicle"
+    DEVICE = "device"
+    URL = "url"
+    IP = "ip"
+    BIOMETRIC = "biometric"
+    PHOTO = "photo"
+    UNIQUE_ID = "unique_id"
+
+
 # ---------------------------------------------------------------------------
 # HIPAA remediation guidance
 # ---------------------------------------------------------------------------
 
-HIPAA_REMEDIATION_GUIDANCE: dict[str, str] = {
-    "NAME": (
+HIPAA_REMEDIATION_GUIDANCE: dict[PhiCategory, str] = {
+    PhiCategory.NAME: (
         "Remove or replace the patient name with a synthetic placeholder. "
         "Use faker-generated names in test fixtures. Never commit real patient names."
     ),
-    "GEOGRAPHIC": (
+    PhiCategory.GEOGRAPHIC: (
         "Replace geographic data smaller than state level with a placeholder. "
         "State abbreviations are generally safe; zip codes and street addresses are not."
     ),
-    "DATE": (
+    PhiCategory.DATE: (
         "Replace dates more specific than year with a synthetic date. "
         "Year-only values are acceptable under the Safe Harbor method."
     ),
-    "PHONE": (
+    PhiCategory.PHONE: (
         "Replace phone numbers with a synthetic value such as (555) 000-0001. "
         "All area codes in the 555 range are reserved and safe for testing."
     ),
-    "FAX": (
+    PhiCategory.FAX: (
         "Replace fax numbers with a synthetic value. "
         "Treat fax numbers with the same care as phone numbers."
     ),
-    "EMAIL": (
+    PhiCategory.EMAIL: (
         "Replace email addresses with a synthetic address such as patient@example.com. "
         "The example.com domain is reserved and will never reach a real recipient."
     ),
-    "SSN": (
+    PhiCategory.SSN: (
         "Remove Social Security Numbers immediately. Use the format 000-00-0000 "
         "or a faker-generated SSN for test data. Never commit real SSNs."
     ),
-    "MRN": (
+    PhiCategory.MRN: (
         "Replace Medical Record Numbers with a synthetic identifier. "
         "Use a prefix such as TEST- to make synthetic MRNs self-evident."
     ),
-    "HEALTH_PLAN": (
+    PhiCategory.HEALTH_PLAN: (
         "Replace health plan beneficiary numbers with synthetic values. "
         "These identifiers link directly to insurance records and must be protected."
     ),
-    "ACCOUNT": (
+    PhiCategory.ACCOUNT: (
         "Replace account numbers with synthetic values. "
         "Use a test-prefix convention so synthetic accounts are identifiable."
     ),
-    "CERTIFICATE": (
+    PhiCategory.CERTIFICATE: (
         "Replace certificate and license numbers with synthetic values. "
         "These identifiers can be used to impersonate licensed practitioners."
     ),
-    "VEHICLE": (
+    PhiCategory.VEHICLE: (
         "Replace vehicle identifiers and serial numbers with synthetic values. "
         "VINs are linkable to registered owners via public databases."
     ),
-    "DEVICE": (
+    PhiCategory.DEVICE: (
         "Replace device identifiers and serial numbers with synthetic values. "
         "Device IDs can be linked back to individual patients via medical records."
     ),
-    "URL": (
+    PhiCategory.URL: (
         "Review URLs containing path segments that encode patient identifiers. "
         "Replace patient-specific URL components with synthetic values."
     ),
-    "IP": (
+    PhiCategory.IP: (
         "Replace IP addresses that could identify individual patients with "
         "documentation-range addresses such as 192.0.2.x (RFC 5737 TEST-NET-1)."
     ),
-    "BIOMETRIC": (
+    PhiCategory.BIOMETRIC: (
         "Remove biometric identifiers entirely. These cannot be changed if exposed "
         "and represent a permanent privacy risk."
     ),
-    "PHOTO": (
+    PhiCategory.PHOTO: (
         "Remove full-face photographs and comparable images. "
         "Do not commit patient photos to version control under any circumstances."
     ),
-    "UNIQUE_ID": (
+    PhiCategory.UNIQUE_ID: (
         "Replace unique identifying numbers with synthetic values. "
         "Any number that uniquely identifies a person is a HIPAA identifier."
     ),
