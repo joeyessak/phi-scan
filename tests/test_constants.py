@@ -5,6 +5,7 @@ import pytest
 from phi_scan.constants import (
     AUDIT_RETENTION_DAYS,
     HIPAA_REMEDIATION_GUIDANCE,
+    KNOWN_BINARY_EXTENSIONS,
     MAX_FILE_SIZE_BYTES,
     OutputFormat,
     PhiCategory,
@@ -52,6 +53,17 @@ def test_output_format_missing_is_case_insensitive() -> None:
 def test_hipaa_remediation_guidance_covers_every_phi_category() -> None:
     missing = [category for category in PhiCategory if category not in HIPAA_REMEDIATION_GUIDANCE]
     assert missing == [], f"Missing remediation guidance for: {missing}"
+
+
+def test_known_binary_extensions_are_lowercase_dotted_strings() -> None:
+    malformed = [
+        ext for ext in KNOWN_BINARY_EXTENSIONS if not ext.startswith(".") or ext != ext.lower()
+    ]
+    assert malformed == [], f"Malformed extensions: {malformed}"
+
+
+def test_known_binary_extensions_is_immutable() -> None:
+    assert isinstance(KNOWN_BINARY_EXTENSIONS, frozenset)
 
 
 def test_severity_level_resolves_high_by_value() -> None:

@@ -146,7 +146,9 @@ CONFIDENCE_AI_ADJUSTMENT_MAX: float = 0.15
 # that excludes accidental binary blobs while covering all realistic source files.
 # Use MAX_FILE_SIZE_BYTES in logic code — never multiply MAX_FILE_SIZE_MB inline.
 MAX_FILE_SIZE_MB: int = 10
-_BYTES_PER_MEGABYTE: int = 1024 * 1024
+_BYTES_PER_KILOBYTE: int = 1024
+_KILOBYTES_PER_MEGABYTE: int = 1024
+_BYTES_PER_MEGABYTE: int = _BYTES_PER_KILOBYTE * _KILOBYTES_PER_MEGABYTE
 MAX_FILE_SIZE_BYTES: int = MAX_FILE_SIZE_MB * _BYTES_PER_MEGABYTE
 
 # ---------------------------------------------------------------------------
