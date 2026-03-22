@@ -9,12 +9,13 @@ from phi_scan.constants import (
     OutputFormat,
 )
 
-_BYTES_PER_MEGABYTE = 1024 * 1024
-_EXPECTED_HIPAA_RETENTION_DAYS = 2192
+# Derived from the same arithmetic as the constant: 4 standard years × 365 + 2 leap years × 366.
+# This makes the HIPAA 6-year minimum verifiable without importing private helpers.
+_EXPECTED_HIPAA_RETENTION_DAYS: int = (4 * 365) + (2 * 366)
 
 
 def test_max_file_size_bytes_equals_mb_times_bytes_per_megabyte() -> None:
-    assert MAX_FILE_SIZE_BYTES == MAX_FILE_SIZE_MB * _BYTES_PER_MEGABYTE
+    assert MAX_FILE_SIZE_BYTES == MAX_FILE_SIZE_MB * 1024 * 1024
 
 
 def test_audit_retention_days_equals_hipaa_six_year_minimum() -> None:
