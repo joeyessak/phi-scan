@@ -8,6 +8,9 @@ from phi_scan.exceptions import (
     TraversalError,
 )
 
+_MISSING_PATH: str = "/tmp/missing"
+_AUDIT_DB_PATH: str = "/var/phi-scanner/audit.db"
+
 
 def test_phi_scan_error_is_exception_subclass() -> None:
     assert issubclass(PhiScanError, Exception)
@@ -46,7 +49,7 @@ def test_configuration_error_preserves_message() -> None:
 
 
 def test_traversal_error_preserves_message() -> None:
-    error_message = "path '/tmp/missing' does not exist or is not readable"
+    error_message = f"path '{_MISSING_PATH}' does not exist or is not readable"
 
     raised_error = TraversalError(error_message)
 
@@ -54,7 +57,7 @@ def test_traversal_error_preserves_message() -> None:
 
 
 def test_audit_log_error_preserves_message() -> None:
-    error_message = "cannot write to audit log at '/var/phi-scanner/audit.db': permission denied"
+    error_message = f"cannot write to audit log at '{_AUDIT_DB_PATH}': permission denied"
 
     raised_error = AuditLogError(error_message)
 
@@ -70,23 +73,45 @@ def test_schema_migration_error_preserves_message() -> None:
 
 
 def test_phi_scan_error_is_catchable_as_exception() -> None:
-    with_message = "base catch test"
+    error_message = "base catch test"
 
     try:
-        raise PhiScanError(with_message)
+        raise PhiScanError(error_message)
     except Exception as caught_error:
-        assert str(caught_error) == with_message
+        assert str(caught_error) == error_message
 
 
-def test_subclass_errors_are_catchable_as_phi_scan_error() -> None:
-    # All subclasses must be catchable at the PhiScanError level so callers
-    # can handle any domain error with a single except clause.
-    subclasses = [ConfigurationError, TraversalError, AuditLogError, SchemaMigrationError]
+def test_configuration_error_is_catchable_as_phi_scan_error() -> None:
+    raised_error = ConfigurationError("test")
 
-    for subclass in subclasses:
-        try:
-            raise subclass("test")
-        except PhiScanError:
-            pass
-        else:
-            raise AssertionError(f"{subclass.__name__} was not caught as PhiScanError")
+    try:
+        raise raised_error
+    except PhiScanError as caught_error:
+        assert isinstance(caught_error, ConfigurationError)
+
+
+def test_traversal_error_is_catchable_as_phi_scan_error() -> None:
+    raised_error = TraversalError("test")
+
+    try:
+        raise raised_error
+    except PhiScanError as caught_error:
+        assert isinstance(caught_error, TraversalError)
+
+
+def test_audit_log_error_is_catchable_as_phi_scan_error() -> None:
+    raised_error = AuditLogError("test")
+
+    try:
+        raise raised_error
+    except PhiScanError as caught_error:
+        assert isinstance(caught_error, AuditLogError)
+
+
+def test_schema_migration_error_is_catchable_as_phi_scan_error() -> None:
+    raised_error = SchemaMigrationError("test")
+
+    try:
+        raise raised_error
+    except PhiScanError as caught_error:
+        assert isinstance(caught_error, SchemaMigrationError)
