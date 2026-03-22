@@ -4,8 +4,10 @@ import pytest
 
 from phi_scan.constants import (
     AUDIT_RETENTION_DAYS,
+    HIPAA_REMEDIATION_GUIDANCE,
     MAX_FILE_SIZE_BYTES,
     OutputFormat,
+    PhiCategory,
 )
 
 # HIPAA §164.530(j) 6-year minimum: 4 standard years + 2 leap years = 2192 days.
@@ -40,3 +42,8 @@ def test_output_format_missing_matches_gitlab_sast_by_value() -> None:
 
 def test_output_format_missing_is_case_insensitive() -> None:
     assert OutputFormat("TABLE") is OutputFormat.TABLE
+
+
+def test_hipaa_remediation_guidance_covers_every_phi_category() -> None:
+    missing = [category for category in PhiCategory if category not in HIPAA_REMEDIATION_GUIDANCE]
+    assert missing == [], f"Missing remediation guidance for: {missing}"
