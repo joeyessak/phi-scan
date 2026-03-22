@@ -2,6 +2,34 @@
 
 from enum import StrEnum
 
+__all__ = [
+    "AUDIT_RETENTION_DAYS",
+    "BINARY_CHECK_BYTE_COUNT",
+    "CACHE_SCHEMA_VERSION",
+    "CONFIDENCE_AI_ADJUSTMENT_MAX",
+    "CONFIDENCE_FHIR_MAX",
+    "CONFIDENCE_FHIR_MIN",
+    "CONFIDENCE_HIGH_FLOOR",
+    "CONFIDENCE_LOW_FLOOR",
+    "CONFIDENCE_MEDIUM_FLOOR",
+    "CONFIDENCE_NLP_MAX",
+    "CONFIDENCE_NLP_MIN",
+    "CONFIDENCE_REGEX_MAX",
+    "CONFIDENCE_REGEX_MIN",
+    "DEFAULT_CONFIDENCE_THRESHOLD",
+    "DEFAULT_CONFIG_FILENAME",
+    "DEFAULT_IGNORE_FILENAME",
+    "EXIT_CODE_CLEAN",
+    "EXIT_CODE_VIOLATION",
+    "HIPAA_REMEDIATION_GUIDANCE",
+    "KNOWN_BINARY_EXTENSIONS",
+    "MAX_FILE_SIZE_MB",
+    "SCHEMA_VERSION",
+    "OutputFormat",
+    "RiskLevel",
+    "SeverityLevel",
+]
+
 # ---------------------------------------------------------------------------
 # File names
 # ---------------------------------------------------------------------------
@@ -63,6 +91,11 @@ BINARY_CHECK_BYTE_COUNT = 8192
 # ---------------------------------------------------------------------------
 
 # Default minimum confidence for a finding to be reported.
+# 0.6 sits in the middle of the MEDIUM band (0.70 floor exclusive), catching
+# findings that are likely PHI while still filtering very weak signals.
+# This value is intentionally below CONFIDENCE_MEDIUM_FLOOR so that findings
+# in the upper half of the LOW band are surfaced but can be filtered by
+# adjusting this threshold in .phi-scanner.yml.
 DEFAULT_CONFIDENCE_THRESHOLD = 0.6
 
 # Confidence floor that separates HIGH severity from MEDIUM.
@@ -72,7 +105,8 @@ CONFIDENCE_HIGH_FLOOR = 0.90
 CONFIDENCE_MEDIUM_FLOOR = 0.70
 
 # Confidence floor that separates LOW severity from INFO.
-# Findings below this value are logged as INFO and not flagged by default.
+# Findings below this value are assigned SeverityLevel.INFO and are logged
+# but not flagged by default (below DEFAULT_CONFIDENCE_THRESHOLD).
 CONFIDENCE_LOW_FLOOR = 0.40
 
 # ---------------------------------------------------------------------------
@@ -98,6 +132,9 @@ CONFIDENCE_AI_ADJUSTMENT_MAX = 0.15
 # File size limit
 # ---------------------------------------------------------------------------
 
+# Files larger than this are skipped to bound memory usage during scanning.
+# At 8192-byte chunks, a 10 MB file requires ~1280 reads — a reasonable cap
+# that excludes accidental binary blobs while covering all realistic source files.
 MAX_FILE_SIZE_MB = 10
 
 # ---------------------------------------------------------------------------
@@ -105,8 +142,10 @@ MAX_FILE_SIZE_MB = 10
 # ---------------------------------------------------------------------------
 
 # HIPAA §164.530(j) requires audit log retention for a minimum of 6 years.
-# 4×365 + 2×366 = 2192 days — the mathematical maximum for a 6-year span.
-# Must match the audit_retention_days default in .phi-scanner.yml.
+# A 6-year window contains either 1 or 2 leap years depending on start date.
+# Using 2 leap years (2×366 + 4×365 = 2192) ensures we always meet the minimum
+# even in the worst-case leap-year distribution. Must match the
+# audit_retention_days default in .phi-scanner.yml.
 AUDIT_RETENTION_DAYS = 2192
 
 # ---------------------------------------------------------------------------
@@ -141,13 +180,18 @@ class OutputFormat(StrEnum):
     PDF = "pdf"
     HTML = "html"
     JUNIT = "junit"
+    # "codequality" matches the GitLab Code Quality artifact type name exactly.
     CODEQUALITY = "codequality"
+    # "gitlab-sast" matches the GitLab SAST artifact type name exactly.
+    # The hyphen is intentional — do not normalize to underscore.
     GITLAB_SAST = "gitlab-sast"
 
 
 class SeverityLevel(StrEnum):
     """Severity level assigned to a ScanFinding based on confidence score."""
 
+    # INFO: confidence < CONFIDENCE_LOW_FLOOR — very weak signal, logged only.
+    INFO = "info"
     LOW = "low"
     MEDIUM = "medium"
     HIGH = "high"
