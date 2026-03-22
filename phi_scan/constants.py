@@ -25,6 +25,7 @@ __all__ = [
     "EXIT_CODE_VIOLATION",
     "HIPAA_REMEDIATION_GUIDANCE",
     "KNOWN_BINARY_EXTENSIONS",
+    "MAX_FILE_SIZE_BYTES",
     "MAX_FILE_SIZE_MB",
     "OutputFormat",
     "PhiCategory",
@@ -143,7 +144,10 @@ CONFIDENCE_AI_ADJUSTMENT_MAX: float = 0.15
 # Files larger than this are skipped to bound memory usage during scanning.
 # At 8192-byte chunks, a 10 MB file requires ~1280 reads — a reasonable cap
 # that excludes accidental binary blobs while covering all realistic source files.
+# Use MAX_FILE_SIZE_BYTES in logic code — never multiply MAX_FILE_SIZE_MB inline.
 MAX_FILE_SIZE_MB: int = 10
+_BYTES_PER_MEGABYTE: int = 1024 * 1024
+MAX_FILE_SIZE_BYTES: int = MAX_FILE_SIZE_MB * _BYTES_PER_MEGABYTE
 
 # ---------------------------------------------------------------------------
 # HIPAA audit retention
@@ -187,7 +191,13 @@ CACHE_SCHEMA_VERSION: int = 1
 
 
 class OutputFormat(StrEnum):
-    """Supported --output format values for the scan command."""
+    """Supported --output format values for the scan command.
+
+    Always look up members by value: OutputFormat("gitlab-sast"), not by name.
+    OutputFormat["gitlab-sast"] raises KeyError because key lookup uses the
+    member name (GITLAB_SAST), not the string value. The _missing_ hook below
+    handles case-insensitive value lookups as a convenience for CLI input.
+    """
 
     TABLE = "table"
     JSON = "json"
@@ -201,6 +211,15 @@ class OutputFormat(StrEnum):
     # "gitlab-sast" matches the GitLab SAST artifact type name exactly.
     # The hyphen is intentional — do not normalize to underscore.
     GITLAB_SAST = "gitlab-sast"
+
+    @classmethod
+    def _missing_(cls, value: object) -> "OutputFormat | None":
+        """Allow case-insensitive value lookup from CLI input."""
+        if isinstance(value, str):
+            for member in cls:
+                if member.value == value.lower():
+                    return member
+        return None
 
 
 class SeverityLevel(StrEnum):
