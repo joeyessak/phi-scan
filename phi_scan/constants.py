@@ -213,12 +213,12 @@ class OutputFormat(StrEnum):
     GITLAB_SAST = "gitlab-sast"
 
     @classmethod
-    def _missing_(cls, value: object) -> "OutputFormat | None":
+    def _missing_(cls, raw_input: object) -> "OutputFormat | None":
         """Allow case-insensitive value lookup from CLI input."""
-        if not isinstance(value, str):
+        if not isinstance(raw_input, str):
             return None
         for member in cls:
-            if member.value == value.lower():
+            if member.value == raw_input.lower():
                 return member
         return None
 

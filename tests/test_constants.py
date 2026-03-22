@@ -8,14 +8,19 @@ from phi_scan.constants import (
     MAX_FILE_SIZE_BYTES,
     OutputFormat,
     PhiCategory,
+    RiskLevel,
+    SeverityLevel,
 )
 
 # HIPAA §164.530(j) 6-year minimum: 4 standard years + 2 leap years = 2192 days.
 _EXPECTED_HIPAA_RETENTION_DAYS: int = 2192
 
+# 10 MB expressed in bytes: 10 × 1024 × 1024.
+_EXPECTED_MAX_FILE_SIZE_BYTES: int = 10_485_760
+
 
 def test_max_file_size_bytes_equals_mb_times_bytes_per_megabyte() -> None:
-    assert MAX_FILE_SIZE_BYTES == 10_485_760
+    assert MAX_FILE_SIZE_BYTES == _EXPECTED_MAX_FILE_SIZE_BYTES
 
 
 def test_audit_retention_days_equals_hipaa_six_year_minimum() -> None:
@@ -47,3 +52,19 @@ def test_output_format_missing_is_case_insensitive() -> None:
 def test_hipaa_remediation_guidance_covers_every_phi_category() -> None:
     missing = [category for category in PhiCategory if category not in HIPAA_REMEDIATION_GUIDANCE]
     assert missing == [], f"Missing remediation guidance for: {missing}"
+
+
+def test_severity_level_resolves_high_by_value() -> None:
+    assert SeverityLevel("high") is SeverityLevel.HIGH
+
+
+def test_severity_level_resolves_info_by_value() -> None:
+    assert SeverityLevel("info") is SeverityLevel.INFO
+
+
+def test_risk_level_resolves_clean_by_value() -> None:
+    assert RiskLevel("clean") is RiskLevel.CLEAN
+
+
+def test_risk_level_resolves_critical_by_value() -> None:
+    assert RiskLevel("critical") is RiskLevel.CRITICAL
