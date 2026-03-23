@@ -1,1 +1,69 @@
-"""Custom exception hierarchy for PhiScan."""
+"""Custom exception hierarchy for PhiScan.
+
+All domain errors inherit from PhiScanError so callers can catch the entire
+family with a single except clause when broad error handling is appropriate.
+Each subclass targets a specific failure domain so callers can also catch
+narrowly when they need to distinguish error types.
+"""
+
+from __future__ import annotations
+
+__all__ = [
+    "AuditLogError",
+    "ConfigurationError",
+    "PhiScanError",
+    "SchemaMigrationError",
+    "TraversalError",
+]
+
+
+class PhiScanError(Exception):
+    """Base class for all PhiScan domain errors.
+
+    Raise a specific subclass in preference to this base class. Use this
+    base class only in except clauses that need to catch any PhiScan error.
+
+    Args:
+        message: Human-readable description of the failure including the
+            bad value and what was expected where applicable.
+    """
+
+
+class ConfigurationError(PhiScanError):
+    """Raised when a configuration file is missing, malformed, or contains
+    an invalid value.
+
+    Args:
+        message: Description of the invalid configuration including the
+            offending key, the bad value, and what was expected.
+    """
+
+
+class TraversalError(PhiScanError):
+    """Raised when the file-system or git traversal cannot proceed.
+
+    Covers unreadable root paths, attempts to scan outside a git repository
+    when a git operation is required, and invalid diff references.
+
+    Args:
+        message: Description of the traversal failure including the path
+            or git ref that caused it.
+    """
+
+
+class AuditLogError(PhiScanError):
+    """Raised when the SQLite audit log cannot be read from or written to.
+
+    Args:
+        message: Description of the failure including the database path
+            and the underlying cause.
+    """
+
+
+class SchemaMigrationError(PhiScanError):
+    """Raised when a database schema migration fails or is not possible.
+
+    Args:
+        message: Description of the migration failure including the source
+            version, the target version, and the reason it could not complete.
+    """
