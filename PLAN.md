@@ -153,7 +153,7 @@ and explain commands deferred to Phase 2).
   - `HIPAA_REMEDIATION_GUIDANCE` — dict mapping each HIPAA category to specific remediation text
   - `SCHEMA_VERSION = 1` — audit DB schema version for migration tracking
   - `CACHE_SCHEMA_VERSION = 1` — cache DB schema version
-- [ ] **1B.3** `exceptions.py` — `PhiScanError` (base), `ConfigurationError`, `TraversalError`, `AuditLogError`, `SchemaMigrationError`
+- [x] **1B.3** `exceptions.py` — `PhiScanError` (base), `ConfigurationError`, `TraversalError`, `AuditLogError`, `SchemaMigrationError`
 - [ ] **1B.4** `models.py` — dataclasses:
   - `ScanFinding` (file_path, line_number, entity_type, hipaa_category, confidence, detection_layer, value_hash, severity, code_context, remediation_hint)
   - `ScanResult` (findings, files_scanned, files_with_findings, scan_duration, is_clean, risk_level, severity_counts, category_counts)
