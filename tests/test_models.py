@@ -574,6 +574,13 @@ _INVALID_MAX_FILE_SIZE_MB_NEGATIVE: int = -1
 # isinstance(value, float) would silently skip int inputs in __setattr__.
 _INVALID_CONFIDENCE_THRESHOLD_AS_INT: int = 2
 _INVALID_SEVERITY_THRESHOLD: str = "not_a_severity"
+# A truthy non-bool — exercises the gap where `value is True` would silently
+# pass 1 (or any other truthy int) as should_follow_symlinks.
+_TRUTHY_NON_BOOL_SYMLINK_VALUE: int = 1
+# Bool values used where int/float fields are expected — must be rejected
+# explicitly so True (≡1) and False (≡0) cannot masquerade as valid counts.
+_BOOL_AS_MAX_FILE_SIZE_MB: bool = True
+_BOOL_AS_CONFIDENCE_THRESHOLD: bool = True
 
 
 def test_scan_config_raises_configuration_error_for_max_file_size_mb_zero() -> None:
@@ -687,6 +694,33 @@ def test_scan_config_raises_when_symlinks_set_true_post_construction() -> None:
 
     with pytest.raises(ConfigurationError):
         config.should_follow_symlinks = True  # type: ignore[misc]
+
+
+def test_scan_config_raises_when_symlinks_set_to_truthy_non_bool() -> None:
+    # `value is True` would silently accept 1 or any truthy non-bool; the guard
+    # must use truthiness (`value`) to cover all truthy inputs.
+    config = ScanConfig()
+
+    with pytest.raises(ConfigurationError):
+        config.should_follow_symlinks = _TRUTHY_NON_BOOL_SYMLINK_VALUE  # type: ignore[assignment]
+
+
+def test_scan_config_raises_when_max_file_size_mb_set_to_bool() -> None:
+    # bool is a subclass of int — True (≡1) would pass the int range check
+    # and be silently stored; bools must be explicitly rejected.
+    config = ScanConfig()
+
+    with pytest.raises(ConfigurationError):
+        config.max_file_size_mb = _BOOL_AS_MAX_FILE_SIZE_MB  # type: ignore[assignment]
+
+
+def test_scan_config_raises_when_confidence_threshold_set_to_bool() -> None:
+    # bool is a subclass of int — True (≡1.0) is in [0.0, 1.0] and would pass
+    # the range check; bools must be explicitly rejected.
+    config = ScanConfig()
+
+    with pytest.raises(ConfigurationError):
+        config.confidence_threshold = _BOOL_AS_CONFIDENCE_THRESHOLD  # type: ignore[assignment]
 
 
 def test_scan_config_raises_when_max_file_size_below_minimum_post_construction() -> None:

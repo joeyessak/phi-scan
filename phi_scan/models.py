@@ -124,13 +124,14 @@ class ScanResult:
     category_counts: MappingProxyType[PhiCategory, int]
 
     def __post_init__(self) -> None:
-        _assert_file_counts_are_valid(self)
-        _assert_scan_duration_is_valid(self)
-        _assert_clean_findings_are_consistent(self)
-        _assert_clean_risk_level_is_consistent(self)
+        _validate_file_counts(self)
+        _validate_scan_duration(self)
+        _validate_clean_findings_consistency(self)
+        _validate_clean_result_has_clean_risk_level(self)
+        _validate_dirty_result_lacks_clean_risk_level(self)
 
 
-def _assert_file_counts_are_valid(result: ScanResult) -> None:
+def _validate_file_counts(result: ScanResult) -> None:
     if result.files_scanned < _MINIMUM_ELIGIBLE_FILE_COUNT:
         raise PhiDetectionError(
             f"files_scanned ({result.files_scanned}) must be >= {_MINIMUM_ELIGIBLE_FILE_COUNT}"
@@ -147,14 +148,14 @@ def _assert_file_counts_are_valid(result: ScanResult) -> None:
         )
 
 
-def _assert_scan_duration_is_valid(result: ScanResult) -> None:
+def _validate_scan_duration(result: ScanResult) -> None:
     if result.scan_duration < _MINIMUM_SCAN_DURATION:
         raise PhiDetectionError(
             f"scan_duration ({result.scan_duration!r}) must be >= {_MINIMUM_SCAN_DURATION}"
         )
 
 
-def _assert_clean_findings_are_consistent(result: ScanResult) -> None:
+def _validate_clean_findings_consistency(result: ScanResult) -> None:
     if result.is_clean and result.findings:
         raise PhiDetectionError(
             f"is_clean is True but findings contains {len(result.findings)} finding(s) — "
@@ -162,12 +163,15 @@ def _assert_clean_findings_are_consistent(result: ScanResult) -> None:
         )
 
 
-def _assert_clean_risk_level_is_consistent(result: ScanResult) -> None:
+def _validate_clean_result_has_clean_risk_level(result: ScanResult) -> None:
     if result.is_clean and result.risk_level != RiskLevel.CLEAN:
         raise PhiDetectionError(
             f"is_clean is True but risk_level is {result.risk_level!r} — "
             "a clean result must have RiskLevel.CLEAN"
         )
+
+
+def _validate_dirty_result_lacks_clean_risk_level(result: ScanResult) -> None:
     if not result.is_clean and result.risk_level == RiskLevel.CLEAN:
         raise PhiDetectionError(
             "risk_level is RiskLevel.CLEAN but is_clean is False — "
@@ -206,10 +210,11 @@ class ScanConfig:
     include_extensions: list[str] | None = None
 
     def __post_init__(self) -> None:
-        # Field validation runs in __setattr__, which fires for every assignment
-        # including those in __init__ — no duplicate guards needed here.
+        # Non-frozen dataclass __init__ uses normal attribute assignment (not
+        # object.__setattr__), so __setattr__ fires for every field during
+        # construction — all guards run then, no duplicate checks needed here.
         # Compute both copies before assigning so both fields are updated together;
-        # readers of this object never observe one updated field and one original.
+        # readers never observe one updated field and one original.
         exclude_paths_copy = list(self.exclude_paths)
         include_extensions_copy: list[str] | None = (
             list(self.include_extensions) if self.include_extensions is not None else None
@@ -218,23 +223,22 @@ class ScanConfig:
         self.include_extensions = include_extensions_copy
 
     def __setattr__(self, name: str, value: object) -> None:
-        # Re-enforce security-critical invariants on every field assignment so
-        # post-construction mutation cannot bypass the __post_init__ guards.
-        if name == "should_follow_symlinks" and value is True:
+        # Guards enforce invariants at every assignment, including during __init__.
+        if name == "should_follow_symlinks" and value:
             raise ConfigurationError(
                 "should_follow_symlinks must be False — symlink traversal is prohibited "
                 "to prevent infinite loops and directory escape attacks."
             )
-        if name == "max_file_size_mb" and isinstance(value, int) and not isinstance(value, bool):
-            if value < _MINIMUM_FILE_SIZE_MB:
+        if name == "max_file_size_mb":
+            if isinstance(value, bool):
+                raise ConfigurationError(f"max_file_size_mb must be an int, got {value!r}")
+            if isinstance(value, int) and value < _MINIMUM_FILE_SIZE_MB:
                 raise ConfigurationError(
                     f"max_file_size_mb {value!r} must be >= {_MINIMUM_FILE_SIZE_MB}"
                 )
-        if (
-            name == "confidence_threshold"
-            and isinstance(value, (int, float))
-            and not isinstance(value, bool)
-        ):
+        if name == "confidence_threshold":
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                raise ConfigurationError(f"confidence_threshold must be a float, got {value!r}")
             if not CONFIDENCE_SCORE_MINIMUM <= value <= CONFIDENCE_SCORE_MAXIMUM:
                 raise ConfigurationError(
                     f"confidence_threshold {value!r} is outside the valid range "
