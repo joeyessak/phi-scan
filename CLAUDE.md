@@ -272,6 +272,11 @@ make help         # list all available targets
 - Constants: `UPPER_SNAKE_CASE`
 - Booleans must start with `is_`, `has_`, `can_`, `should_`, or `was_`
 - Function names must be verb-noun pairs: `calculate_tax_total`, not `process`
+- Functions that raise when a condition is violated use `raise_on_<condition>`:
+  `raise_on_negative_files_scanned`, `raise_on_clean_result_with_findings`.
+  Functions that validate a single field and raise use `validate_<field_name>`:
+  `validate_confidence_threshold`, `validate_max_file_size_mb`.
+  Both patterns satisfy the verb-noun requirement.
 - No abbreviations — write the full word. No: `usr`, `cfg`, `tmp`, `val`, `res`, `d`, `ts`
 - Avoid class names ending in: `Manager`, `Handler`, `Processor`, `Helper`, `Util`
 - The bigger the scope, the longer the name

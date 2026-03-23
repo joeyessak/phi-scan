@@ -570,6 +570,9 @@ def test_scan_config_include_extensions_defensive_copy_isolates_caller() -> None
 
 _INVALID_MAX_FILE_SIZE_MB_ZERO: int = 0
 _INVALID_MAX_FILE_SIZE_MB_NEGATIVE: int = -1
+# A float where int is required — was silently stored before _validate_max_file_size_mb
+# used `not isinstance(value, int)` to catch non-int types.
+_INVALID_MAX_FILE_SIZE_MB_FLOAT: float = 2.5
 # An int value above CONFIDENCE_SCORE_MAXIMUM — exercises the gap where
 # isinstance(value, float) would silently skip int inputs in __setattr__.
 _INVALID_CONFIDENCE_THRESHOLD_AS_INT: int = 2
@@ -594,6 +597,13 @@ def test_scan_config_raises_configuration_error_for_max_file_size_mb_zero() -> N
 def test_scan_config_raises_configuration_error_for_max_file_size_mb_negative() -> None:
     with pytest.raises(ConfigurationError):
         ScanConfig(max_file_size_mb=_INVALID_MAX_FILE_SIZE_MB_NEGATIVE)
+
+
+def test_scan_config_raises_configuration_error_for_max_file_size_mb_float() -> None:
+    # Float values bypass the isinstance(int) check and were silently stored;
+    # _validate_max_file_size_mb now uses `not isinstance(int)` to catch them.
+    with pytest.raises(ConfigurationError):
+        ScanConfig(max_file_size_mb=_INVALID_MAX_FILE_SIZE_MB_FLOAT)  # type: ignore[arg-type]
 
 
 # ---------------------------------------------------------------------------

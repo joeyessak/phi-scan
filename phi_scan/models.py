@@ -124,23 +124,31 @@ class ScanResult:
     category_counts: MappingProxyType[PhiCategory, int]
 
     def __post_init__(self) -> None:
-        _raise_on_invalid_file_counts(self)
+        _raise_on_negative_files_scanned(self)
+        _raise_on_negative_files_with_findings(self)
+        _raise_on_files_with_findings_exceeding_files_scanned(self)
         _raise_on_negative_scan_duration(self)
         _raise_on_clean_result_with_findings(self)
         _raise_on_clean_result_with_wrong_risk_level(self)
         _raise_on_dirty_result_with_clean_risk_level(self)
 
 
-def _raise_on_invalid_file_counts(result: ScanResult) -> None:
+def _raise_on_negative_files_scanned(result: ScanResult) -> None:
     if result.files_scanned < _MINIMUM_ELIGIBLE_FILE_COUNT:
         raise PhiDetectionError(
             f"files_scanned ({result.files_scanned}) must be >= {_MINIMUM_ELIGIBLE_FILE_COUNT}"
         )
+
+
+def _raise_on_negative_files_with_findings(result: ScanResult) -> None:
     if result.files_with_findings < _MINIMUM_ELIGIBLE_FILE_COUNT:
         raise PhiDetectionError(
             f"files_with_findings ({result.files_with_findings}) "
             f"must be >= {_MINIMUM_ELIGIBLE_FILE_COUNT}"
         )
+
+
+def _raise_on_files_with_findings_exceeding_files_scanned(result: ScanResult) -> None:
     if result.files_with_findings > result.files_scanned:
         raise PhiDetectionError(
             f"files_with_findings ({result.files_with_findings}) exceeds "
@@ -222,32 +230,58 @@ class ScanConfig:
         self.include_extensions = include_extensions_copy
 
     def __setattr__(self, name: str, value: object) -> None:
-        if name == "should_follow_symlinks" and value:
-            raise ConfigurationError(
-                "should_follow_symlinks must be False — symlink traversal is prohibited "
-                "to prevent infinite loops and directory escape attacks."
-            )
-        if name == "max_file_size_mb":
-            if isinstance(value, bool):
-                raise ConfigurationError(f"max_file_size_mb must be an int, got {value!r}")
-            if isinstance(value, int) and value < _MINIMUM_FILE_SIZE_MB:
-                raise ConfigurationError(
-                    f"max_file_size_mb {value!r} must be >= {_MINIMUM_FILE_SIZE_MB}"
-                )
-        if name == "confidence_threshold":
-            if isinstance(value, bool) or not isinstance(value, (int, float)):
-                raise ConfigurationError(f"confidence_threshold must be a float, got {value!r}")
-            if not CONFIDENCE_SCORE_MINIMUM <= value <= CONFIDENCE_SCORE_MAXIMUM:
-                raise ConfigurationError(
-                    f"confidence_threshold {value!r} is outside the valid range "
-                    f"[{CONFIDENCE_SCORE_MINIMUM}, {CONFIDENCE_SCORE_MAXIMUM}]"
-                )
-        if name == "severity_threshold" and not isinstance(value, SeverityLevel):
-            raise ConfigurationError(
-                f"severity_threshold must be a SeverityLevel member, got {value!r}"
-            )
-        if name == "exclude_paths" and not isinstance(value, list):
-            raise ConfigurationError(f"exclude_paths must be a list, got {value!r}")
-        if name == "include_extensions" and not (value is None or isinstance(value, list)):
-            raise ConfigurationError(f"include_extensions must be a list or None, got {value!r}")
+        if name == "should_follow_symlinks":
+            _validate_should_follow_symlinks(value)
+        elif name == "max_file_size_mb":
+            _validate_max_file_size_mb(value)
+        elif name == "confidence_threshold":
+            _validate_confidence_threshold(value)
+        elif name == "severity_threshold":
+            _validate_severity_threshold(value)
+        elif name == "exclude_paths":
+            _validate_exclude_paths(value)
+        elif name == "include_extensions":
+            _validate_include_extensions(value)
         super().__setattr__(name, value)
+
+
+def _validate_should_follow_symlinks(value: object) -> None:
+    if value:
+        raise ConfigurationError(
+            "should_follow_symlinks must be False — symlink traversal is prohibited "
+            "to prevent infinite loops and directory escape attacks."
+        )
+
+
+def _validate_max_file_size_mb(value: object) -> None:
+    if not isinstance(value, int) or isinstance(value, bool):
+        raise ConfigurationError(f"max_file_size_mb must be an int, got {value!r}")
+    if value < _MINIMUM_FILE_SIZE_MB:
+        raise ConfigurationError(f"max_file_size_mb {value!r} must be >= {_MINIMUM_FILE_SIZE_MB}")
+
+
+def _validate_confidence_threshold(value: object) -> None:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ConfigurationError(f"confidence_threshold must be a float, got {value!r}")
+    if not CONFIDENCE_SCORE_MINIMUM <= value <= CONFIDENCE_SCORE_MAXIMUM:
+        raise ConfigurationError(
+            f"confidence_threshold {value!r} is outside the valid range "
+            f"[{CONFIDENCE_SCORE_MINIMUM}, {CONFIDENCE_SCORE_MAXIMUM}]"
+        )
+
+
+def _validate_severity_threshold(value: object) -> None:
+    if not isinstance(value, SeverityLevel):
+        raise ConfigurationError(
+            f"severity_threshold must be a SeverityLevel member, got {value!r}"
+        )
+
+
+def _validate_exclude_paths(value: object) -> None:
+    if not isinstance(value, list):
+        raise ConfigurationError(f"exclude_paths must be a list, got {value!r}")
+
+
+def _validate_include_extensions(value: object) -> None:
+    if not (value is None or isinstance(value, list)):
+        raise ConfigurationError(f"include_extensions must be a list or None, got {value!r}")
