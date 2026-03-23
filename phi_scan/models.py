@@ -278,6 +278,15 @@ class ScanConfig:
             _validate_exclude_paths(value)
         elif name == _ConfigField.INCLUDE_EXTENSIONS:
             _validate_include_extensions(value)
+        else:
+            # Guard against adding a _ConfigField member without wiring up a validator.
+            # This branch is unreachable in correct code — it fires only when a developer
+            # adds a member to _ConfigField but forgets to add a corresponding elif above.
+            if name in set(_ConfigField):  # pragma: no cover
+                raise ConfigurationError(  # pragma: no cover
+                    f"ScanConfig field {name!r} is registered in _ConfigField "
+                    "but has no validator in __setattr__"
+                )
         super().__setattr__(name, value)
 
 
@@ -299,6 +308,9 @@ def _validate_max_file_size_mb(value: object) -> None:
 
 
 def _validate_confidence_threshold(value: object) -> None:
+    # Strict float — confidence is a ratio; passing 1 (int) instead of 1.0 is a caller
+    # bug. Unlike max_file_size_mb (a natural integer count), a confidence score has no
+    # meaningful integer representation. No coercion is performed; strict type required.
     if isinstance(value, bool) or not isinstance(value, float):
         raise ConfigurationError(f"confidence_threshold must be a float, got {value!r}")
     if not CONFIDENCE_SCORE_MINIMUM <= value <= CONFIDENCE_SCORE_MAXIMUM:
