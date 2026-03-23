@@ -251,6 +251,12 @@ _RESULT_FILES_WITH_FINDINGS_ZERO: int = 0
 _RESULT_SCAN_DURATION: float = 0.42
 _RESULT_RISK_LEVEL: RiskLevel = RiskLevel.HIGH
 
+_INVALID_FILES_SCANNED_NEGATIVE: int = -1
+_INVALID_FILES_WITH_FINDINGS_NEGATIVE: int = -1
+# files_with_findings must not exceed files_scanned — use a value clearly above the ceiling.
+_INVALID_FILES_WITH_FINDINGS_TOO_HIGH: int = _RESULT_FILES_SCANNED + 1
+_INVALID_SCAN_DURATION_NEGATIVE: float = -0.001
+
 
 def _make_scan_result(
     findings: tuple[ScanFinding, ...] | None = None,
@@ -366,12 +372,54 @@ def test_scan_result_raises_phi_detection_error_when_is_clean_true_with_findings
         )
 
 
+def test_scan_result_raises_phi_detection_error_when_files_scanned_is_negative() -> None:
+    with pytest.raises(PhiDetectionError):
+        ScanResult(
+            findings=(),
+            files_scanned=_INVALID_FILES_SCANNED_NEGATIVE,
+            files_with_findings=_RESULT_FILES_WITH_FINDINGS_ZERO,
+            scan_duration=_RESULT_SCAN_DURATION,
+            is_clean=False,
+            risk_level=RiskLevel.LOW,
+            severity_counts=MappingProxyType({}),
+            category_counts=MappingProxyType({}),
+        )
+
+
+def test_scan_result_raises_phi_detection_error_when_files_with_findings_is_negative() -> None:
+    with pytest.raises(PhiDetectionError):
+        ScanResult(
+            findings=(),
+            files_scanned=_RESULT_FILES_SCANNED,
+            files_with_findings=_INVALID_FILES_WITH_FINDINGS_NEGATIVE,
+            scan_duration=_RESULT_SCAN_DURATION,
+            is_clean=False,
+            risk_level=RiskLevel.LOW,
+            severity_counts=MappingProxyType({}),
+            category_counts=MappingProxyType({}),
+        )
+
+
+def test_scan_result_raises_phi_detection_error_when_scan_duration_is_negative() -> None:
+    with pytest.raises(PhiDetectionError):
+        ScanResult(
+            findings=(),
+            files_scanned=_RESULT_FILES_SCANNED,
+            files_with_findings=_RESULT_FILES_WITH_FINDINGS_ZERO,
+            scan_duration=_INVALID_SCAN_DURATION_NEGATIVE,
+            is_clean=False,
+            risk_level=RiskLevel.LOW,
+            severity_counts=MappingProxyType({}),
+            category_counts=MappingProxyType({}),
+        )
+
+
 def test_scan_result_raises_phi_detection_error_when_files_with_findings_exceeds_scanned() -> None:
     with pytest.raises(PhiDetectionError):
         ScanResult(
             findings=(),
-            files_scanned=_RESULT_FILES_WITH_FINDINGS,
-            files_with_findings=_RESULT_FILES_SCANNED,
+            files_scanned=_RESULT_FILES_SCANNED,
+            files_with_findings=_INVALID_FILES_WITH_FINDINGS_TOO_HIGH,
             scan_duration=_RESULT_SCAN_DURATION,
             is_clean=False,
             risk_level=RiskLevel.LOW,

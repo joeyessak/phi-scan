@@ -27,11 +27,14 @@ __all__ = [
 ]
 
 _MINIMUM_LINE_NUMBER: int = 1
+_MINIMUM_FILE_COUNT: int = 0
+_MINIMUM_SCAN_DURATION: float = 0.0
 
 # Matches exactly SHA256_HEX_DIGEST_LENGTH lowercase hex characters.
+# fullmatch without anchors is used — anchors and fullmatch together are redundant.
 # A length-only check would accept base64 or truncated raw values of the right
-# length — the hex constraint enforces that value_hash is actually a SHA-256 digest.
-_VALID_SHA256_PATTERN: re.Pattern[str] = re.compile(r"^[0-9a-f]{64}$")
+# length — the hex character class enforces that value_hash is actually a SHA-256 digest.
+_VALID_SHA256_PATTERN: re.Pattern[str] = re.compile(rf"[0-9a-f]{{{SHA256_HEX_DIGEST_LENGTH}}}")
 
 
 @dataclass(frozen=True)
@@ -112,6 +115,18 @@ class ScanResult:
     category_counts: MappingProxyType[PhiCategory, int]
 
     def __post_init__(self) -> None:
+        if self.files_scanned < _MINIMUM_FILE_COUNT:
+            raise PhiDetectionError(
+                f"files_scanned ({self.files_scanned}) must be >= {_MINIMUM_FILE_COUNT}"
+            )
+        if self.files_with_findings < _MINIMUM_FILE_COUNT:
+            raise PhiDetectionError(
+                f"files_with_findings ({self.files_with_findings}) must be >= {_MINIMUM_FILE_COUNT}"
+            )
+        if self.scan_duration < _MINIMUM_SCAN_DURATION:
+            raise PhiDetectionError(
+                f"scan_duration ({self.scan_duration!r}) must be >= {_MINIMUM_SCAN_DURATION}"
+            )
         if self.is_clean and self.findings:
             raise PhiDetectionError(
                 f"is_clean is True but findings contains {len(self.findings)} finding(s) — "
@@ -155,6 +170,11 @@ class ScanConfig:
     include_extensions: list[str] | None = None
 
     def __post_init__(self) -> None:
+        # Defensive copies are made first so all subsequent validation reads the
+        # owned data, not the caller's original list — guarding against mid-init mutation.
+        self.exclude_paths = list(self.exclude_paths)
+        if self.include_extensions is not None:
+            self.include_extensions = list(self.include_extensions)
         if self.should_follow_symlinks:
             raise ConfigurationError(
                 "should_follow_symlinks must be False — symlink traversal is prohibited "
@@ -165,7 +185,3 @@ class ScanConfig:
                 f"confidence_threshold {self.confidence_threshold!r} is outside the valid range "
                 f"[{CONFIDENCE_SCORE_MINIMUM}, {CONFIDENCE_SCORE_MAXIMUM}]"
             )
-        # Defensive copies prevent callers from mutating config state after construction.
-        self.exclude_paths = list(self.exclude_paths)
-        if self.include_extensions is not None:
-            self.include_extensions = list(self.include_extensions)
