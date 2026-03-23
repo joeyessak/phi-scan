@@ -14,6 +14,18 @@ from phi_scan.exceptions import (
 _NONEXISTENT_PATH: str = "/nonexistent/phi-scan-test-path"
 # Placeholder used in tests where the message content is not under test.
 _PLACEHOLDER_ERROR_MESSAGE: str = "phi-scan-test-error"
+_SAMPLE_CONFIG_ERROR_MESSAGE: str = (
+    "invalid value 'foo' for key 'output_format': expected one of table, json"
+)
+_SAMPLE_TRAVERSAL_ERROR_MESSAGE: str = (
+    f"path '{_NONEXISTENT_PATH}' does not exist or is not readable"
+)
+_SAMPLE_AUDIT_LOG_ERROR_MESSAGE: str = (
+    f"cannot write to audit log at '{_NONEXISTENT_PATH}': permission denied"
+)
+_SAMPLE_SCHEMA_MIGRATION_ERROR_MESSAGE: str = (
+    "cannot migrate schema from version 1 to version 3: version 2 migration missing"
+)
 
 
 def test_phi_scan_error_is_exception_subclass() -> None:
@@ -37,43 +49,33 @@ def test_schema_migration_error_is_phi_scan_error_subclass() -> None:
 
 
 def test_phi_scan_error_preserves_message() -> None:
-    error_message = "something went wrong"
+    raised_error = PhiScanError(_PLACEHOLDER_ERROR_MESSAGE)
 
-    raised_error = PhiScanError(error_message)
-
-    assert str(raised_error) == error_message
+    assert str(raised_error) == _PLACEHOLDER_ERROR_MESSAGE
 
 
 def test_configuration_error_preserves_message() -> None:
-    error_message = "invalid value 'foo' for key 'output_format': expected one of table, json"
+    raised_error = ConfigurationError(_SAMPLE_CONFIG_ERROR_MESSAGE)
 
-    raised_error = ConfigurationError(error_message)
-
-    assert str(raised_error) == error_message
+    assert str(raised_error) == _SAMPLE_CONFIG_ERROR_MESSAGE
 
 
 def test_traversal_error_preserves_message() -> None:
-    error_message = f"path '{_NONEXISTENT_PATH}' does not exist or is not readable"
+    raised_error = TraversalError(_SAMPLE_TRAVERSAL_ERROR_MESSAGE)
 
-    raised_error = TraversalError(error_message)
-
-    assert str(raised_error) == error_message
+    assert str(raised_error) == _SAMPLE_TRAVERSAL_ERROR_MESSAGE
 
 
 def test_audit_log_error_preserves_message() -> None:
-    error_message = f"cannot write to audit log at '{_NONEXISTENT_PATH}': permission denied"
+    raised_error = AuditLogError(_SAMPLE_AUDIT_LOG_ERROR_MESSAGE)
 
-    raised_error = AuditLogError(error_message)
-
-    assert str(raised_error) == error_message
+    assert str(raised_error) == _SAMPLE_AUDIT_LOG_ERROR_MESSAGE
 
 
 def test_schema_migration_error_preserves_message() -> None:
-    error_message = "cannot migrate schema from version 1 to version 3: version 2 migration missing"
+    raised_error = SchemaMigrationError(_SAMPLE_SCHEMA_MIGRATION_ERROR_MESSAGE)
 
-    raised_error = SchemaMigrationError(error_message)
-
-    assert str(raised_error) == error_message
+    assert str(raised_error) == _SAMPLE_SCHEMA_MIGRATION_ERROR_MESSAGE
 
 
 def test_phi_scan_error_is_catchable_as_exception() -> None:
