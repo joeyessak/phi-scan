@@ -67,6 +67,10 @@ class ScanFinding:
         confidence: Detection confidence score in the range [0.0, 1.0].
         detection_layer: Layer that produced the finding.
         value_hash: SHA-256 hex digest of the raw detected value — never the raw value itself.
+            Callers are responsible for hashing before construction. Hashing belongs in the
+            detection layer (scanner.py), not here — the model stores data, does not transform
+            it. The format is enforced (64 lowercase hex chars) but the model cannot verify the
+            caller hashed the correct value; that obligation rests with the detection layer.
         severity: Severity level derived from the confidence score.
         code_context: Surrounding source lines shown in reports for human review.
         remediation_hint: Actionable guidance for removing or replacing this PHI.
@@ -299,9 +303,9 @@ def _validate_exclude_paths(value: object) -> None:
 
 
 def _validate_include_extensions(value: object) -> None:
-    if not (value is None or isinstance(value, list)):
+    if value is None:
+        return
+    if not isinstance(value, list):
         raise ConfigurationError(f"include_extensions must be a list or None, got {value!r}")
-    if isinstance(value, list) and not all(isinstance(element, str) for element in value):
-        raise ConfigurationError(
-            f"include_extensions must be a list of strings or None, got {value!r}"
-        )
+    if not all(isinstance(element, str) for element in value):
+        raise ConfigurationError(f"include_extensions must be a list of strings, got {value!r}")
