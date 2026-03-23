@@ -15,7 +15,7 @@ from phi_scan.constants import (
     RiskLevel,
     SeverityLevel,
 )
-from phi_scan.exceptions import ConfigurationError
+from phi_scan.exceptions import ConfigurationError, PhiDetectionError
 
 __all__ = [
     "ScanConfig",
@@ -57,13 +57,13 @@ class ScanFinding:
 
     def __post_init__(self) -> None:
         if not CONFIDENCE_SCORE_MINIMUM <= self.confidence <= CONFIDENCE_SCORE_MAXIMUM:
-            raise ValueError(
+            raise PhiDetectionError(
                 f"confidence {self.confidence!r} is outside the valid range "
                 f"[{CONFIDENCE_SCORE_MINIMUM}, {CONFIDENCE_SCORE_MAXIMUM}]"
             )
 
 
-@dataclass
+@dataclass(frozen=True)
 class ScanResult:
     """The aggregated outcome of a completed scan operation.
 
@@ -100,7 +100,7 @@ class ScanConfig:
         severity_threshold: Minimum severity level to include in the report.
         confidence_threshold: Minimum confidence score [0.0, 1.0] for a finding to be reported.
         should_follow_symlinks: Must remain False — symlink traversal is prohibited.
-            config.py raises ConfigurationError if this is set to True.
+            Raises ConfigurationError immediately on construction if set to True.
         max_file_size_mb: Files larger than this value in megabytes are skipped.
         include_extensions: If set, only files with a suffix in this list are scanned.
             None (default) scans all non-binary text files regardless of extension.
@@ -114,6 +114,11 @@ class ScanConfig:
     include_extensions: list[str] | None = None
 
     def __post_init__(self) -> None:
+        if self.should_follow_symlinks:
+            raise ConfigurationError(
+                "should_follow_symlinks must be False — symlink traversal is prohibited "
+                "to prevent infinite loops and directory escape attacks."
+            )
         if not CONFIDENCE_SCORE_MINIMUM <= self.confidence_threshold <= CONFIDENCE_SCORE_MAXIMUM:
             raise ConfigurationError(
                 f"confidence_threshold {self.confidence_threshold!r} is outside the valid range "

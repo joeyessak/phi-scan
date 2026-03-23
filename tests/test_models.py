@@ -15,7 +15,7 @@ from phi_scan.constants import (
     RiskLevel,
     SeverityLevel,
 )
-from phi_scan.exceptions import ConfigurationError
+from phi_scan.exceptions import ConfigurationError, PhiDetectionError
 from phi_scan.models import ScanConfig, ScanFinding, ScanResult
 
 # ---------------------------------------------------------------------------
@@ -138,9 +138,9 @@ _RESULT_RISK_LEVEL: RiskLevel = RiskLevel.HIGH
 
 def _make_scan_result(findings: list[ScanFinding] | None = None) -> ScanResult:
     """Return a populated ScanResult for use across multiple tests."""
-    resolved_findings = findings if findings is not None else [_make_scan_finding()]
+    findings_to_use = findings if findings is not None else [_make_scan_finding()]
     return ScanResult(
-        findings=resolved_findings,
+        findings=findings_to_use,
         files_scanned=_RESULT_FILES_SCANNED,
         files_with_findings=_RESULT_FILES_WITH_FINDINGS,
         scan_duration=_RESULT_SCAN_DURATION,
@@ -331,8 +331,8 @@ def test_scan_finding_accepts_maximum_confidence_boundary() -> None:
     assert finding.confidence == CONFIDENCE_SCORE_MAXIMUM
 
 
-def test_scan_finding_raises_value_error_for_confidence_below_minimum() -> None:
-    with pytest.raises(ValueError):
+def test_scan_finding_raises_phi_detection_error_for_confidence_below_minimum() -> None:
+    with pytest.raises(PhiDetectionError):
         ScanFinding(
             file_path=_FINDING_FILE_PATH,
             line_number=_FINDING_LINE_NUMBER,
@@ -347,8 +347,8 @@ def test_scan_finding_raises_value_error_for_confidence_below_minimum() -> None:
         )
 
 
-def test_scan_finding_raises_value_error_for_confidence_above_maximum() -> None:
-    with pytest.raises(ValueError):
+def test_scan_finding_raises_phi_detection_error_for_confidence_above_maximum() -> None:
+    with pytest.raises(PhiDetectionError):
         ScanFinding(
             file_path=_FINDING_FILE_PATH,
             line_number=_FINDING_LINE_NUMBER,
@@ -371,3 +371,16 @@ def test_scan_config_raises_configuration_error_for_threshold_below_minimum() ->
 def test_scan_config_raises_configuration_error_for_threshold_above_maximum() -> None:
     with pytest.raises(ConfigurationError):
         ScanConfig(confidence_threshold=_CONFIDENCE_ABOVE_MAXIMUM)
+
+
+def test_scan_config_raises_configuration_error_when_follow_symlinks_is_true() -> None:
+    with pytest.raises(ConfigurationError):
+        ScanConfig(should_follow_symlinks=True)
+
+
+def test_scan_result_is_immutable() -> None:
+    # frozen=True prevents field reassignment — ScanResult is a sealed record.
+    scan_result = _make_scan_result()
+
+    with pytest.raises(FrozenInstanceError):
+        scan_result.files_scanned = 0  # type: ignore[misc]
