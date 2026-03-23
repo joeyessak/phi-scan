@@ -115,7 +115,7 @@ def _reject_invalid_line_number(finding: ScanFinding) -> None:
 def _reject_invalid_value_hash(finding: ScanFinding) -> None:
     if not _VALID_SHA256_PATTERN.fullmatch(finding.value_hash):
         raise PhiDetectionError(
-            f"value_hash is not a valid SHA-256 hex digest — "
+            f"value_hash {finding.value_hash!r} is not a valid SHA-256 hex digest — "
             f"must be exactly {SHA256_HEX_DIGEST_LENGTH} lowercase hex characters [0-9a-f], "
             f"got {len(finding.value_hash)} characters"
         )
@@ -321,7 +321,7 @@ def _validate_severity_threshold(value: object) -> None:
 def _validate_exclude_paths(value: object) -> None:
     if not isinstance(value, list):
         raise ConfigurationError(f"exclude_paths must be a list, got {value!r}")
-    if not all(isinstance(element, str) for element in value):
+    if not all(isinstance(path_pattern, str) for path_pattern in value):
         raise ConfigurationError(f"exclude_paths must be a list of strings, got {value!r}")
 
 
@@ -330,5 +330,5 @@ def _validate_include_extensions(value: object) -> None:
         return
     if not isinstance(value, list):
         raise ConfigurationError(f"include_extensions must be a list or None, got {value!r}")
-    if not all(isinstance(element, str) for element in value):
+    if not all(isinstance(extension, str) for extension in value):
         raise ConfigurationError(f"include_extensions must be a list of strings, got {value!r}")
