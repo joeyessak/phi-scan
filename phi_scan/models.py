@@ -27,16 +27,20 @@ __all__ = [
 ]
 
 _MINIMUM_LINE_NUMBER: int = 1
-_MINIMUM_FILE_COUNT: int = 0
+# Both fields can legitimately be zero: a scan of an empty directory has
+# files_scanned=0, and a scan that finds no PHI has files_with_findings=0.
+_MINIMUM_ELIGIBLE_FILE_COUNT: int = 0
 _MINIMUM_SCAN_DURATION: float = 0.0
 # Zero is not a valid file-size limit — a scanner that skips all files is broken.
 _MINIMUM_FILE_SIZE_MB: int = 1
 
-# Matches exactly SHA256_HEX_DIGEST_LENGTH lowercase hex characters.
+# Build the pattern string explicitly — avoids the non-obvious triple-brace
+# rf-string rf"[0-9a-f]{{{SHA256_HEX_DIGEST_LENGTH}}}". The result is "[0-9a-f]{64}".
+_SHA256_PATTERN_STRING: str = "[0-9a-f]{" + str(SHA256_HEX_DIGEST_LENGTH) + "}"
 # fullmatch matches the entire string — explicit ^ and $ anchors are redundant and omitted.
 # A length-only check would accept base64 or truncated raw values of the right
 # length — the hex character class enforces that value_hash is actually a SHA-256 digest.
-_VALID_SHA256_PATTERN: re.Pattern[str] = re.compile(rf"[0-9a-f]{{{SHA256_HEX_DIGEST_LENGTH}}}")
+_VALID_SHA256_PATTERN: re.Pattern[str] = re.compile(_SHA256_PATTERN_STRING)
 
 
 @dataclass(frozen=True)
@@ -116,53 +120,61 @@ class ScanResult:
     severity_counts: MappingProxyType[SeverityLevel, int]
     category_counts: MappingProxyType[PhiCategory, int]
 
-    def _validate_file_counts(self) -> None:
-        if self.files_scanned < _MINIMUM_FILE_COUNT:
-            raise PhiDetectionError(
-                f"files_scanned ({self.files_scanned}) must be >= {_MINIMUM_FILE_COUNT}"
-            )
-        if self.files_with_findings < _MINIMUM_FILE_COUNT:
-            raise PhiDetectionError(
-                f"files_with_findings ({self.files_with_findings}) must be >= {_MINIMUM_FILE_COUNT}"
-            )
-        if self.files_with_findings > self.files_scanned:
-            raise PhiDetectionError(
-                f"files_with_findings ({self.files_with_findings}) exceeds "
-                f"files_scanned ({self.files_scanned})"
-            )
-
-    def _validate_scan_duration(self) -> None:
-        if self.scan_duration < _MINIMUM_SCAN_DURATION:
-            raise PhiDetectionError(
-                f"scan_duration ({self.scan_duration!r}) must be >= {_MINIMUM_SCAN_DURATION}"
-            )
-
-    def _validate_clean_invariant(self) -> None:
-        if self.is_clean and self.findings:
-            raise PhiDetectionError(
-                f"is_clean is True but findings contains {len(self.findings)} finding(s) — "
-                "a clean result must have zero findings"
-            )
-        if not self.is_clean and not self.findings:
-            raise PhiDetectionError(
-                "is_clean is False but findings is empty — "
-                "a result with no findings must have is_clean=True"
-            )
-        if self.is_clean and self.risk_level != RiskLevel.CLEAN:
-            raise PhiDetectionError(
-                f"is_clean is True but risk_level is {self.risk_level!r} — "
-                "a clean result must have RiskLevel.CLEAN"
-            )
-        if not self.is_clean and self.risk_level == RiskLevel.CLEAN:
-            raise PhiDetectionError(
-                "risk_level is RiskLevel.CLEAN but is_clean is False — "
-                "RiskLevel.CLEAN requires is_clean to be True"
-            )
-
     def __post_init__(self) -> None:
-        self._validate_file_counts()
-        self._validate_scan_duration()
-        self._validate_clean_invariant()
+        _validate_scan_result_file_counts(self)
+        _validate_scan_result_duration(self)
+        _validate_is_clean_findings_agreement(self)
+        _validate_is_clean_risk_level_agreement(self)
+
+
+def _validate_scan_result_file_counts(result: ScanResult) -> None:
+    if result.files_scanned < _MINIMUM_ELIGIBLE_FILE_COUNT:
+        raise PhiDetectionError(
+            f"files_scanned ({result.files_scanned}) must be >= {_MINIMUM_ELIGIBLE_FILE_COUNT}"
+        )
+    if result.files_with_findings < _MINIMUM_ELIGIBLE_FILE_COUNT:
+        raise PhiDetectionError(
+            f"files_with_findings ({result.files_with_findings}) "
+            f"must be >= {_MINIMUM_ELIGIBLE_FILE_COUNT}"
+        )
+    if result.files_with_findings > result.files_scanned:
+        raise PhiDetectionError(
+            f"files_with_findings ({result.files_with_findings}) exceeds "
+            f"files_scanned ({result.files_scanned})"
+        )
+
+
+def _validate_scan_result_duration(result: ScanResult) -> None:
+    if result.scan_duration < _MINIMUM_SCAN_DURATION:
+        raise PhiDetectionError(
+            f"scan_duration ({result.scan_duration!r}) must be >= {_MINIMUM_SCAN_DURATION}"
+        )
+
+
+def _validate_is_clean_findings_agreement(result: ScanResult) -> None:
+    if result.is_clean and result.findings:
+        raise PhiDetectionError(
+            f"is_clean is True but findings contains {len(result.findings)} finding(s) — "
+            "a clean result must have zero findings"
+        )
+    if not result.is_clean and not result.findings:
+        raise PhiDetectionError(
+            "is_clean is False but findings is empty — "
+            "a result with no findings must have is_clean=True"
+        )
+
+
+def _validate_is_clean_risk_level_agreement(result: ScanResult) -> None:
+    if result.is_clean and result.risk_level != RiskLevel.CLEAN:
+        raise PhiDetectionError(
+            f"is_clean is True but risk_level is {result.risk_level!r} — "
+            "a clean result must have RiskLevel.CLEAN"
+        )
+    if not result.is_clean and result.risk_level == RiskLevel.CLEAN:
+        raise PhiDetectionError(
+            "risk_level is RiskLevel.CLEAN but is_clean is False — "
+            "RiskLevel.CLEAN requires is_clean to be True"
+        )
 
 
 @dataclass
@@ -211,8 +223,11 @@ class ScanConfig:
             raise ConfigurationError(
                 f"max_file_size_mb {self.max_file_size_mb!r} must be >= {_MINIMUM_FILE_SIZE_MB}"
             )
-        # Defensive copies are made after validation so a raised ConfigurationError
-        # leaves the object completely unmutated — no partial state.
-        self.exclude_paths = list(self.exclude_paths)
-        if self.include_extensions is not None:
-            self.include_extensions = list(self.include_extensions)
+        # Compute both copies before assigning — the object is never partially mutated
+        # if an error were raised between the two assignments.
+        exclude_paths_copy = list(self.exclude_paths)
+        include_extensions_copy: list[str] | None = (
+            list(self.include_extensions) if self.include_extensions is not None else None
+        )
+        self.exclude_paths = exclude_paths_copy
+        self.include_extensions = include_extensions_copy
