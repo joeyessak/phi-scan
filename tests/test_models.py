@@ -43,6 +43,9 @@ _INVALID_VALUE_HASH_TOO_LONG: str = "a" * (SHA256_HEX_DIGEST_LENGTH + 1)
 _INVALID_VALUE_HASH_NON_HEX: str = "z" * SHA256_HEX_DIGEST_LENGTH
 # Uppercase hex is not a valid SHA-256 hex digest — must be lowercase [0-9a-f].
 _INVALID_VALUE_HASH_UPPERCASE_HEX: str = "A" * SHA256_HEX_DIGEST_LENGTH
+# Arbitrary confidence value used to exercise FrozenInstanceError — the exact
+# value is irrelevant; any valid score in [0.0, 1.0] triggers the same error.
+_ARBITRARY_CONFIDENCE_FOR_MUTATION_ATTEMPT: float = 0.5
 
 
 def _build_scan_finding() -> ScanFinding:
@@ -132,7 +135,7 @@ def test_scan_finding_is_immutable() -> None:
     finding = _build_scan_finding()
 
     with pytest.raises(FrozenInstanceError):
-        finding.confidence = 0.5  # type: ignore[misc]
+        finding.confidence = _ARBITRARY_CONFIDENCE_FOR_MUTATION_ATTEMPT  # type: ignore[misc]
 
 
 # ---------------------------------------------------------------------------
@@ -258,13 +261,10 @@ _INVALID_FILES_WITH_FINDINGS_TOO_HIGH: int = _RESULT_FILES_SCANNED + 1
 _INVALID_SCAN_DURATION_NEGATIVE: float = -0.001
 
 
-def _build_scan_result(
-    findings: tuple[ScanFinding, ...] | None = None,
-) -> ScanResult:
+def _build_scan_result() -> ScanResult:
     """Return a populated ScanResult for use across multiple tests."""
-    findings_to_use = findings if findings is not None else (_build_scan_finding(),)
     return ScanResult(
-        findings=findings_to_use,
+        findings=(_build_scan_finding(),),
         files_scanned=_RESULT_FILES_SCANNED,
         files_with_findings=_RESULT_FILES_WITH_FINDINGS,
         scan_duration=_RESULT_SCAN_DURATION,
@@ -276,11 +276,11 @@ def _build_scan_result(
 
 
 def test_scan_result_stores_findings() -> None:
-    finding = _build_scan_finding()
+    expected_finding = _build_scan_finding()
 
-    scan_result = _build_scan_result(findings=(finding,))
+    scan_result = _build_scan_result()
 
-    assert scan_result.findings == (finding,)
+    assert scan_result.findings == (expected_finding,)
 
 
 def test_scan_result_stores_files_scanned() -> None:
@@ -372,18 +372,22 @@ def test_scan_result_raises_phi_detection_error_when_is_clean_true_with_findings
         )
 
 
-def test_scan_result_raises_phi_detection_error_when_is_clean_false_with_empty_findings() -> None:
-    with pytest.raises(PhiDetectionError):
-        ScanResult(
-            findings=(),
-            files_scanned=_RESULT_FILES_SCANNED,
-            files_with_findings=_RESULT_FILES_WITH_FINDINGS_ZERO,
-            scan_duration=_RESULT_SCAN_DURATION,
-            is_clean=False,
-            risk_level=RiskLevel.LOW,
-            severity_counts=MappingProxyType({}),
-            category_counts=MappingProxyType({}),
-        )
+def test_scan_result_accepts_is_clean_false_with_empty_findings() -> None:
+    # findings=() with is_clean=False is valid when all raw detections were below
+    # the confidence threshold and filtered out before the result was built.
+    result = ScanResult(
+        findings=(),
+        files_scanned=_RESULT_FILES_SCANNED,
+        files_with_findings=_RESULT_FILES_WITH_FINDINGS_ZERO,
+        scan_duration=_RESULT_SCAN_DURATION,
+        is_clean=False,
+        risk_level=RiskLevel.LOW,
+        severity_counts=MappingProxyType({}),
+        category_counts=MappingProxyType({}),
+    )
+
+    assert result.is_clean is False
+    assert result.findings == ()
 
 
 def test_scan_result_raises_phi_detection_error_when_files_scanned_is_negative() -> None:

@@ -106,6 +106,8 @@ class ScanResult:
         files_with_findings: Number of files that contained at least one finding.
         scan_duration: Wall-clock time in seconds the scan took to complete.
         is_clean: True when the scan produced zero findings at or above the threshold.
+            False when at least one finding met the threshold — or when findings is empty
+            because all raw detections were below the confidence threshold and filtered out.
         risk_level: Overall risk classification for the scanned codebase.
         severity_counts: Number of findings per severity level.
         category_counts: Number of findings per HIPAA PHI category.
@@ -121,13 +123,13 @@ class ScanResult:
     category_counts: MappingProxyType[PhiCategory, int]
 
     def __post_init__(self) -> None:
-        _validate_scan_result_file_counts(self)
-        _validate_scan_result_duration(self)
-        _validate_is_clean_findings_agreement(self)
-        _validate_is_clean_risk_level_agreement(self)
+        _check_scan_result_file_counts(self)
+        _check_scan_result_duration(self)
+        _check_is_clean_findings_agreement(self)
+        _check_is_clean_risk_level_agreement(self)
 
 
-def _validate_scan_result_file_counts(result: ScanResult) -> None:
+def _check_scan_result_file_counts(result: ScanResult) -> None:
     if result.files_scanned < _MINIMUM_ELIGIBLE_FILE_COUNT:
         raise PhiDetectionError(
             f"files_scanned ({result.files_scanned}) must be >= {_MINIMUM_ELIGIBLE_FILE_COUNT}"
@@ -144,27 +146,22 @@ def _validate_scan_result_file_counts(result: ScanResult) -> None:
         )
 
 
-def _validate_scan_result_duration(result: ScanResult) -> None:
+def _check_scan_result_duration(result: ScanResult) -> None:
     if result.scan_duration < _MINIMUM_SCAN_DURATION:
         raise PhiDetectionError(
             f"scan_duration ({result.scan_duration!r}) must be >= {_MINIMUM_SCAN_DURATION}"
         )
 
 
-def _validate_is_clean_findings_agreement(result: ScanResult) -> None:
+def _check_is_clean_findings_agreement(result: ScanResult) -> None:
     if result.is_clean and result.findings:
         raise PhiDetectionError(
             f"is_clean is True but findings contains {len(result.findings)} finding(s) — "
             "a clean result must have zero findings"
         )
-    if not result.is_clean and not result.findings:
-        raise PhiDetectionError(
-            "is_clean is False but findings is empty — "
-            "a result with no findings must have is_clean=True"
-        )
 
 
-def _validate_is_clean_risk_level_agreement(result: ScanResult) -> None:
+def _check_is_clean_risk_level_agreement(result: ScanResult) -> None:
     if result.is_clean and result.risk_level != RiskLevel.CLEAN:
         raise PhiDetectionError(
             f"is_clean is True but risk_level is {result.risk_level!r} — "
@@ -223,8 +220,8 @@ class ScanConfig:
             raise ConfigurationError(
                 f"max_file_size_mb {self.max_file_size_mb!r} must be >= {_MINIMUM_FILE_SIZE_MB}"
             )
-        # Compute both copies before assigning — the object is never partially mutated
-        # if an error were raised between the two assignments.
+        # Compute both copies before assigning so both fields are updated together;
+        # readers of this object never observe one updated field and one original.
         exclude_paths_copy = list(self.exclude_paths)
         include_extensions_copy: list[str] | None = (
             list(self.include_extensions) if self.include_extensions is not None else None
