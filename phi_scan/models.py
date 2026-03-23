@@ -34,6 +34,9 @@ _MINIMUM_FILE_COUNT: int = 0
 _MINIMUM_SCAN_DURATION: float = 0.0
 # Zero is not a valid file-size limit — a scanner that skips all files is broken.
 _MINIMUM_FILE_SIZE_MB: int = 1
+# An empty list means "scan no files" — callers who want unrestricted scanning
+# must pass None, not []. Enforced to prevent silent HIPAA coverage gaps.
+_MINIMUM_INCLUDE_EXTENSIONS_COUNT: int = 1
 
 
 class _ConfigField(StrEnum):
@@ -281,54 +284,69 @@ class ScanConfig:
         super().__setattr__(name, value)
 
 
-def _validate_should_follow_symlinks(value: object) -> None:
-    if not isinstance(value, bool):
-        raise ConfigurationError(f"should_follow_symlinks must be a bool, got {value!r}")
-    if value:
+def _validate_should_follow_symlinks(should_follow_symlinks: object) -> None:
+    if not isinstance(should_follow_symlinks, bool):
+        raise ConfigurationError(
+            f"should_follow_symlinks must be a bool, got {should_follow_symlinks!r}"
+        )
+    if should_follow_symlinks:
         raise ConfigurationError(
             "should_follow_symlinks must be False — symlink traversal is prohibited "
             "to prevent infinite loops and directory escape attacks."
         )
 
 
-def _validate_max_file_size_mb(value: object) -> None:
-    if not isinstance(value, int) or isinstance(value, bool):
-        raise ConfigurationError(f"max_file_size_mb must be an int, got {value!r}")
-    if value < _MINIMUM_FILE_SIZE_MB:
-        raise ConfigurationError(f"max_file_size_mb {value!r} must be >= {_MINIMUM_FILE_SIZE_MB}")
+def _validate_max_file_size_mb(max_file_size_mb: object) -> None:
+    if not isinstance(max_file_size_mb, int) or isinstance(max_file_size_mb, bool):
+        raise ConfigurationError(f"max_file_size_mb must be an int, got {max_file_size_mb!r}")
+    if max_file_size_mb < _MINIMUM_FILE_SIZE_MB:
+        raise ConfigurationError(
+            f"max_file_size_mb {max_file_size_mb!r} must be >= {_MINIMUM_FILE_SIZE_MB}"
+        )
 
 
-def _validate_confidence_threshold(value: object) -> None:
+def _validate_confidence_threshold(confidence_threshold: object) -> None:
     # Strict float — confidence is a ratio; passing 1 (int) instead of 1.0 is a caller
     # bug. Unlike max_file_size_mb (a natural integer count), a confidence score has no
     # meaningful integer representation. No coercion is performed; strict type required.
-    if isinstance(value, bool) or not isinstance(value, float):
-        raise ConfigurationError(f"confidence_threshold must be a float, got {value!r}")
-    if not CONFIDENCE_SCORE_MINIMUM <= value <= CONFIDENCE_SCORE_MAXIMUM:
+    if isinstance(confidence_threshold, bool) or not isinstance(confidence_threshold, float):
         raise ConfigurationError(
-            f"confidence_threshold {value!r} is outside the valid range "
+            f"confidence_threshold must be a float, got {confidence_threshold!r}"
+        )
+    if not CONFIDENCE_SCORE_MINIMUM <= confidence_threshold <= CONFIDENCE_SCORE_MAXIMUM:
+        raise ConfigurationError(
+            f"confidence_threshold {confidence_threshold!r} is outside the valid range "
             f"[{CONFIDENCE_SCORE_MINIMUM}, {CONFIDENCE_SCORE_MAXIMUM}]"
         )
 
 
-def _validate_severity_threshold(value: object) -> None:
-    if not isinstance(value, SeverityLevel):
+def _validate_severity_threshold(severity_threshold: object) -> None:
+    if not isinstance(severity_threshold, SeverityLevel):
         raise ConfigurationError(
-            f"severity_threshold must be a SeverityLevel member, got {value!r}"
+            f"severity_threshold must be a SeverityLevel member, got {severity_threshold!r}"
         )
 
 
-def _validate_exclude_paths(value: object) -> None:
-    if not isinstance(value, list):
-        raise ConfigurationError(f"exclude_paths must be a list, got {value!r}")
-    if not all(isinstance(path_pattern, str) for path_pattern in value):
-        raise ConfigurationError(f"exclude_paths must be a list of strings, got {value!r}")
+def _validate_exclude_paths(exclude_paths: object) -> None:
+    if not isinstance(exclude_paths, list):
+        raise ConfigurationError(f"exclude_paths must be a list, got {exclude_paths!r}")
+    if not all(isinstance(path_pattern, str) for path_pattern in exclude_paths):
+        raise ConfigurationError(f"exclude_paths must be a list of strings, got {exclude_paths!r}")
 
 
-def _validate_include_extensions(value: object) -> None:
-    if value is None:
+def _validate_include_extensions(include_extensions: object) -> None:
+    if include_extensions is None:
         return
-    if not isinstance(value, list):
-        raise ConfigurationError(f"include_extensions must be a list or None, got {value!r}")
-    if not all(isinstance(extension, str) for extension in value):
-        raise ConfigurationError(f"include_extensions must be a list of strings, got {value!r}")
+    if not isinstance(include_extensions, list):
+        raise ConfigurationError(
+            f"include_extensions must be a list or None, got {include_extensions!r}"
+        )
+    if len(include_extensions) < _MINIMUM_INCLUDE_EXTENSIONS_COUNT:
+        raise ConfigurationError(
+            "include_extensions must not be empty — "
+            "use None to scan all non-binary text files regardless of extension"
+        )
+    if not all(isinstance(extension, str) for extension in include_extensions):
+        raise ConfigurationError(
+            f"include_extensions must be a list of strings, got {include_extensions!r}"
+        )
