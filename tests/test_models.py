@@ -584,6 +584,9 @@ _INCLUDE_EXTENSIONS_WITH_NON_STRING_ELEMENT: list[object] = [".py", None]
 # Empty include_extensions silently means "scan no files" — must be rejected to
 # prevent HIPAA coverage gaps where the scanner silently skips everything.
 _EMPTY_INCLUDE_EXTENSIONS: list[str] = []
+# Misspelled field name — exercises the __setattr__ unknown-attribute guard.
+_MISSPELLED_FIELD_NAME: str = "shold_follow_symlinks"
+_MISSPELLED_FIELD_VALUE: bool = True
 # A truthy non-bool — exercises the gap where `value is True` would silently
 # pass 1 (or any other truthy int) as should_follow_symlinks.
 _TRUTHY_NON_BOOL_SYMLINK_VALUE: int = 1
@@ -801,3 +804,12 @@ def test_scan_config_raises_when_include_extensions_is_empty_list() -> None:
     # Callers who want unrestricted scanning must pass None, not [].
     with pytest.raises(ConfigurationError):
         ScanConfig(include_extensions=_EMPTY_INCLUDE_EXTENSIONS)
+
+
+def test_scan_config_raises_when_unknown_attribute_is_assigned() -> None:
+    # A typo like shold_follow_symlinks would silently set a phantom attribute
+    # while leaving the real security control unchanged — reject unknown names.
+    config = ScanConfig()
+
+    with pytest.raises(ConfigurationError):
+        setattr(config, _MISSPELLED_FIELD_NAME, _MISSPELLED_FIELD_VALUE)

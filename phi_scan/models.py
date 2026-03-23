@@ -257,10 +257,9 @@ class ScanConfig:
     include_extensions: list[str] | None = None
 
     def __post_init__(self) -> None:
-        # Non-frozen dataclass __init__ uses normal attribute assignment, so
-        # __setattr__ fires for each field during construction and for the copy
-        # assignments below — list values pass type guards without error.
-        # Compute both copies before assigning so state is never partially updated.
+        # __init__ already validated both list fields via __setattr__; make
+        # defensive copies so the caller's original list cannot be mutated
+        # through a reference they still hold after construction.
         exclude_paths_copy = list(self.exclude_paths)
         include_extensions_copy: list[str] | None = (
             list(self.include_extensions) if self.include_extensions is not None else None
@@ -281,6 +280,14 @@ class ScanConfig:
             _validate_exclude_paths(value)
         elif name == _ConfigField.INCLUDE_EXTENSIONS:
             _validate_include_extensions(value)
+        else:
+            # Reject unknown attribute names — a typo like shold_follow_symlinks
+            # would otherwise set a phantom attribute while the real security
+            # control remains unchanged.
+            raise ConfigurationError(
+                f"ScanConfig has no field named {name!r} — "
+                "assignment to unknown attributes is not permitted"
+            )
         super().__setattr__(name, value)
 
 
