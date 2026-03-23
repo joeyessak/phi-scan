@@ -570,6 +570,10 @@ def test_scan_config_include_extensions_defensive_copy_isolates_caller() -> None
 
 _INVALID_MAX_FILE_SIZE_MB_ZERO: int = 0
 _INVALID_MAX_FILE_SIZE_MB_NEGATIVE: int = -1
+# An int value above CONFIDENCE_SCORE_MAXIMUM — exercises the gap where
+# isinstance(value, float) would silently skip int inputs in __setattr__.
+_INVALID_CONFIDENCE_THRESHOLD_AS_INT: int = 2
+_INVALID_SEVERITY_THRESHOLD: str = "not_a_severity"
 
 
 def test_scan_config_raises_configuration_error_for_max_file_size_mb_zero() -> None:
@@ -697,3 +701,19 @@ def test_scan_config_raises_when_confidence_threshold_out_of_range_post_construc
 
     with pytest.raises(ConfigurationError):
         config.confidence_threshold = _CONFIDENCE_ABOVE_MAXIMUM
+
+
+def test_scan_config_raises_when_confidence_threshold_set_to_out_of_range_int() -> None:
+    # int values must be range-checked — isinstance(value, float) would silently
+    # skip ints, allowing config.confidence_threshold = 2 to succeed without error.
+    config = ScanConfig()
+
+    with pytest.raises(ConfigurationError):
+        config.confidence_threshold = _INVALID_CONFIDENCE_THRESHOLD_AS_INT  # type: ignore[assignment]
+
+
+def test_scan_config_raises_when_severity_threshold_set_to_invalid_value() -> None:
+    config = ScanConfig()
+
+    with pytest.raises(ConfigurationError):
+        config.severity_threshold = _INVALID_SEVERITY_THRESHOLD  # type: ignore[assignment]

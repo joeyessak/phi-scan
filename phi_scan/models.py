@@ -124,13 +124,13 @@ class ScanResult:
     category_counts: MappingProxyType[PhiCategory, int]
 
     def __post_init__(self) -> None:
-        _validate_file_counts(self)
-        _validate_scan_duration(self)
-        _validate_clean_findings_consistency(self)
-        _validate_clean_risk_level_consistency(self)
+        _assert_file_counts_are_valid(self)
+        _assert_scan_duration_is_valid(self)
+        _assert_clean_findings_are_consistent(self)
+        _assert_clean_risk_level_is_consistent(self)
 
 
-def _validate_file_counts(result: ScanResult) -> None:
+def _assert_file_counts_are_valid(result: ScanResult) -> None:
     if result.files_scanned < _MINIMUM_ELIGIBLE_FILE_COUNT:
         raise PhiDetectionError(
             f"files_scanned ({result.files_scanned}) must be >= {_MINIMUM_ELIGIBLE_FILE_COUNT}"
@@ -147,14 +147,14 @@ def _validate_file_counts(result: ScanResult) -> None:
         )
 
 
-def _validate_scan_duration(result: ScanResult) -> None:
+def _assert_scan_duration_is_valid(result: ScanResult) -> None:
     if result.scan_duration < _MINIMUM_SCAN_DURATION:
         raise PhiDetectionError(
             f"scan_duration ({result.scan_duration!r}) must be >= {_MINIMUM_SCAN_DURATION}"
         )
 
 
-def _validate_clean_findings_consistency(result: ScanResult) -> None:
+def _assert_clean_findings_are_consistent(result: ScanResult) -> None:
     if result.is_clean and result.findings:
         raise PhiDetectionError(
             f"is_clean is True but findings contains {len(result.findings)} finding(s) — "
@@ -162,7 +162,7 @@ def _validate_clean_findings_consistency(result: ScanResult) -> None:
         )
 
 
-def _validate_clean_risk_level_consistency(result: ScanResult) -> None:
+def _assert_clean_risk_level_is_consistent(result: ScanResult) -> None:
     if result.is_clean and result.risk_level != RiskLevel.CLEAN:
         raise PhiDetectionError(
             f"is_clean is True but risk_level is {result.risk_level!r} — "
@@ -230,10 +230,18 @@ class ScanConfig:
                 raise ConfigurationError(
                     f"max_file_size_mb {value!r} must be >= {_MINIMUM_FILE_SIZE_MB}"
                 )
-        if name == "confidence_threshold" and isinstance(value, float):
+        if (
+            name == "confidence_threshold"
+            and isinstance(value, (int, float))
+            and not isinstance(value, bool)
+        ):
             if not CONFIDENCE_SCORE_MINIMUM <= value <= CONFIDENCE_SCORE_MAXIMUM:
                 raise ConfigurationError(
                     f"confidence_threshold {value!r} is outside the valid range "
                     f"[{CONFIDENCE_SCORE_MINIMUM}, {CONFIDENCE_SCORE_MAXIMUM}]"
                 )
+        if name == "severity_threshold" and not isinstance(value, SeverityLevel):
+            raise ConfigurationError(
+                f"severity_threshold must be a SeverityLevel member, got {value!r}"
+            )
         super().__setattr__(name, value)
