@@ -125,14 +125,16 @@ class ScanResult:
             raise PhiDetectionError(
                 f"files_with_findings ({self.files_with_findings}) must be >= {_MINIMUM_FILE_COUNT}"
             )
-        if self.scan_duration < _MINIMUM_SCAN_DURATION:
-            raise PhiDetectionError(
-                f"scan_duration ({self.scan_duration!r}) must be >= {_MINIMUM_SCAN_DURATION}"
-            )
         if self.files_with_findings > self.files_scanned:
             raise PhiDetectionError(
                 f"files_with_findings ({self.files_with_findings}) exceeds "
                 f"files_scanned ({self.files_scanned})"
+            )
+
+    def _validate_scan_duration(self) -> None:
+        if self.scan_duration < _MINIMUM_SCAN_DURATION:
+            raise PhiDetectionError(
+                f"scan_duration ({self.scan_duration!r}) must be >= {_MINIMUM_SCAN_DURATION}"
             )
 
     def _validate_clean_invariant(self) -> None:
@@ -154,6 +156,7 @@ class ScanResult:
 
     def __post_init__(self) -> None:
         self._validate_file_counts()
+        self._validate_scan_duration()
         self._validate_clean_invariant()
 
 
