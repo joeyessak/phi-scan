@@ -6,25 +6,31 @@ from pathlib import Path
 import pytest
 
 from phi_scan.constants import (
+    CONFIDENCE_SCORE_MAXIMUM,
+    CONFIDENCE_SCORE_MINIMUM,
     DEFAULT_CONFIDENCE_THRESHOLD,
     MAX_FILE_SIZE_MB,
+    DetectionLayer,
     PhiCategory,
     RiskLevel,
     SeverityLevel,
 )
+from phi_scan.exceptions import ConfigurationError
 from phi_scan.models import ScanConfig, ScanFinding, ScanResult
 
 # ---------------------------------------------------------------------------
 # ScanFinding fixture data — all fields required, no defaults
 # ---------------------------------------------------------------------------
 
+_SHA256_HEX_DIGEST_LENGTH: int = 64
+
 _FINDING_FILE_PATH: Path = Path("/project/src/patient_handler.py")
 _FINDING_LINE_NUMBER: int = 42
 _FINDING_ENTITY_TYPE: str = "us_ssn"
 _FINDING_HIPAA_CATEGORY: PhiCategory = PhiCategory.SSN
 _FINDING_CONFIDENCE: float = 0.95
-_FINDING_DETECTION_LAYER: int = 1
-_FINDING_VALUE_HASH: str = "a" * 64  # 64 hex chars = valid SHA-256 placeholder
+_FINDING_DETECTION_LAYER: DetectionLayer = DetectionLayer.REGEX
+_FINDING_VALUE_HASH: str = "a" * _SHA256_HEX_DIGEST_LENGTH
 _FINDING_SEVERITY: SeverityLevel = SeverityLevel.HIGH
 _FINDING_CODE_CONTEXT: str = "patient_ssn = '***-**-****'"
 _FINDING_REMEDIATION_HINT: str = "Replace SSN with synthetic value using 000-00-0000 format."
@@ -281,3 +287,87 @@ def test_scan_config_accepts_include_extensions_allowlist() -> None:
     config = ScanConfig(include_extensions=allowed_extensions)
 
     assert config.include_extensions == allowed_extensions
+
+
+# ---------------------------------------------------------------------------
+# Confidence boundary tests
+# ---------------------------------------------------------------------------
+
+_CONFIDENCE_BELOW_MINIMUM: float = CONFIDENCE_SCORE_MINIMUM - 0.001
+_CONFIDENCE_ABOVE_MAXIMUM: float = CONFIDENCE_SCORE_MAXIMUM + 0.001
+
+
+def test_scan_finding_accepts_minimum_confidence_boundary() -> None:
+    finding = ScanFinding(
+        file_path=_FINDING_FILE_PATH,
+        line_number=_FINDING_LINE_NUMBER,
+        entity_type=_FINDING_ENTITY_TYPE,
+        hipaa_category=_FINDING_HIPAA_CATEGORY,
+        confidence=CONFIDENCE_SCORE_MINIMUM,
+        detection_layer=_FINDING_DETECTION_LAYER,
+        value_hash=_FINDING_VALUE_HASH,
+        severity=_FINDING_SEVERITY,
+        code_context=_FINDING_CODE_CONTEXT,
+        remediation_hint=_FINDING_REMEDIATION_HINT,
+    )
+
+    assert finding.confidence == CONFIDENCE_SCORE_MINIMUM
+
+
+def test_scan_finding_accepts_maximum_confidence_boundary() -> None:
+    finding = ScanFinding(
+        file_path=_FINDING_FILE_PATH,
+        line_number=_FINDING_LINE_NUMBER,
+        entity_type=_FINDING_ENTITY_TYPE,
+        hipaa_category=_FINDING_HIPAA_CATEGORY,
+        confidence=CONFIDENCE_SCORE_MAXIMUM,
+        detection_layer=_FINDING_DETECTION_LAYER,
+        value_hash=_FINDING_VALUE_HASH,
+        severity=_FINDING_SEVERITY,
+        code_context=_FINDING_CODE_CONTEXT,
+        remediation_hint=_FINDING_REMEDIATION_HINT,
+    )
+
+    assert finding.confidence == CONFIDENCE_SCORE_MAXIMUM
+
+
+def test_scan_finding_raises_value_error_for_confidence_below_minimum() -> None:
+    with pytest.raises(ValueError):
+        ScanFinding(
+            file_path=_FINDING_FILE_PATH,
+            line_number=_FINDING_LINE_NUMBER,
+            entity_type=_FINDING_ENTITY_TYPE,
+            hipaa_category=_FINDING_HIPAA_CATEGORY,
+            confidence=_CONFIDENCE_BELOW_MINIMUM,
+            detection_layer=_FINDING_DETECTION_LAYER,
+            value_hash=_FINDING_VALUE_HASH,
+            severity=_FINDING_SEVERITY,
+            code_context=_FINDING_CODE_CONTEXT,
+            remediation_hint=_FINDING_REMEDIATION_HINT,
+        )
+
+
+def test_scan_finding_raises_value_error_for_confidence_above_maximum() -> None:
+    with pytest.raises(ValueError):
+        ScanFinding(
+            file_path=_FINDING_FILE_PATH,
+            line_number=_FINDING_LINE_NUMBER,
+            entity_type=_FINDING_ENTITY_TYPE,
+            hipaa_category=_FINDING_HIPAA_CATEGORY,
+            confidence=_CONFIDENCE_ABOVE_MAXIMUM,
+            detection_layer=_FINDING_DETECTION_LAYER,
+            value_hash=_FINDING_VALUE_HASH,
+            severity=_FINDING_SEVERITY,
+            code_context=_FINDING_CODE_CONTEXT,
+            remediation_hint=_FINDING_REMEDIATION_HINT,
+        )
+
+
+def test_scan_config_raises_configuration_error_for_threshold_below_minimum() -> None:
+    with pytest.raises(ConfigurationError):
+        ScanConfig(confidence_threshold=_CONFIDENCE_BELOW_MINIMUM)
+
+
+def test_scan_config_raises_configuration_error_for_threshold_above_maximum() -> None:
+    with pytest.raises(ConfigurationError):
+        ScanConfig(confidence_threshold=_CONFIDENCE_ABOVE_MAXIMUM)

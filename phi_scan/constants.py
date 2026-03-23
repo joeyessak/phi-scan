@@ -20,9 +20,11 @@ __all__ = [
     "CONFIDENCE_REGEX_MAX",
     "CONFIDENCE_REGEX_MIN",
     "CONFIDENCE_SCORE_MAXIMUM",
+    "CONFIDENCE_SCORE_MINIMUM",
     "DEFAULT_CONFIDENCE_THRESHOLD",
     "DEFAULT_CONFIG_FILENAME",
     "DEFAULT_IGNORE_FILENAME",
+    "DetectionLayer",
     "EXIT_CODE_CLEAN",
     "EXIT_CODE_VIOLATION",
     "HIPAA_REMEDIATION_GUIDANCE",
@@ -118,8 +120,11 @@ CONFIDENCE_LOW_FLOOR: float = 0.40
 # Confidence ranges by detection layer (informational — used in docs/logging)
 # ---------------------------------------------------------------------------
 
-# Absolute ceiling for any confidence score — used as the upper bound for
-# layer ranges and normalization. All CONFIDENCE_*_MAX values reference this.
+# Valid confidence scores occupy [CONFIDENCE_SCORE_MINIMUM, CONFIDENCE_SCORE_MAXIMUM].
+# Both bounds are inclusive. Scores outside this range are a bug in the detection layer.
+CONFIDENCE_SCORE_MINIMUM: float = 0.0
+# Absolute ceiling — used as the upper bound for layer ranges and normalization.
+# All CONFIDENCE_*_MAX values reference this.
 CONFIDENCE_SCORE_MAXIMUM: float = 1.0
 
 # Score bounds per detection layer — the range a layer assigns to its findings.
@@ -239,6 +244,19 @@ class SeverityLevel(StrEnum):
     LOW = "low"
     MEDIUM = "medium"
     HIGH = "high"
+
+
+class DetectionLayer(StrEnum):
+    """The four detection layers that can produce a ScanFinding.
+
+    Layers are applied in order: REGEX first (fastest, highest confidence),
+    then NLP, FHIR, and optionally AI. A finding records which layer observed it.
+    """
+
+    REGEX = "regex"
+    NLP = "nlp"
+    FHIR = "fhir"
+    AI = "ai"
 
 
 class RiskLevel(StrEnum):

@@ -6,12 +6,16 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from phi_scan.constants import (
+    CONFIDENCE_SCORE_MAXIMUM,
+    CONFIDENCE_SCORE_MINIMUM,
     DEFAULT_CONFIDENCE_THRESHOLD,
     MAX_FILE_SIZE_MB,
+    DetectionLayer,
     PhiCategory,
     RiskLevel,
     SeverityLevel,
 )
+from phi_scan.exceptions import ConfigurationError
 
 __all__ = [
     "ScanConfig",
@@ -33,7 +37,7 @@ class ScanFinding:
         entity_type: Pattern name that matched (e.g. "us_ssn", "email_address").
         hipaa_category: HIPAA Safe Harbor category of the detected identifier.
         confidence: Detection confidence score in the range [0.0, 1.0].
-        detection_layer: Layer that produced the finding (1=regex, 2=nlp, 3=fhir, 4=ai).
+        detection_layer: Layer that produced the finding.
         value_hash: SHA-256 hex digest of the raw detected value — never the raw value itself.
         severity: Severity level derived from the confidence score.
         code_context: Surrounding source lines shown in reports for human review.
@@ -45,11 +49,18 @@ class ScanFinding:
     entity_type: str
     hipaa_category: PhiCategory
     confidence: float
-    detection_layer: int
+    detection_layer: DetectionLayer
     value_hash: str
     severity: SeverityLevel
     code_context: str
     remediation_hint: str
+
+    def __post_init__(self) -> None:
+        if not CONFIDENCE_SCORE_MINIMUM <= self.confidence <= CONFIDENCE_SCORE_MAXIMUM:
+            raise ValueError(
+                f"confidence {self.confidence!r} is outside the valid range "
+                f"[{CONFIDENCE_SCORE_MINIMUM}, {CONFIDENCE_SCORE_MAXIMUM}]"
+            )
 
 
 @dataclass
@@ -101,3 +112,10 @@ class ScanConfig:
     should_follow_symlinks: bool = False
     max_file_size_mb: int = MAX_FILE_SIZE_MB
     include_extensions: list[str] | None = None
+
+    def __post_init__(self) -> None:
+        if not CONFIDENCE_SCORE_MINIMUM <= self.confidence_threshold <= CONFIDENCE_SCORE_MAXIMUM:
+            raise ConfigurationError(
+                f"confidence_threshold {self.confidence_threshold!r} is outside the valid range "
+                f"[{CONFIDENCE_SCORE_MINIMUM}, {CONFIDENCE_SCORE_MAXIMUM}]"
+            )
