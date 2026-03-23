@@ -34,6 +34,15 @@ _MINIMUM_SCAN_DURATION: float = 0.0
 # Zero is not a valid file-size limit — a scanner that skips all files is broken.
 _MINIMUM_FILE_SIZE_MB: int = 1
 
+# ScanConfig field name constants — used in __setattr__ dispatch to avoid bare
+# string literals in logic code (no-magic-values rule).
+_FIELD_SHOULD_FOLLOW_SYMLINKS: str = "should_follow_symlinks"
+_FIELD_MAX_FILE_SIZE_MB: str = "max_file_size_mb"
+_FIELD_CONFIDENCE_THRESHOLD: str = "confidence_threshold"
+_FIELD_SEVERITY_THRESHOLD: str = "severity_threshold"
+_FIELD_EXCLUDE_PATHS: str = "exclude_paths"
+_FIELD_INCLUDE_EXTENSIONS: str = "include_extensions"
+
 # Build the pattern string explicitly — avoids the non-obvious triple-brace
 # rf-string rf"[0-9a-f]{{{SHA256_HEX_DIGEST_LENGTH}}}". The result is "[0-9a-f]{64}".
 _SHA256_PATTERN_STRING: str = "[0-9a-f]{" + str(SHA256_HEX_DIGEST_LENGTH) + "}"
@@ -230,17 +239,17 @@ class ScanConfig:
         self.include_extensions = include_extensions_copy
 
     def __setattr__(self, name: str, value: object) -> None:
-        if name == "should_follow_symlinks":
+        if name == _FIELD_SHOULD_FOLLOW_SYMLINKS:
             _validate_should_follow_symlinks(value)
-        elif name == "max_file_size_mb":
+        elif name == _FIELD_MAX_FILE_SIZE_MB:
             _validate_max_file_size_mb(value)
-        elif name == "confidence_threshold":
+        elif name == _FIELD_CONFIDENCE_THRESHOLD:
             _validate_confidence_threshold(value)
-        elif name == "severity_threshold":
+        elif name == _FIELD_SEVERITY_THRESHOLD:
             _validate_severity_threshold(value)
-        elif name == "exclude_paths":
+        elif name == _FIELD_EXCLUDE_PATHS:
             _validate_exclude_paths(value)
-        elif name == "include_extensions":
+        elif name == _FIELD_INCLUDE_EXTENSIONS:
             _validate_include_extensions(value)
         super().__setattr__(name, value)
 
@@ -261,7 +270,7 @@ def _validate_max_file_size_mb(value: object) -> None:
 
 
 def _validate_confidence_threshold(value: object) -> None:
-    if isinstance(value, bool) or not isinstance(value, (int, float)):
+    if isinstance(value, bool) or not isinstance(value, float):
         raise ConfigurationError(f"confidence_threshold must be a float, got {value!r}")
     if not CONFIDENCE_SCORE_MINIMUM <= value <= CONFIDENCE_SCORE_MAXIMUM:
         raise ConfigurationError(
