@@ -45,13 +45,17 @@ _EXTENSION_DOT_PREFIX: str = "."
 
 
 class _ConfigField(StrEnum):
-    """Field names for ScanConfig — used in __setattr__ dispatch.
+    """Field names for ScanConfig — keys for the _FIELD_VALIDATORS dispatch dict.
 
-    StrEnum values equal the Python attribute names so Python's attribute
-    protocol (which passes field names as plain strings) can be compared
-    directly against enum members with ==. Using an enum instead of bare
-    string constants means a misspelled member raises AttributeError at
-    import time rather than silently skipping validation at runtime.
+    StrEnum subclasses str, so members have the same hash and equality as their
+    string values. _FIELD_VALIDATORS.get(name) where name is a plain str from
+    Python's attribute protocol correctly finds a _ConfigField key.
+
+    Typo protection: a misspelled member access like _ConfigField.COFIDENCE_THRESHOLD
+    raises AttributeError at module load time — before any ScanConfig is constructed.
+    This does not protect against a typo in the string value itself
+    (e.g. CONFIDENCE_THRESHOLD = "cofidence_threshold"), so values must be verified
+    against the actual dataclass field names.
     """
 
     SHOULD_FOLLOW_SYMLINKS = "should_follow_symlinks"
@@ -365,6 +369,11 @@ def _validate_include_extensions(include_extensions: object) -> None:
 # Defined after all _validate_* functions so the references are valid at module load.
 # __setattr__ resolves this name at call time (not at class definition time), so the
 # forward reference from inside the class body is safe.
+#
+# Lookup: __setattr__ receives name as a plain str. _ConfigField is a StrEnum, which
+# subclasses str, so _ConfigField members share str hash and equality. dict.get(name)
+# with a plain str key correctly finds a matching _ConfigField key — no explicit cast
+# or conversion is needed.
 _FIELD_VALIDATORS: dict[str, Callable[[object], None]] = {
     _ConfigField.SHOULD_FOLLOW_SYMLINKS: _validate_should_follow_symlinks,
     _ConfigField.MAX_FILE_SIZE_MB: _validate_max_file_size_mb,
