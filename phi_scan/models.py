@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
+from enum import StrEnum
 from pathlib import Path
 from types import MappingProxyType
 
@@ -29,19 +30,29 @@ __all__ = [
 _MINIMUM_LINE_NUMBER: int = 1
 # Both fields can legitimately be zero: a scan of an empty directory has
 # files_scanned=0, and a scan that finds no PHI has files_with_findings=0.
-_MINIMUM_ELIGIBLE_FILE_COUNT: int = 0
+_MINIMUM_FILE_COUNT: int = 0
 _MINIMUM_SCAN_DURATION: float = 0.0
 # Zero is not a valid file-size limit — a scanner that skips all files is broken.
 _MINIMUM_FILE_SIZE_MB: int = 1
 
-# ScanConfig field name constants — used in __setattr__ dispatch to avoid bare
-# string literals in logic code (no-magic-values rule).
-_FIELD_SHOULD_FOLLOW_SYMLINKS: str = "should_follow_symlinks"
-_FIELD_MAX_FILE_SIZE_MB: str = "max_file_size_mb"
-_FIELD_CONFIDENCE_THRESHOLD: str = "confidence_threshold"
-_FIELD_SEVERITY_THRESHOLD: str = "severity_threshold"
-_FIELD_EXCLUDE_PATHS: str = "exclude_paths"
-_FIELD_INCLUDE_EXTENSIONS: str = "include_extensions"
+
+class _ConfigField(StrEnum):
+    """Field names for ScanConfig — used in __setattr__ dispatch.
+
+    StrEnum values equal the Python attribute names so Python's attribute
+    protocol (which passes field names as plain strings) can be compared
+    directly against enum members with ==. Using an enum instead of bare
+    string constants means a misspelled member raises AttributeError at
+    import time rather than silently skipping validation at runtime.
+    """
+
+    SHOULD_FOLLOW_SYMLINKS = "should_follow_symlinks"
+    MAX_FILE_SIZE_MB = "max_file_size_mb"
+    CONFIDENCE_THRESHOLD = "confidence_threshold"
+    SEVERITY_THRESHOLD = "severity_threshold"
+    EXCLUDE_PATHS = "exclude_paths"
+    INCLUDE_EXTENSIONS = "include_extensions"
+
 
 # Build the pattern string explicitly — avoids the non-obvious triple-brace
 # rf-string rf"[0-9a-f]{{{SHA256_HEX_DIGEST_LENGTH}}}". The result is "[0-9a-f]{64}".
@@ -88,22 +99,34 @@ class ScanFinding:
     remediation_hint: str
 
     def __post_init__(self) -> None:
-        if self.line_number < _MINIMUM_LINE_NUMBER:
-            raise PhiDetectionError(
-                f"line_number {self.line_number!r} is invalid — "
-                f"line numbers are 1-indexed and must be >= {_MINIMUM_LINE_NUMBER}"
-            )
-        if not _VALID_SHA256_PATTERN.fullmatch(self.value_hash):
-            raise PhiDetectionError(
-                f"value_hash is not a valid SHA-256 hex digest — "
-                f"must be exactly {SHA256_HEX_DIGEST_LENGTH} lowercase hex characters [0-9a-f], "
-                f"got {len(self.value_hash)} characters"
-            )
-        if not CONFIDENCE_SCORE_MINIMUM <= self.confidence <= CONFIDENCE_SCORE_MAXIMUM:
-            raise PhiDetectionError(
-                f"confidence {self.confidence!r} is outside the valid range "
-                f"[{CONFIDENCE_SCORE_MINIMUM}, {CONFIDENCE_SCORE_MAXIMUM}]"
-            )
+        _reject_invalid_line_number(self)
+        _reject_invalid_value_hash(self)
+        _reject_out_of_range_confidence(self)
+
+
+def _reject_invalid_line_number(finding: ScanFinding) -> None:
+    if finding.line_number < _MINIMUM_LINE_NUMBER:
+        raise PhiDetectionError(
+            f"line_number {finding.line_number!r} is invalid — "
+            f"line numbers are 1-indexed and must be >= {_MINIMUM_LINE_NUMBER}"
+        )
+
+
+def _reject_invalid_value_hash(finding: ScanFinding) -> None:
+    if not _VALID_SHA256_PATTERN.fullmatch(finding.value_hash):
+        raise PhiDetectionError(
+            f"value_hash is not a valid SHA-256 hex digest — "
+            f"must be exactly {SHA256_HEX_DIGEST_LENGTH} lowercase hex characters [0-9a-f], "
+            f"got {len(finding.value_hash)} characters"
+        )
+
+
+def _reject_out_of_range_confidence(finding: ScanFinding) -> None:
+    if not CONFIDENCE_SCORE_MINIMUM <= finding.confidence <= CONFIDENCE_SCORE_MAXIMUM:
+        raise PhiDetectionError(
+            f"confidence {finding.confidence!r} is outside the valid range "
+            f"[{CONFIDENCE_SCORE_MINIMUM}, {CONFIDENCE_SCORE_MAXIMUM}]"
+        )
 
 
 @dataclass(frozen=True)
@@ -147,17 +170,16 @@ class ScanResult:
 
 
 def _reject_negative_files_scanned(result: ScanResult) -> None:
-    if result.files_scanned < _MINIMUM_ELIGIBLE_FILE_COUNT:
+    if result.files_scanned < _MINIMUM_FILE_COUNT:
         raise PhiDetectionError(
-            f"files_scanned ({result.files_scanned}) must be >= {_MINIMUM_ELIGIBLE_FILE_COUNT}"
+            f"files_scanned ({result.files_scanned}) must be >= {_MINIMUM_FILE_COUNT}"
         )
 
 
 def _reject_negative_files_with_findings(result: ScanResult) -> None:
-    if result.files_with_findings < _MINIMUM_ELIGIBLE_FILE_COUNT:
+    if result.files_with_findings < _MINIMUM_FILE_COUNT:
         raise PhiDetectionError(
-            f"files_with_findings ({result.files_with_findings}) "
-            f"must be >= {_MINIMUM_ELIGIBLE_FILE_COUNT}"
+            f"files_with_findings ({result.files_with_findings}) must be >= {_MINIMUM_FILE_COUNT}"
         )
 
 
@@ -213,10 +235,8 @@ class ScanConfig:
         confidence_threshold: Minimum confidence score [0.0, 1.0] for a finding to be reported.
         should_follow_symlinks: Must remain False — symlink traversal is prohibited.
             Raises ConfigurationError on construction or post-construction mutation
-            if set to True. The __setattr__ override enforces this at every assignment.
-            Known limitation: object.__setattr__(config, "should_follow_symlinks", True)
-            bypasses __setattr__ and is an accepted gap for this phase — callers must
-            not use object.__setattr__ to mutate security-critical fields.
+            if set to True. The __setattr__ override enforces this at every normal
+            assignment. Callers must not bypass __setattr__ via object.__setattr__.
         max_file_size_mb: Files larger than this value in megabytes are skipped.
         include_extensions: If set, only files with a suffix in this list are scanned.
             None (default) scans all non-binary text files regardless of extension.
@@ -246,17 +266,17 @@ class ScanConfig:
         self.include_extensions = include_extensions_copy
 
     def __setattr__(self, name: str, value: object) -> None:
-        if name == _FIELD_SHOULD_FOLLOW_SYMLINKS:
+        if name == _ConfigField.SHOULD_FOLLOW_SYMLINKS:
             _validate_should_follow_symlinks(value)
-        elif name == _FIELD_MAX_FILE_SIZE_MB:
+        elif name == _ConfigField.MAX_FILE_SIZE_MB:
             _validate_max_file_size_mb(value)
-        elif name == _FIELD_CONFIDENCE_THRESHOLD:
+        elif name == _ConfigField.CONFIDENCE_THRESHOLD:
             _validate_confidence_threshold(value)
-        elif name == _FIELD_SEVERITY_THRESHOLD:
+        elif name == _ConfigField.SEVERITY_THRESHOLD:
             _validate_severity_threshold(value)
-        elif name == _FIELD_EXCLUDE_PATHS:
+        elif name == _ConfigField.EXCLUDE_PATHS:
             _validate_exclude_paths(value)
-        elif name == _FIELD_INCLUDE_EXTENSIONS:
+        elif name == _ConfigField.INCLUDE_EXTENSIONS:
             _validate_include_extensions(value)
         super().__setattr__(name, value)
 
