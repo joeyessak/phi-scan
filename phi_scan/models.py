@@ -138,7 +138,8 @@ class ScanResult:
         _reject_files_with_findings_exceeding_files_scanned(self)
         _reject_negative_scan_duration(self)
         _reject_clean_result_with_findings(self)
-        _reject_mismatched_clean_flag_and_risk_level(self)
+        _reject_clean_flag_with_non_clean_risk_level(self)
+        _reject_non_clean_flag_with_clean_risk_level(self)
 
 
 def _reject_negative_files_scanned(result: ScanResult) -> None:
@@ -179,15 +180,15 @@ def _reject_clean_result_with_findings(result: ScanResult) -> None:
         )
 
 
-def _reject_mismatched_clean_flag_and_risk_level(result: ScanResult) -> None:
-    # is_clean and risk_level must agree: is_clean=True requires RiskLevel.CLEAN
-    # and is_clean=False requires any other RiskLevel. Both directions of the
-    # bi-conditional are enforced here so neither half can be bypassed in isolation.
+def _reject_clean_flag_with_non_clean_risk_level(result: ScanResult) -> None:
     if result.is_clean and result.risk_level != RiskLevel.CLEAN:
         raise PhiDetectionError(
             f"is_clean is True but risk_level is {result.risk_level!r} — "
             "a clean result must have RiskLevel.CLEAN"
         )
+
+
+def _reject_non_clean_flag_with_clean_risk_level(result: ScanResult) -> None:
     if not result.is_clean and result.risk_level == RiskLevel.CLEAN:
         raise PhiDetectionError(
             "risk_level is RiskLevel.CLEAN but is_clean is False — "
@@ -209,6 +210,9 @@ class ScanConfig:
         should_follow_symlinks: Must remain False — symlink traversal is prohibited.
             Raises ConfigurationError on construction or post-construction mutation
             if set to True. The __setattr__ override enforces this at every assignment.
+            Known limitation: object.__setattr__(config, "should_follow_symlinks", True)
+            bypasses __setattr__ and is an accepted gap for this phase — callers must
+            not use object.__setattr__ to mutate security-critical fields.
         max_file_size_mb: Files larger than this value in megabytes are skipped.
         include_extensions: If set, only files with a suffix in this list are scanned.
             None (default) scans all non-binary text files regardless of extension.
@@ -290,8 +294,14 @@ def _validate_severity_threshold(value: object) -> None:
 def _validate_exclude_paths(value: object) -> None:
     if not isinstance(value, list):
         raise ConfigurationError(f"exclude_paths must be a list, got {value!r}")
+    if not all(isinstance(element, str) for element in value):
+        raise ConfigurationError(f"exclude_paths must be a list of strings, got {value!r}")
 
 
 def _validate_include_extensions(value: object) -> None:
     if not (value is None or isinstance(value, list)):
         raise ConfigurationError(f"include_extensions must be a list or None, got {value!r}")
+    if isinstance(value, list) and not all(isinstance(element, str) for element in value):
+        raise ConfigurationError(
+            f"include_extensions must be a list of strings or None, got {value!r}"
+        )

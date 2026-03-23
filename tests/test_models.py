@@ -446,7 +446,7 @@ def test_scan_result_raises_phi_detection_error_when_files_with_findings_exceeds
         )
 
 
-def test_scan_result_raises_phi_detection_error_when_is_clean_true_with_wrong_risk_level() -> None:
+def test_scan_result_raises_phi_detection_error_when_clean_flag_with_non_clean_risk_level() -> None:
     with pytest.raises(PhiDetectionError):
         ScanResult(
             findings=(),
@@ -460,9 +460,7 @@ def test_scan_result_raises_phi_detection_error_when_is_clean_true_with_wrong_ri
         )
 
 
-def test_scan_result_raises_phi_detection_error_when_is_clean_false_with_clean_risk_level() -> None:
-    # is_clean=False with RiskLevel.CLEAN is a bi-conditional mismatch —
-    # both directions are enforced by _reject_mismatched_clean_flag_and_risk_level.
+def test_scan_result_raises_phi_detection_error_when_non_clean_flag_with_clean_risk_level() -> None:
     with pytest.raises(PhiDetectionError):
         ScanResult(
             findings=(_build_scan_finding(),),
@@ -580,6 +578,9 @@ _INVALID_SEVERITY_THRESHOLD: str = "not_a_severity"
 # String values passed where list fields are expected — must be rejected.
 _INVALID_EXCLUDE_PATHS_NON_LIST: str = "*.py"
 _INVALID_INCLUDE_EXTENSIONS_NON_LIST: str = ".py"
+# Lists containing non-string elements — must be rejected by element-type checks.
+_EXCLUDE_PATHS_WITH_NON_STRING_ELEMENT: list[object] = ["*.py", 42]
+_INCLUDE_EXTENSIONS_WITH_NON_STRING_ELEMENT: list[object] = [".py", None]
 # A truthy non-bool — exercises the gap where `value is True` would silently
 # pass 1 (or any other truthy int) as should_follow_symlinks.
 _TRUTHY_NON_BOOL_SYMLINK_VALUE: int = 1
@@ -778,3 +779,15 @@ def test_scan_config_raises_when_include_extensions_set_to_non_list() -> None:
 
     with pytest.raises(ConfigurationError):
         config.include_extensions = _INVALID_INCLUDE_EXTENSIONS_NON_LIST  # type: ignore[assignment]
+
+
+def test_scan_config_raises_when_exclude_paths_contains_non_string_element() -> None:
+    with pytest.raises(ConfigurationError):
+        ScanConfig(exclude_paths=_EXCLUDE_PATHS_WITH_NON_STRING_ELEMENT)  # type: ignore[arg-type]
+
+
+def test_scan_config_raises_when_include_extensions_contains_non_string_element() -> None:
+    with pytest.raises(ConfigurationError):
+        ScanConfig(
+            include_extensions=_INCLUDE_EXTENSIONS_WITH_NON_STRING_ELEMENT  # type: ignore[arg-type]
+        )
