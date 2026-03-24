@@ -17,12 +17,12 @@ __all__ = [
 
 _LOGGER_NAME: str = "phi_scan"
 LOG_FORMAT: str = "[%(asctime)s] %(levelname)s %(name)s: %(message)s"
-_DEFAULT_LOG_DIRECTORY: Path = Path.home() / ".phi-scanner"
-_DEFAULT_LOG_FILENAME: str = "phi-scan.log"
 _DEFAULT_CONSOLE_LEVEL: int = logging.WARNING
 _MAX_LOG_FILE_BYTES: int = 10 * 1024 * 1024
 _LOG_FILE_BACKUP_COUNT: int = 5
 _SILENCED_LOG_LEVEL: int = logging.CRITICAL + 1
+_SYMLINK_LOG_PATH_ERROR: str = "Log file path must not be a symlink: "
+_SYMLINK_LOG_PARENT_ERROR: str = "Log file path resolves through a symlink: "
 
 
 def get_logger(name: str | None = None) -> logging.Logger:
@@ -100,13 +100,19 @@ def _build_file_handler(log_file_path: Path) -> logging.handlers.RotatingFileHan
         A configured RotatingFileHandler at DEBUG level.
 
     Raises:
-        PhiScanLoggingError: If log_file_path resolves to a symlink. Following
-            symlinks during log writes could redirect output to arbitrary files.
+        PhiScanLoggingError: If log_file_path is a symlink or if any parent
+            directory component is a symlink. Either condition could redirect
+            log writes to an attacker-controlled destination.
     """
     expanded_path = log_file_path.expanduser()
     if expanded_path.is_symlink():
-        raise PhiScanLoggingError(f"Log file path must not be a symlink: {expanded_path}")
+        raise PhiScanLoggingError(f"{_SYMLINK_LOG_PATH_ERROR}{expanded_path}")
     resolved_path = expanded_path.resolve()
+    # Detects symlinks in parent directory components: resolve() follows them
+    # silently, so if resolved_path differs from the non-symlink-following
+    # absolute path, a symlinked parent was traversed.
+    if resolved_path != expanded_path.absolute():
+        raise PhiScanLoggingError(f"{_SYMLINK_LOG_PARENT_ERROR}{expanded_path}")
     resolved_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
 
     handler = logging.handlers.RotatingFileHandler(

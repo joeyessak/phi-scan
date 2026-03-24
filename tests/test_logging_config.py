@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Generator
 from pathlib import Path
 
 import pytest
@@ -14,7 +15,7 @@ _PHI_SCAN_LOGGER_NAME: str = "phi_scan"
 
 
 @pytest.fixture(autouse=True)
-def reset_phi_scan_logger() -> object:
+def reset_phi_scan_logger() -> Generator[None, None, None]:
     """Ensure each test starts and ends with a clean phi_scan logger state."""
     yield
     logger = logging.getLogger(_PHI_SCAN_LOGGER_NAME)
@@ -178,6 +179,19 @@ def test_configure_logging_raises_phi_scan_logging_error_for_symlinked_log_path(
 
     with pytest.raises(PhiScanLoggingError):
         configure_logging(log_file_path=symlink_path)
+
+
+def test_configure_logging_raises_phi_scan_logging_error_for_symlinked_parent_directory(
+    tmp_path: Path,
+) -> None:
+    real_dir = tmp_path / "real_dir"
+    real_dir.mkdir()
+    symlink_dir = tmp_path / "symlink_dir"
+    symlink_dir.symlink_to(real_dir)
+    log_file = symlink_dir / "phi-scan.log"
+
+    with pytest.raises(PhiScanLoggingError):
+        configure_logging(log_file_path=log_file)
 
 
 # ---------------------------------------------------------------------------
