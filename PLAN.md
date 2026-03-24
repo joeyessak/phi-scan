@@ -726,7 +726,8 @@ and can be wired in before or alongside the detection engine.
     or `11` inline in regex quantifiers — build the pattern string from the named constants.
 - [ ] **2B.2** Implement confidence scoring for regex matches (high confidence for structured patterns)
 - [ ] **2B.3** Extract matched value, compute SHA-256 hash (never store raw value)
-- [ ] **2B.4** Wire regex layer into `detect_phi_in_text_content()` — scan line-by-line
+- [ ] **2B.4** Implement `detect_phi_with_regex(file_content: str, file_path: Path) -> list[ScanFinding]`
+  — the Layer 1 delegated function; scans line-by-line using the pattern registry from 2B.1
 
 ### 2C — Layer 2: NLP Named Entity Recognition
 
@@ -734,7 +735,8 @@ and can be wired in before or alongside the detection engine.
 - [ ] **2C.2** Configure Presidio recognizers for: PERSON, GPE, DATE, ORG, LOCATION
 - [ ] **2C.3** Map Presidio entity types to HIPAA categories (Names → #1, Geographic → #2, etc.)
 - [ ] **2C.4** Set confidence thresholds — medium confidence findings flagged differently from high
-- [ ] **2C.5** Wire NLP layer into `detect_phi_in_text_content()` — runs after regex layer
+- [ ] **2C.5** Implement `detect_phi_with_nlp(file_content: str, file_path: Path) -> list[ScanFinding]`
+  — the Layer 2 delegated function; runs after regex layer; applies Presidio NLP recognition
 - [ ] **2C.6** Graceful degradation: if spaCy model not installed, skip NLP layer with warning log and suggest `phi-scan setup`
 
 ### 2D — Layer 3: Structured Healthcare Formats (FHIR R4 + HL7 v2)
@@ -746,7 +748,9 @@ a plugin because it appears in production healthcare codebases at least as often
 
 #### 2D-FHIR — FHIR R4 Schema Awareness
 
-- [ ] **2D.1** Create `fhir_recognizer.py` — custom FHIR R4 pattern detector
+- [ ] **2D.1** Create `fhir_recognizer.py` — custom FHIR R4 pattern detector; its detection logic
+  is called from `detect_phi_in_structured_content(file_content: str, file_path: Path) -> list[ScanFinding]`,
+  the Layer 3 delegated function that consolidates both FHIR and HL7 detection
 - [ ] **2D.2** Detect PHI-bearing FHIR field names in JSON/XML:
   - Patient: name, birthDate, address, telecom, identifier, photo, deceasedDateTime
   - Practitioner: name, identifier (NPI, DEA), telecom, address
@@ -761,7 +765,8 @@ a plugin because it appears in production healthcare codebases at least as often
   - AllergyIntolerance: patient, asserter, note
   - ImagingStudy: subject, referrer (DICOM metadata path — flag field presence, not binary)
 - [ ] **2D.3** Flag FHIR fields only when they contain non-synthetic/non-null values
-- [ ] **2D.4** Wire FHIR layer into `detect_phi_in_text_content()` — runs on .json and .xml files
+- [ ] **2D.4** Wire FHIR detection into `detect_phi_in_structured_content()` — the Layer 3
+  delegated function attempts FHIR structure detection on content that does not match HL7 format
 - [ ] **2D.5** Detect FHIR Bundle resources — scan all `entry.resource` objects within a Bundle
   regardless of resource type; Bundles are the transport envelope for all FHIR operations
 
@@ -778,9 +783,13 @@ in `.hl7`, `.msg`, or containing MSH segments in test fixtures are common source
   plan proposes compliant names but does not grant exemptions from the standards:
   - `is_hl7_message_format(file_content: str) -> bool` — returns True when content
     contains a valid MSH segment header; used as the entry guard before HL7 parsing.
-    The `is_` prefix satisfies the boolean naming rule at the function level. Call sites
-    may use it directly in a conditional (`if is_hl7_message_format(file_content):`) or
-    store it (`is_hl7_format = is_hl7_message_format(file_content)`) — both are compliant.
+    Naming rules satisfied: (1) the `is_` prefix satisfies the boolean-naming rule;
+    (2) the name reads as a predicate — "is [this content in] HL7 message format?" —
+    which satisfies the verb-noun pair requirement because `is_` acts as the predicate
+    verb and `hl7_message_format` is the noun phrase being tested. Both rules are met
+    without conflict. Call sites may use it directly in a conditional
+    (`if is_hl7_message_format(file_content):`) or store it
+    (`is_hl7_format = is_hl7_message_format(file_content)`) — both are compliant.
     This function must be called only from within the HL7 detection delegated function,
     not from `scan_file()` or `detect_phi_in_text_content()` directly.
   - `detect_phi_in_hl7_segment(segment: hl7.Segment, segment_field_categories: Mapping[str, PhiCategory])
@@ -790,8 +799,11 @@ in `.hl7`, `.msg`, or containing MSH segments in test fixtures are common source
     contract — the function must not mutate the lookup table it receives. The caller always
     passes a module-level constant defined in `hl7_scanner.py` (e.g. `_PID_FIELD_CATEGORIES`,
     `_NK1_FIELD_CATEGORIES`) — never a caller-constructed dict built at call time. These
-    per-segment lookup tables are module-private constants: the leading underscore is
-    mandatory, they must not appear in `__all__`, and no other module may import them.
+    per-segment lookup tables are module-private constants and must follow `UPPER_SNAKE_CASE`
+    with a leading underscore: `_PID_FIELD_CATEGORIES`, not `_pid_field_categories`. The
+    leading underscore is mandatory; they must not appear in `__all__`; no other module
+    may import them. The UPPER_SNAKE_CASE rule for module-level constants is not relaxed
+    for module-private names — only the leading underscore signals private scope.
     **Attribution creep notice:** this signature is currently 2 arguments and compliant.
     If `file_path` or `line_number` attribution context is ever needed inside this function,
     a `@dataclass Hl7ScanContext` must be introduced before a third argument is added —
@@ -814,8 +826,9 @@ in `.hl7`, `.msg`, or containing MSH segments in test fixtures are common source
 - [ ] **2D.8** Map HL7 v2 segment fields to HIPAA Safe Harbor categories:
   - PID.5 → PhiCategory.NAME; PID.7 → PhiCategory.DATE; PID.19 → PhiCategory.SSN
   - PID.11 → PhiCategory.GEOGRAPHIC; PID.13/14 → PhiCategory.PHONE; etc.
-- [ ] **2D.9** Wire HL7 v2 detection into `detect_phi_in_text_content()` — activated when
-  `is_hl7_message_format()` returns True for the file content
+- [ ] **2D.9** Wire HL7 v2 detection into `detect_phi_in_structured_content()` — the Layer 3
+  delegated function calls `is_hl7_message_format()` internally to decide whether to parse
+  as HL7; if True, it dispatches to the HL7 segment scanner; otherwise it attempts FHIR detection
 - [ ] **2D.10** Graceful degradation: if `hl7` library not installed, raise
   `MissingOptionalDependencyError` at the point of first use inside the function that
   needs the library. The import must be lazy (inside the function body), not at module
@@ -823,7 +836,7 @@ in `.hl7`, `.msg`, or containing MSH segments in test fixtures are common source
   to load and gives no function-level caller the chance to catch it.
   Implement a private helper that encapsulates the lazy import exactly once:
   ```python
-  def _require_hl7_library() -> types.ModuleType:
+  def _import_hl7_library() -> types.ModuleType:
       try:
           import hl7  # noqa: PLC0415 (intentional lazy import)
           return hl7
@@ -833,7 +846,7 @@ in `.hl7`, `.msg`, or containing MSH segments in test fixtures are common source
               " — install with: pip install phi-scan[hl7]"
           ) from import_error
   ```
-  Each HL7 function that needs the library calls `hl7_lib = _require_hl7_library()`
+  Each HL7 function that needs the library calls `hl7_lib = _import_hl7_library()`
   as its first statement. The caller of the HL7 detection delegated function catches
   `MissingOptionalDependencyError` specifically, logs a structured WARNING
   ("HL7 v2 scanning disabled — install phi-scan[hl7] to enable"), and continues with
@@ -861,14 +874,30 @@ in `.hl7`, `.msg`, or containing MSH segments in test fixtures are common source
   All four wire-in tasks below (2B.4, 2C.5, 2D.4, 2D.9) wire into
   `detect_phi_in_text_content()`, not `scan_file()`.
   The body of `detect_phi_in_text_content()` must consist exclusively of delegated function
-  calls — one call per detection layer, one call to `detect_quasi_identifier_combination()`,
-  and one call to `deduplicate_overlapping_findings(findings: list[ScanFinding]) ->
-  list[ScanFinding]`. No pattern matching, entity recognition, or structural parsing logic
-  may appear inline. If any step requires conditional logic or iteration, extract it to its
-  own named function. The 30-line maximum applies to this coordinator the same as any other
-  function — "only makes delegated calls" is not an exemption. As detection layers grow,
-  adding a layer must not push the coordinator past 30 lines; if it would, extract the
-  accumulation loop into a named helper.
+  calls. No pattern matching, entity recognition, or structural parsing logic may appear
+  inline. The 30-line maximum applies — "only makes delegated calls" is not an exemption.
+  The delegated layer functions (which must be named as specified here) are:
+  - `detect_phi_with_regex(file_content: str, file_path: Path) -> list[ScanFinding]` — Layer 1
+  - `detect_phi_with_nlp(file_content: str, file_path: Path) -> list[ScanFinding]` — Layer 2
+  - `detect_phi_in_structured_content(file_content: str, file_path: Path) -> list[ScanFinding]`
+    — Layer 3; internally calls `is_hl7_message_format()` and FHIR content detection to
+    decide which structured-format path to apply; consolidates HL7 and FHIR into one delegated call
+  The proposed body that verifies the 30-line claim (shown as a skeleton; docstring and
+  type imports are additional lines but do not count toward the 30-line function body limit):
+  ```python
+  def detect_phi_in_text_content(
+      file_content: str, file_path: Path
+  ) -> list[ScanFinding]:
+      all_findings: list[ScanFinding] = []
+      all_findings.extend(detect_phi_with_regex(file_content, file_path))
+      all_findings.extend(detect_phi_with_nlp(file_content, file_path))
+      all_findings.extend(detect_phi_in_structured_content(file_content, file_path))
+      all_findings.extend(detect_quasi_identifier_combination(all_findings))
+      return deduplicate_overlapping_findings(all_findings)
+  ```
+  This skeleton is 7 body lines. The 30-line limit is met with significant headroom.
+  If adding a future layer would exceed the limit, extract the `.extend()` accumulation
+  pattern into a named helper rather than inlining more calls.
 - [ ] **2E.2** Add `.phi-scanignore` support — patterns evaluated at every traversal depth
 - [ ] **2E.3** Add content-aware scan strategy — detect file type from content/extension for optimal scanning:
   - Structured data (.json, .xml, .yaml) → parse structure + scan values
@@ -932,6 +961,19 @@ in `.hl7`, `.msg`, or containing MSH segments in test fixtures are common source
     `MINIMUM_QUASI_IDENTIFIER_COUNT`.
   `detect_quasi_identifier_combination()` calls each evaluator in order, extends its result
   list, and returns. No combination rule logic may be implemented inline in the coordinator.
+  The proposed body that verifies the 30-line claim:
+  ```python
+  def detect_quasi_identifier_combination(
+      findings: list[ScanFinding],
+  ) -> list[ScanFinding]:
+      combination_findings: list[ScanFinding] = []
+      combination_findings.extend(evaluate_zip_dob_sex_combination(findings))
+      combination_findings.extend(evaluate_name_date_combination(findings))
+      combination_findings.extend(evaluate_age_geographic_combination(findings))
+      combination_findings.extend(evaluate_colocated_identifier_combination(findings))
+      return combination_findings
+  ```
+  This skeleton is 7 body lines. The 30-line limit is met with significant headroom.
   Each returned finding must be `PhiCategory.QUASI_IDENTIFIER_COMBINATION` with a note
   listing which fields triggered the rule. Do not reuse `PhiCategory.UNIQUE_ID` — conflating
   the two breaks compliance mapping at Layer 4.
