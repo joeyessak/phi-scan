@@ -177,6 +177,15 @@ and explain commands deferred to Phase 2).
     - `FICTIONAL_PHONE_SUBSCRIBER_MAX = 199` — end of FCC fictional subscriber range (555-0199)
     - `ZIP_CODE_SAFE_HARBOR_POPULATION_MIN = 20_000` — minimum census population for a 3-digit
       ZIP prefix to qualify as safe harbor under §164.514(b)(2)(i)
+  - Regex pattern string constants (prevent magic string literals in detection logic):
+    - `MBI_ALLOWED_LETTERS = "AC-HJ-KM-NP-RT-Y"` — CMS-approved letters for MBI positions
+      2, 3, 5, 6, 8, 9 (excludes S, L, O, I, B, Z per CMS specification); used to build
+      the MBI regex — never embed `AC-HJ-KM-NP-RT-Y` inline in any pattern string
+    - `SSN_EXCLUDED_AREA_NUMBERS: frozenset[int]` — SSA area numbers never assigned per
+      §205.20 regulations: `frozenset({666, *range(900, 1000)})`; used to build SSN exclusion
+      regex — never embed `666`, `900`, or `999` as literals in pattern strings
+    - `SUD_FIELD_NAME_PATTERNS: frozenset[str]` — 42 CFR Part 2 SUD-suggestive field names;
+      detection logic iterates this set — never embed the strings inline in detection code
   - `HIPAA_REMEDIATION_GUIDANCE` — dict mapping each `PhiCategory` member to specific
     remediation text; must cover all members including the two extended ones above
   - `SCHEMA_VERSION = 1` — audit DB schema version for migration tracking
@@ -637,9 +646,11 @@ and can be wired in before or alongside the detection engine.
   healthcare identifiers. Precision requirements are listed per pattern — over-flagging causes
   alert fatigue; under-flagging is a HIPAA violation risk:
   - **SSN** (XXX-XX-XXXX) — must exclude reserved ranges to suppress false positives on order
-    IDs and version strings: `000-XX-XXXX`, `XXX-00-XXXX`, `XXX-XX-0000`, `666-XX-XXXX`,
-    `900-XX-XXXX` through `999-XX-XXXX` (§205.20 SSA regulations; these area/group/serial combos are never
-    assigned). Do not flag these ranges.
+    IDs and version strings (§205.20 SSA regulations; these area/group/serial combos are never
+    assigned): area `000`, group `00`, serial `0000`, and all area numbers in
+    `SSN_EXCLUDED_AREA_NUMBERS` (which contains 666 and the range 900–999). The exclusion
+    regex must be constructed from `SSN_EXCLUDED_AREA_NUMBERS` — never embed `666`, `900`, or
+    `999` as literals in pattern strings.
   - **MRN** — 6-10 digit numeric adjacent to MRN-suggestive variable names (`mrn`, `medical_record`,
     `patient_id`, `chart_number`); bare 6-10 digit strings without context are low-confidence only
   - **NPI** — 10-digit with Luhn check digit validation. **Type 1 (individual provider):** PHI when
@@ -647,11 +658,13 @@ and can be wired in before or alongside the detection engine.
     identifier, not PHI — do not flag when context is clearly organizational (e.g., assigned to a
     hospital object, not a patient record). Distinguish via surrounding variable/key name context.
   - **MBI (Medicare Beneficiary Identifier)** — `MBI_CHARACTER_COUNT`-character alphanumeric
-    pattern `[1-9][AC-HJ-KM-NP-RT-Y][AC-HJ-KM-NP-RT-Y0-9][0-9][AC-HJ-KM-NP-RT-Y][AC-HJ-KM-NP-RT-Y0-9]
-    [0-9][AC-HJ-KM-NP-RT-Y][AC-HJ-KM-NP-RT-Y][0-9][0-9]`. This is the primary Medicare identifier
-    since 2019, replacing the SSN-based HICN. High-confidence when the pattern matches exactly.
-    The regex quantifier must reference `MBI_CHARACTER_COUNT` via an f-string or pre-compiled
-    constant — never use the literal `11` inline.
+    pattern built from `MBI_ALLOWED_LETTERS` (the CMS-approved letter set, excluding S, L, O,
+    I, B, Z). The structural pattern is:
+    `[1-9][{L}][{L}0-9][0-9][{L}][{L}0-9][0-9][{L}][{L}][0-9][0-9]` where `{L}` expands
+    to `MBI_ALLOWED_LETTERS`. This is the primary Medicare identifier since 2019, replacing
+    the SSN-based HICN. High-confidence when the pattern matches exactly.
+    Neither `MBI_CHARACTER_COUNT` nor the character class string `AC-HJ-KM-NP-RT-Y` may
+    appear as inline literals in detection logic — both must reference named constants.
   - **DEA number** — 2-letter prefix + `DEA_NUMBER_DIGIT_COUNT` digits with checksum:
     sum of digits 1+3+5 + 2×(2+4+6) must equal last digit mod 10. Validate checksum to
     eliminate false positives. Never use the literal `7` in the regex quantifier.
@@ -760,11 +773,13 @@ in `.hl7`, `.msg`, or containing MSH segments in test fixtures are common source
 - [ ] **2D.7** Implement HL7 v2 scanning functions in `scanner.py` (or a dedicated
   `hl7_scanner.py` module). All names must comply with the project naming standards — the
   plan proposes compliant names but does not grant exemptions from the standards:
-  - `detect_hl7_message_format(file_content: str) -> bool` — returns True when content
-    contains a valid MSH segment header; used as the entry guard before parsing. Call sites
-    must store the return value in an `is_`-prefixed variable per the boolean naming rule:
-    `is_hl7_format = detect_hl7_message_format(file_content)`. Using the return value as
-    an anonymous expression without naming it is not permitted.
+  - `is_hl7_message_format(file_content: str) -> bool` — returns True when content
+    contains a valid MSH segment header; used as the entry guard before HL7 parsing.
+    The `is_` prefix satisfies the boolean naming rule at the function level. Call sites
+    may use it directly in a conditional (`if is_hl7_message_format(file_content):`) or
+    store it (`is_hl7_format = is_hl7_message_format(file_content)`) — both are compliant.
+    This function must be called only from within the HL7 detection delegated function,
+    not from `scan_file()` or `detect_phi_in_text_content()` directly.
   - `detect_phi_in_hl7_segment(segment: hl7.Segment, segment_field_categories: Mapping[str, PhiCategory])
     -> list[ScanFinding]` — scans one parsed segment, returns findings; pure function,
     no side effects. `segment` is a parsed `hl7.Segment` instance, not a raw string.
@@ -792,7 +807,7 @@ in `.hl7`, `.msg`, or containing MSH segments in test fixtures are common source
   - PID.5 → PhiCategory.NAME; PID.7 → PhiCategory.DATE; PID.19 → PhiCategory.SSN
   - PID.11 → PhiCategory.GEOGRAPHIC; PID.13/14 → PhiCategory.PHONE; etc.
 - [ ] **2D.9** Wire HL7 v2 detection into `detect_phi_in_text_content()` — activated when
-  `detect_hl7_message_format()` returns True for the file content
+  `is_hl7_message_format()` returns True for the file content
 - [ ] **2D.10** Graceful degradation: if `hl7` library not installed, raise
   `MissingOptionalDependencyError` (added to `exceptions.py` in Phase 1B.3 — see below)
   at the point of first use, then catch it one level up to skip HL7 scanning and log a
@@ -817,22 +832,26 @@ in `.hl7`, `.msg`, or containing MSH segments in test fixtures are common source
 - [ ] **2E.1** Define a coordinator function `detect_phi_in_text_content(file_content: str,
   file_path: Path) -> list[ScanFinding]` that orchestrates all detection layers in order
   (regex → NLP → FHIR/HL7 → quasi-identifier combination) and deduplicates overlapping
-  findings before returning. `file_path` is passed solely so each returned `ScanFinding`
-  can record its source file for attribution (the `file_path` field on `ScanFinding`) —
-  it is attribution metadata only. `detect_phi_in_text_content()` must not inspect the
-  path extension or use `file_path` for any dispatch or routing decision. Format dispatch
-  (HL7 vs FHIR vs plain text) is the exclusive responsibility of `scan_file()`, which reads
-  the file, selects the appropriate branch, and then calls `detect_phi_in_text_content()`
-  with the resolved text content. `scan_file()` must not contain any detection logic itself.
-  This separation is required by the single-responsibility rule: `scan_file()` can be
-  described as "read a file and dispatch to the detector"; adding detection logic would
-  require "and", which is banned. All four wire-in tasks below (2B.4, 2C.5, 2D.4, 2D.9)
-  wire into `detect_phi_in_text_content()`, not `scan_file()`.
+  findings before returning. `file_path` is attribution metadata only — each returned
+  `ScanFinding` records it as its source file. `detect_phi_in_text_content()` must not
+  inspect `file_path` for any dispatch or routing decision.
+  `scan_file()` has one responsibility: read the file's text content and call
+  `detect_phi_in_text_content(file_content, file_path)`. It must not dispatch by format
+  (HL7 vs FHIR vs plain text) — doing so adds "select format" to its responsibility,
+  which requires "and" in its description and violates the single-responsibility rule.
+  `scan_file()` can be described as "read a file and initiate detection"; that must remain
+  its complete description. All format-detection gating lives inside each detection layer's
+  delegated function: the HL7 delegated function calls `is_hl7_message_format()` internally;
+  the FHIR delegated function examines content structure to decide whether to apply; the
+  regex and NLP layers apply to all text content unconditionally.
+  All four wire-in tasks below (2B.4, 2C.5, 2D.4, 2D.9) wire into
+  `detect_phi_in_text_content()`, not `scan_file()`.
   The body of `detect_phi_in_text_content()` must consist exclusively of delegated function
   calls — one call per detection layer, one call to `detect_quasi_identifier_combination()`,
-  and one call to a deduplication function. No pattern matching, entity recognition, or
-  structural parsing logic may appear inline inside `detect_phi_in_text_content()`. If any
-  step requires conditional logic or iteration, it must be extracted to its own named function.
+  and one call to `deduplicate_overlapping_findings(findings: list[ScanFinding]) ->
+  list[ScanFinding]`. No pattern matching, entity recognition, or structural parsing logic
+  may appear inline. If any step requires conditional logic or iteration, extract it to its
+  own named function.
 - [ ] **2E.2** Add `.phi-scanignore` support — patterns evaluated at every traversal depth
 - [ ] **2E.3** Add content-aware scan strategy — detect file type from content/extension for optimal scanning:
   - Structured data (.json, .xml, .yaml) → parse structure + scan values
@@ -910,7 +929,8 @@ Generate a git-applicable patch that developers can review and apply in seconds.
   - SSN → synthetic range `000-00-XXXX` (reserved non-real range)
   - MRN → synthetic `MRN-000001` through `MRN-999999`
   - Email → `user{N}@example.com` (RFC 2606 safe domain)
-  - Phone → `555-0100` to `555-0199` (reserved fictional range)
+  - Phone → `{FICTIONAL_PHONE_EXCHANGE}-0{FICTIONAL_PHONE_SUBSCRIBER_MIN}` to
+    `{FICTIONAL_PHONE_EXCHANGE}-0{FICTIONAL_PHONE_SUBSCRIBER_MAX}` (FCC reserved fictional range)
   - DOB/Dates → synthetic dates within plausible range (1950–2000)
   - Geographic → faker `fake.address()` (synthetic addresses)
   - IP address → RFC 5737 test range `192.0.2.X`, `198.51.100.X`
@@ -960,9 +980,11 @@ reflected in the Phase 4 documentation and compliance mapping.
   HITECH extended HIPAA to business associates and established breach notification thresholds.
 - [ ] **2H.1c** 42 CFR Part 2 (Substance Use Disorder) — stricter than HIPAA; requires
   explicit consent for disclosure even for treatment. The scanner must flag field names and
-  data patterns suggestive of SUD records: `substance_use`, `addiction_treatment`,
-  `sud_diagnosis`, `alcohol_abuse`, `opioid_treatment`, `methadone`, `buprenorphine`,
-  `naloxone`, treatment program names. Map detections to `PhiCategory.SUBSTANCE_USE_DISORDER`
+  data patterns defined in `SUD_FIELD_NAME_PATTERNS` (a `frozenset[str]` in `constants.py`
+  containing: `substance_use`, `addiction_treatment`, `sud_diagnosis`, `alcohol_abuse`,
+  `opioid_treatment`, `methadone`, `buprenorphine`, `naloxone`, and related treatment program
+  keywords). Detection logic must iterate over `SUD_FIELD_NAME_PATTERNS` — never embed these
+  strings as inline literals. Map detections to `PhiCategory.SUBSTANCE_USE_DISORDER`
   — a dedicated enum member added to `PhiCategory` in Phase 1B.2 (constants.py), not reused
   from an existing category. Do NOT map to `PhiCategory.UNIQUE_ID`; SUD records are a distinct
   regulatory category under a different statute with different consent requirements. Reusing

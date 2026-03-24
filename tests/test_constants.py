@@ -25,9 +25,12 @@ from phi_scan.constants import (
     KNOWN_BINARY_EXTENSIONS,
     MAX_FILE_SIZE_BYTES,
     MAX_FILE_SIZE_MB,
+    MBI_ALLOWED_LETTERS,
     MBI_CHARACTER_COUNT,
     MINIMUM_QUASI_IDENTIFIER_COUNT,
     QUASI_IDENTIFIER_PROXIMITY_WINDOW_LINES,
+    SSN_EXCLUDED_AREA_NUMBERS,
+    SUD_FIELD_NAME_PATTERNS,
     VIN_CHARACTER_COUNT,
     ZIP_CODE_SAFE_HARBOR_POPULATION_MIN,
     OutputFormat,
@@ -220,3 +223,64 @@ def test_zip_code_safe_harbor_population_min_is_positive() -> None:
     # the purpose of the constant entirely.
     assert isinstance(ZIP_CODE_SAFE_HARBOR_POPULATION_MIN, int)
     assert ZIP_CODE_SAFE_HARBOR_POPULATION_MIN > 0
+
+
+def test_mbi_allowed_letters_is_nonempty_string() -> None:
+    # MBI_ALLOWED_LETTERS encodes the CMS-approved character set; an empty string
+    # would produce a regex that matches nothing and silently disables MBI detection.
+    assert isinstance(MBI_ALLOWED_LETTERS, str)
+    assert len(MBI_ALLOWED_LETTERS) > 0
+
+
+def test_mbi_allowed_letters_excludes_cms_banned_characters() -> None:
+    # CMS explicitly bans S, L, O, I, B, Z to prevent visual ambiguity with digits.
+    # This test pins the exclusion — a drift here would cause false negatives on real MBIs.
+    for banned_char in ("S", "L", "O", "I", "B", "Z"):
+        assert banned_char not in MBI_ALLOWED_LETTERS, (
+            f"Banned character {banned_char!r} found in MBI_ALLOWED_LETTERS"
+        )
+
+
+def test_ssn_excluded_area_numbers_is_immutable() -> None:
+    assert isinstance(SSN_EXCLUDED_AREA_NUMBERS, frozenset)
+
+
+def test_ssn_excluded_area_numbers_contains_666() -> None:
+    # SSA area number 666 is permanently reserved and never assigned (§205.20).
+    assert 666 in SSN_EXCLUDED_AREA_NUMBERS
+
+
+def test_ssn_excluded_area_numbers_contains_full_900_to_999_range() -> None:
+    # SSA area numbers 900–999 are permanently reserved. Any gap would allow a reserved
+    # area number through the exclusion filter and produce false positives.
+    for area_number in range(900, 1000):
+        assert area_number in SSN_EXCLUDED_AREA_NUMBERS, (
+            f"Area number {area_number} missing from SSN_EXCLUDED_AREA_NUMBERS"
+        )
+
+
+def test_ssn_excluded_area_numbers_does_not_contain_valid_area_numbers() -> None:
+    # Spot-check that common valid area numbers are not accidentally excluded.
+    for valid_area in (100, 200, 500, 750, 899):
+        assert valid_area not in SSN_EXCLUDED_AREA_NUMBERS, (
+            f"Valid area number {valid_area} incorrectly excluded"
+        )
+
+
+def test_sud_field_name_patterns_is_immutable() -> None:
+    assert isinstance(SUD_FIELD_NAME_PATTERNS, frozenset)
+
+
+def test_sud_field_name_patterns_contains_core_42_cfr_part2_terms() -> None:
+    # These terms are the minimum set required for 42 CFR Part 2 SUD record detection.
+    # A regression that removes any of them would silently reduce compliance coverage.
+    required_terms = {"methadone", "buprenorphine", "naloxone", "substance_use"}
+    missing = required_terms - SUD_FIELD_NAME_PATTERNS
+    assert missing == set(), f"Required SUD terms missing: {missing}"
+
+
+def test_sud_field_name_patterns_are_lowercase() -> None:
+    # Detection logic lowercases the target before matching — all patterns must be
+    # lowercase to guarantee matches, since "Methadone" != "methadone" at comparison time.
+    malformed = [term for term in SUD_FIELD_NAME_PATTERNS if term != term.lower()]
+    assert malformed == [], f"Non-lowercase SUD patterns: {malformed}"

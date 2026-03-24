@@ -41,6 +41,7 @@ __all__ = [
     "BYTES_PER_MEGABYTE",
     "MAX_FILE_SIZE_BYTES",
     "MAX_FILE_SIZE_MB",
+    "MBI_ALLOWED_LETTERS",
     "MBI_CHARACTER_COUNT",
     "MINIMUM_QUASI_IDENTIFIER_COUNT",
     "OutputFormat",
@@ -48,6 +49,8 @@ __all__ = [
     "QUASI_IDENTIFIER_PROXIMITY_WINDOW_LINES",
     "RiskLevel",
     "SeverityLevel",
+    "SSN_EXCLUDED_AREA_NUMBERS",
+    "SUD_FIELD_NAME_PATTERNS",
     "VIN_CHARACTER_COUNT",
     "ZIP_CODE_SAFE_HARBOR_POPULATION_MIN",
 ]
@@ -267,6 +270,47 @@ FICTIONAL_PHONE_SUBSCRIBER_MAX: int = 199
 # The scanner cannot verify population counts, so it flags 3-digit prefixes
 # in patient-geographic context and defers the decision to the user.
 ZIP_CODE_SAFE_HARBOR_POPULATION_MIN: int = 20_000
+
+# ---------------------------------------------------------------------------
+# Regex pattern string constants
+# ---------------------------------------------------------------------------
+# These string/set constants encode structured pattern components. Using named
+# constants instead of inline string literals prevents copy-paste errors and
+# makes the compliance rationale traceable to its regulatory source.
+
+# CMS-approved letter set for MBI positions 2, 3, 5, 6, 8, and 9.
+# CMS excludes S, L, O, I, B, Z to avoid visual ambiguity with digits.
+# Use this in regex character classes: f"[{MBI_ALLOWED_LETTERS}]"
+# Never embed "AC-HJ-KM-NP-RT-Y" as an inline string in detection code.
+MBI_ALLOWED_LETTERS: str = "AC-HJ-KM-NP-RT-Y"
+
+# SSN area numbers that SSA has never assigned and never will (§205.20 regulations).
+# Area 000, group 00, and serial 0000 are additional exclusions but are enforced
+# structurally by the regex (zero fields), not by membership in this set.
+# Use this set to construct the area-number exclusion branch of the SSN regex.
+# Never embed 666, 900, or 999 as literals in pattern strings.
+SSN_EXCLUDED_AREA_NUMBERS: frozenset[int] = frozenset({666, *range(900, 1000)})
+
+# 42 CFR Part 2 substance use disorder field name patterns.
+# The scanner flags any variable name, JSON key, or column name that matches
+# a member of this set as a potential SUD record under 42 CFR Part 2.
+# Detection logic must iterate this constant — never embed these strings inline.
+SUD_FIELD_NAME_PATTERNS: frozenset[str] = frozenset(
+    {
+        "substance_use",
+        "addiction_treatment",
+        "sud_diagnosis",
+        "alcohol_abuse",
+        "opioid_treatment",
+        "methadone",
+        "buprenorphine",
+        "naloxone",
+        "substance_use_disorder",
+        "drug_treatment",
+        "detox_program",
+        "mat_program",
+    }
+)
 
 # ---------------------------------------------------------------------------
 # Database schema versions
