@@ -150,7 +150,17 @@ and explain commands deferred to Phase 2).
   - `EXIT_CODE_CLEAN = 0`, `EXIT_CODE_VIOLATION = 1`
   - Enums: `OutputFormat` (TABLE, JSON, SARIF, CSV, PDF, HTML, JUNIT, CODEQUALITY, GITLAB_SAST), `SeverityLevel` (LOW, MEDIUM, HIGH)
   - Enum: `RiskLevel` (CRITICAL, HIGH, MODERATE, LOW, CLEAN)
-  - `HIPAA_REMEDIATION_GUIDANCE` — dict mapping each HIPAA category to specific remediation text
+  - Enum: `PhiCategory` — 18 HIPAA Safe Harbor members (NAME through UNIQUE_ID) plus two
+    extended regulatory members that must be added here and not deferred:
+    - `SUBSTANCE_USE_DISORDER = "substance_use_disorder"` — 42 CFR Part 2 scope; distinct
+      statute with stricter consent rules; must not be aliased to UNIQUE_ID
+    - `QUASI_IDENTIFIER_COMBINATION = "quasi_identifier_combination"` — re-identification
+      risk from field combinations; not a Safe Harbor category; must not be aliased to UNIQUE_ID
+    Both members must also have entries in `HIPAA_REMEDIATION_GUIDANCE` in this same task.
+  - `QUASI_IDENTIFIER_PROXIMITY_WINDOW_LINES = 50` — module-level constant; referenced by
+    `detect_quasi_identifier_combination()` in Phase 2E.11
+  - `HIPAA_REMEDIATION_GUIDANCE` — dict mapping each `PhiCategory` member to specific
+    remediation text; must cover all members including the two extended ones above
   - `SCHEMA_VERSION = 1` — audit DB schema version for migration tracking
   - `CACHE_SCHEMA_VERSION = 1` — cache DB schema version
 - [x] **1B.3** `exceptions.py` — `PhiScanError` (base), `ConfigurationError`, `TraversalError`, `AuditLogError`, `SchemaMigrationError`
@@ -719,13 +729,15 @@ in `.hl7`, `.msg`, or containing MSH segments in test fixtures are common source
 - [ ] **2D.7** Implement HL7 v2 scanning functions in `scanner.py` (or a dedicated
   `hl7_scanner.py` module). All names must comply with the project naming standards — the
   plan proposes compliant names but does not grant exemptions from the standards:
-  - `identify_hl7_message_format(file_content: str) -> bool` — returns True when content
+  - `detect_hl7_message_format(file_content: str) -> bool` — returns True when content
     contains a valid MSH segment header; used as the entry guard before parsing
   - `detect_phi_in_hl7_segment(segment: hl7.Segment, segment_field_categories: Mapping[str, PhiCategory])
     -> list[ScanFinding]` — scans one parsed segment, returns findings; pure function,
     no side effects. `segment` is a parsed `hl7.Segment` instance, not a raw string.
     `segment_field_categories` is typed as `Mapping` (not `dict`) to enforce the read-only
-    contract — the function must not mutate the lookup table it receives.
+    contract — the function must not mutate the lookup table it receives. The caller always
+    passes a module-level constant defined in `hl7_scanner.py` (e.g. `_PID_FIELD_CATEGORIES`,
+    `_NK1_FIELD_CATEGORIES`) — never a caller-constructed dict built at call time.
   Parse and scan the following PHI-bearing segments using the `hl7` library:
   - **MSH** (Message Header) — MSH.4 (sending facility name can contain PHI in some systems)
   - **PID** (Patient Identification) — PID.3 (patient ID/MRN), PID.5 (patient name),
@@ -744,7 +756,7 @@ in `.hl7`, `.msg`, or containing MSH segments in test fixtures are common source
   - PID.5 → PhiCategory.NAME; PID.7 → PhiCategory.DATE; PID.19 → PhiCategory.SSN
   - PID.11 → PhiCategory.GEOGRAPHIC; PID.13/14 → PhiCategory.PHONE; etc.
 - [ ] **2D.9** Wire HL7 v2 detection into `detect_phi_in_text_content()` — activated when
-  `identify_hl7_message_format()` returns True for the file content
+  `detect_hl7_message_format()` returns True for the file content
 - [ ] **2D.10** Graceful degradation: if `hl7` library not installed, raise
   `MissingOptionalDependencyError` (added to `exceptions.py` in Phase 1B.3 — see below)
   at the point of first use, then catch it one level up to skip HL7 scanning and log a
@@ -769,13 +781,17 @@ in `.hl7`, `.msg`, or containing MSH segments in test fixtures are common source
 - [ ] **2E.1** Define a coordinator function `detect_phi_in_text_content(file_content: str,
   file_path: Path) -> list[ScanFinding]` that orchestrates all detection layers in order
   (regex → NLP → FHIR/HL7 → quasi-identifier combination) and deduplicates overlapping
-  findings before returning. `scan_file()` is responsible only for file I/O and format
-  dispatch — it reads the file, selects the appropriate branch (HL7, FHIR, plain text),
-  and delegates to `detect_phi_in_text_content()`. `scan_file()` must not contain any
-  detection logic itself. This separation is required by the single-responsibility rule:
-  `scan_file()` can be described as "read a file and dispatch to the detector"; adding
-  detection logic would require "and", which is banned. All four wire-in tasks below
-  (2B.4, 2C.5, 2D.4, 2D.9) wire into `detect_phi_in_text_content()`, not `scan_file()`.
+  findings before returning. `file_path` is passed solely so each returned `ScanFinding`
+  can record its source file for attribution (the `file_path` field on `ScanFinding`) —
+  it is attribution metadata only. `detect_phi_in_text_content()` must not inspect the
+  path extension or use `file_path` for any dispatch or routing decision. Format dispatch
+  (HL7 vs FHIR vs plain text) is the exclusive responsibility of `scan_file()`, which reads
+  the file, selects the appropriate branch, and then calls `detect_phi_in_text_content()`
+  with the resolved text content. `scan_file()` must not contain any detection logic itself.
+  This separation is required by the single-responsibility rule: `scan_file()` can be
+  described as "read a file and dispatch to the detector"; adding detection logic would
+  require "and", which is banned. All four wire-in tasks below (2B.4, 2C.5, 2D.4, 2D.9)
+  wire into `detect_phi_in_text_content()`, not `scan_file()`.
 - [ ] **2E.2** Add `.phi-scanignore` support — patterns evaluated at every traversal depth
 - [ ] **2E.3** Add content-aware scan strategy — detect file type from content/extension for optimal scanning:
   - Structured data (.json, .xml, .yaml) → parse structure + scan values
@@ -808,12 +824,14 @@ in `.hl7`, `.msg`, or containing MSH segments in test fixtures are common source
   - Remove .jar and .war from KNOWN_BINARY_EXTENSIONS in constants.py when this ships
   - Update `.phi-scanignore` Format Specification in PLAN.md to note archive inspection live
 - [ ] **2E.11** Quasi-identifier combination detection — implement as
-  `evaluate_quasi_identifier_combination(findings: list[ScanFinding]) -> ScanFinding | None`.
+  `detect_quasi_identifier_combination(findings: list[ScanFinding]) -> ScanFinding | None`.
   Returns a single `PhiCategory.QUASI_IDENTIFIER_COMBINATION` finding when the proximity and
   category conditions are met, or None when no combination risk is present. Called at the end
   of `detect_phi_in_text_content()` after all layer findings are collected. Pure function —
   no side effects, no I/O. The proximity window must be read from
-  `QUASI_IDENTIFIER_PROXIMITY_WINDOW_LINES` — never compare against the literal `50` directly.
+  `QUASI_IDENTIFIER_PROXIMITY_WINDOW_LINES` — a module-level `int` constant defined in
+  `phi_scan/constants.py` and exported in its `__all__`; import it from `phi_scan.constants`.
+  Never compare against the literal `50` directly.
   - ZIP code + date of birth + sex/gender → re-identification risk (Sweeney: 87% of US population
     uniquely identified by these three fields alone); boost combined confidence to HIGH even if
     each field alone would be MEDIUM or LOW
