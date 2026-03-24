@@ -122,9 +122,12 @@ def _find_rotating_file_handler(
     root_logger: logging.Logger,
 ) -> logging.handlers.RotatingFileHandler:
     """Return the RotatingFileHandler attached to root_logger."""
-    return next(
-        h for h in root_logger.handlers if isinstance(h, logging.handlers.RotatingFileHandler)
+    file_handler = next(
+        (h for h in root_logger.handlers if isinstance(h, logging.handlers.RotatingFileHandler)),
+        None,
     )
+    assert file_handler is not None, "No RotatingFileHandler attached to root logger"
+    return file_handler
 
 
 def test_configure_log_output_file_handler_is_at_debug_level(tmp_path: Path) -> None:
@@ -188,6 +191,21 @@ def test_configure_log_output_raises_phi_scan_logging_error_for_symlinked_parent
     symlink_dir = tmp_path / "symlink_dir"
     symlink_dir.symlink_to(real_dir)
     log_file = symlink_dir / "phi-scan.log"
+
+    with pytest.raises(PhiScanLoggingError):
+        configure_log_output(log_file_path=log_file)
+
+
+def test_configure_log_output_raises_phi_scan_logging_error_for_dotdot_path_through_symlink(
+    tmp_path: Path,
+) -> None:
+    # A path like /tmp/symlink_dir/../real_dir/phi-scan.log uses ".." to escape
+    # the symlink component — the parent walk catches symlink_dir regardless.
+    real_dir = tmp_path / "real_dir"
+    real_dir.mkdir()
+    symlink_dir = tmp_path / "symlink_dir"
+    symlink_dir.symlink_to(real_dir)
+    log_file = symlink_dir / ".." / "real_dir" / "phi-scan.log"
 
     with pytest.raises(PhiScanLoggingError):
         configure_log_output(log_file_path=log_file)

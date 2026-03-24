@@ -110,12 +110,11 @@ def _build_file_handler(log_file_path: Path) -> logging.handlers.RotatingFileHan
     expanded_path = log_file_path.expanduser()
     if expanded_path.is_symlink():
         raise PhiScanLoggingError(_SYMLINK_LOG_PATH_ERROR.format(path=expanded_path))
-    resolved_path = expanded_path.resolve()
-    # Detects symlinks in parent directory components: resolve() follows them
-    # silently, so if resolved_path differs from the non-symlink-following
-    # absolute path, a symlinked parent was traversed.
-    if resolved_path != expanded_path.absolute():
-        raise PhiScanLoggingError(_SYMLINK_LOG_PARENT_ERROR.format(path=expanded_path))
+    absolute_path = expanded_path.absolute()
+    for parent in absolute_path.parents:
+        if parent.exists() and parent.is_symlink():
+            raise PhiScanLoggingError(_SYMLINK_LOG_PARENT_ERROR.format(path=expanded_path))
+    resolved_path = absolute_path.resolve()
     try:
         resolved_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
     except OSError as error:
