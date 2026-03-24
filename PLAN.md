@@ -173,8 +173,10 @@ and explain commands deferred to Phase 2).
     - `ENSEMBL_GENE_ID_DIGIT_COUNT = 11` — digit count in an Ensembl gene ID (ENSG + 11 digits)
     - `FICTIONAL_PHONE_EXCHANGE = 555` — FCC-reserved fictional NANP exchange; exclude from
       real-phone detection; use for synthetic data generation in `phi-scan fix`
-    - `FICTIONAL_PHONE_SUBSCRIBER_MIN = 100` — start of FCC fictional subscriber range (555-0100)
-    - `FICTIONAL_PHONE_SUBSCRIBER_MAX = 199` — end of FCC fictional subscriber range (555-0199)
+    - `FICTIONAL_PHONE_SUBSCRIBER_DISPLAY_PREFIX = "0"` — leading zero required to render
+      4-digit NANP subscribers (100 → "0100"); must not appear as a bare `"0"` literal
+    - `FICTIONAL_PHONE_SUBSCRIBER_MIN = 100` — start of FCC fictional subscriber range (0100)
+    - `FICTIONAL_PHONE_SUBSCRIBER_MAX = 199` — end of FCC fictional subscriber range (0199)
     - `ZIP_CODE_SAFE_HARBOR_POPULATION_MIN = 20_000` — minimum census population for a 3-digit
       ZIP prefix to qualify as safe harbor under §164.514(b)(2)(i)
   - Regex pattern string constants (prevent magic string literals in detection logic):
@@ -568,8 +570,9 @@ from Phase 1 becomes a working scanner that finds real PHI. Also adds the deferr
 Phase 1 features: suppression system, scan cache, and explain commands.
 
 **Dependencies:** Phase 1 complete. `scan_file()` placeholder replaced with real detection.
-`scan_file()` delegates to `detect_phi_in_text_content()` — detection logic never lives
-directly in `scan_file()`.
+`scan_file()`'s single responsibility is "return the PHI findings for a given file path."
+Detection logic never lives directly in `scan_file()` — it delegates entirely to
+`detect_phi_in_text_content()`.
 
 **Version on completion: 0.2.0**
 
@@ -789,6 +792,11 @@ in `.hl7`, `.msg`, or containing MSH segments in test fixtures are common source
     `_NK1_FIELD_CATEGORIES`) — never a caller-constructed dict built at call time. These
     per-segment lookup tables are module-private constants: the leading underscore is
     mandatory, they must not appear in `__all__`, and no other module may import them.
+    **Attribution creep notice:** this signature is currently 2 arguments and compliant.
+    If `file_path` or `line_number` attribution context is ever needed inside this function,
+    a `@dataclass Hl7ScanContext` must be introduced before a third argument is added —
+    the 3-argument limit would be reached immediately. Do not add a third positional argument;
+    introduce the dataclass first.
   Parse and scan the following PHI-bearing segments using the `hl7` library:
   - **MSH** (Message Header) — MSH.4 (sending facility name can contain PHI in some systems)
   - **PID** (Patient Identification) — PID.3 (patient ID/MRN), PID.5 (patient name),
@@ -809,21 +817,27 @@ in `.hl7`, `.msg`, or containing MSH segments in test fixtures are common source
 - [ ] **2D.9** Wire HL7 v2 detection into `detect_phi_in_text_content()` — activated when
   `is_hl7_message_format()` returns True for the file content
 - [ ] **2D.10** Graceful degradation: if `hl7` library not installed, raise
-  `MissingOptionalDependencyError` (added to `exceptions.py` in Phase 1B.3 — see below)
-  at the point of first use, then catch it one level up to skip HL7 scanning and log a
-  structured WARNING: "HL7 v2 scanning disabled — install phi-scan[hl7] to enable".
-  Do NOT use `except ImportError: pass` — a bare `pass` silences the error and violates
-  the "Never silence errors" rule. The correct pattern is:
+  `MissingOptionalDependencyError` at the point of first use inside the function that
+  needs the library. The import must be lazy (inside the function body), not at module
+  level — a module-level `ImportError` causes the entire `hl7_scanner` module to fail
+  to load and gives no function-level caller the chance to catch it.
+  Implement a private helper that encapsulates the lazy import exactly once:
   ```python
-  try:
-      import hl7
-  except ImportError as import_error:
-      raise MissingOptionalDependencyError(
-          "hl7 is required for HL7 v2 scanning — install with: pip install phi-scan[hl7]"
-      ) from import_error
+  def _require_hl7_library() -> types.ModuleType:
+      try:
+          import hl7  # noqa: PLC0415 (intentional lazy import)
+          return hl7
+      except ImportError as import_error:
+          raise MissingOptionalDependencyError(
+              "hl7 is required for HL7 v2 scanning"
+              " — install with: pip install phi-scan[hl7]"
+          ) from import_error
   ```
-  The caller catches `MissingOptionalDependencyError` specifically, logs the warning,
-  and continues with other detection layers — it never catches bare `Exception`.
+  Each HL7 function that needs the library calls `hl7_lib = _require_hl7_library()`
+  as its first statement. The caller of the HL7 detection delegated function catches
+  `MissingOptionalDependencyError` specifically, logs a structured WARNING
+  ("HL7 v2 scanning disabled — install phi-scan[hl7] to enable"), and continues with
+  other detection layers. Never catch bare `Exception`; never use `except ImportError: pass`.
 - [ ] **2D.11** Add `hl7` to `[project.optional-dependencies]` in `pyproject.toml`:
   `hl7 = ["hl7>=0.4"]`; update `full` extra to include it
 
@@ -835,12 +849,12 @@ in `.hl7`, `.msg`, or containing MSH segments in test fixtures are common source
   findings before returning. `file_path` is attribution metadata only — each returned
   `ScanFinding` records it as its source file. `detect_phi_in_text_content()` must not
   inspect `file_path` for any dispatch or routing decision.
-  `scan_file()` has one responsibility: read the file's text content and call
-  `detect_phi_in_text_content(file_content, file_path)`. It must not dispatch by format
-  (HL7 vs FHIR vs plain text) — doing so adds "select format" to its responsibility,
-  which requires "and" in its description and violates the single-responsibility rule.
-  `scan_file()` can be described as "read a file and initiate detection"; that must remain
-  its complete description. All format-detection gating lives inside each detection layer's
+  `scan_file()`'s single responsibility is "return the PHI findings for a given file path."
+  The how — reading file bytes, decoding to text, calling `detect_phi_in_text_content()` —
+  is implementation detail, not a second responsibility. The function must not dispatch by
+  format (HL7 vs FHIR vs plain text) before calling the coordinator; doing so adds a
+  second named responsibility that violates the single-responsibility rule.
+  All format-detection gating lives inside each detection layer's
   delegated function: the HL7 delegated function calls `is_hl7_message_format()` internally;
   the FHIR delegated function examines content structure to decide whether to apply; the
   regex and NLP layers apply to all text content unconditionally.
@@ -851,7 +865,10 @@ in `.hl7`, `.msg`, or containing MSH segments in test fixtures are common source
   and one call to `deduplicate_overlapping_findings(findings: list[ScanFinding]) ->
   list[ScanFinding]`. No pattern matching, entity recognition, or structural parsing logic
   may appear inline. If any step requires conditional logic or iteration, extract it to its
-  own named function.
+  own named function. The 30-line maximum applies to this coordinator the same as any other
+  function — "only makes delegated calls" is not an exemption. As detection layers grow,
+  adding a layer must not push the coordinator past 30 lines; if it would, extract the
+  accumulation loop into a named helper.
 - [ ] **2E.2** Add `.phi-scanignore` support — patterns evaluated at every traversal depth
 - [ ] **2E.3** Add content-aware scan strategy — detect file type from content/extension for optimal scanning:
   - Structured data (.json, .xml, .yaml) → parse structure + scan values
@@ -884,39 +901,40 @@ in `.hl7`, `.msg`, or containing MSH segments in test fixtures are common source
   - Remove .jar and .war from KNOWN_BINARY_EXTENSIONS in constants.py when this ships
   - Update `.phi-scanignore` Format Specification in PLAN.md to note archive inspection live
 - [ ] **2E.11** Quasi-identifier combination detection — implement as
-  `detect_quasi_identifier_combination(findings: list[ScanFinding]) -> ScanFinding | None`.
-  Returns a single `PhiCategory.QUASI_IDENTIFIER_COMBINATION` finding when the proximity and
-  category conditions are met, or None when no combination risk is present. Called at the end
-  of `detect_phi_in_text_content()` after all layer findings are collected. Pure function —
+  `detect_quasi_identifier_combination(findings: list[ScanFinding]) -> list[ScanFinding]`.
+  Returns a list containing a single `PhiCategory.QUASI_IDENTIFIER_COMBINATION` finding when
+  a combination rule fires, or an empty list when no combination risk is present. An empty
+  list is the sentinel for "no match" — never return `None`. This return type is intentionally
+  consistent with every other detection function, which allows the coordinator to accumulate
+  results with `all_findings.extend(...)` without a None guard. Called at the end of
+  `detect_phi_in_text_content()` after all layer findings are collected. Pure function —
   no side effects, no I/O. The proximity window must be read from
   `QUASI_IDENTIFIER_PROXIMITY_WINDOW_LINES` — a module-level `int` constant defined in
   `phi_scan/constants.py` and exported in its `__all__`; import it from `phi_scan.constants`.
   Never compare against the literal `50` directly.
   Each combination rule is a separate function delegated to from the coordinator — this keeps
-  `detect_quasi_identifier_combination()` under 30 lines and gives each rule a testable name:
-  - `evaluate_zip_dob_sex_combination(findings: list[ScanFinding]) -> ScanFinding | None`
-    ZIP code + date of birth + sex/gender → re-identification risk (Sweeney: 87% of US population
-    uniquely identified by these three fields alone); boost combined confidence to HIGH even if
-    each field alone would be MEDIUM or LOW
-  - `evaluate_name_date_combination(findings: list[ScanFinding]) -> ScanFinding | None`
-    Name + any date → HIGH combined confidence regardless of individual scores
-  - `evaluate_age_geographic_combination(findings: list[ScanFinding]) -> ScanFinding | None`
-    Age > `HIPAA_AGE_RESTRICTION_THRESHOLD` (ages 91+) + any geographic finding → HIGH;
+  `detect_quasi_identifier_combination()` under 30 lines and gives each rule a testable name.
+  Sub-evaluators use the same `list[ScanFinding]` return convention (empty = no match):
+  - `evaluate_zip_dob_sex_combination(findings: list[ScanFinding]) -> list[ScanFinding]`
+    ZIP code + date of birth + sex/gender → re-identification risk (Sweeney: 87% of US
+    population uniquely identified by these three fields alone); return a finding at HIGH
+    confidence even if each field alone would be MEDIUM or LOW
+  - `evaluate_name_date_combination(findings: list[ScanFinding]) -> list[ScanFinding]`
+    Name + any date → return a HIGH confidence finding regardless of individual scores
+  - `evaluate_age_geographic_combination(findings: list[ScanFinding]) -> list[ScanFinding]`
+    Age > `HIPAA_AGE_RESTRICTION_THRESHOLD` (ages 91+) + any geographic finding → HIGH.
     HIPAA §164.514(b)(2)(i) restricts ages "over 90" specifically because they re-identify
     when combined with geographic data. Never compare against the literal `90` — reference
     `HIPAA_AGE_RESTRICTION_THRESHOLD` and check with `>`, not `>=`.
-  - `evaluate_colocated_identifier_combination(findings: list[ScanFinding]) -> ScanFinding | None`
+  - `evaluate_colocated_identifier_combination(findings: list[ScanFinding]) -> list[ScanFinding]`
     ≥ `MINIMUM_QUASI_IDENTIFIER_COUNT` distinct identifier categories present in the same
     JSON object or data structure → elevated risk level. Never use the literal `2` — reference
     `MINIMUM_QUASI_IDENTIFIER_COUNT`.
-  `detect_quasi_identifier_combination()` calls each evaluator in the order above and returns
-  the first non-None result, or None if no combination rule fires. No combination rule logic
-  may be implemented inline in the coordinator.
-  Report the finding as a single `PhiCategory.QUASI_IDENTIFIER_COMBINATION` finding with a
-  note listing which fields triggered the rule. `QUASI_IDENTIFIER_COMBINATION` is a distinct
-  enum member — do not reuse `PhiCategory.UNIQUE_ID`, which is reserved for HIPAA Safe Harbor
-  category #18 (unique identifying numbers). Conflating the two would break compliance mapping
-  at Layer 4.
+  `detect_quasi_identifier_combination()` calls each evaluator in order, extends its result
+  list, and returns. No combination rule logic may be implemented inline in the coordinator.
+  Each returned finding must be `PhiCategory.QUASI_IDENTIFIER_COMBINATION` with a note
+  listing which fields triggered the rule. Do not reuse `PhiCategory.UNIQUE_ID` — conflating
+  the two breaks compliance mapping at Layer 4.
 
 ### 2F — Auto-Fix Engine (`phi-scan fix`)
 
@@ -929,8 +947,10 @@ Generate a git-applicable patch that developers can review and apply in seconds.
   - SSN → synthetic range `000-00-XXXX` (reserved non-real range)
   - MRN → synthetic `MRN-000001` through `MRN-999999`
   - Email → `user{N}@example.com` (RFC 2606 safe domain)
-  - Phone → `{FICTIONAL_PHONE_EXCHANGE}-0{FICTIONAL_PHONE_SUBSCRIBER_MIN}` to
-    `{FICTIONAL_PHONE_EXCHANGE}-0{FICTIONAL_PHONE_SUBSCRIBER_MAX}` (FCC reserved fictional range)
+  - Phone → `{FICTIONAL_PHONE_EXCHANGE}-{FICTIONAL_PHONE_SUBSCRIBER_DISPLAY_PREFIX}{FICTIONAL_PHONE_SUBSCRIBER_MIN}`
+    to `{FICTIONAL_PHONE_EXCHANGE}-{FICTIONAL_PHONE_SUBSCRIBER_DISPLAY_PREFIX}{FICTIONAL_PHONE_SUBSCRIBER_MAX}`
+    (FCC reserved fictional range; the display prefix "0" pads the 4-digit subscriber
+    representation and must not appear as a bare string literal "0" in generation code)
   - DOB/Dates → synthetic dates within plausible range (1950–2000)
   - Geographic → faker `fake.address()` (synthetic addresses)
   - IP address → RFC 5737 test range `192.0.2.X`, `198.51.100.X`

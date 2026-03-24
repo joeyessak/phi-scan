@@ -18,6 +18,7 @@ from phi_scan.constants import (
     DEFAULT_CONFIDENCE_THRESHOLD,
     ENSEMBL_GENE_ID_DIGIT_COUNT,
     FICTIONAL_PHONE_EXCHANGE,
+    FICTIONAL_PHONE_SUBSCRIBER_DISPLAY_PREFIX,
     FICTIONAL_PHONE_SUBSCRIBER_MAX,
     FICTIONAL_PHONE_SUBSCRIBER_MIN,
     HIPAA_AGE_RESTRICTION_THRESHOLD,
@@ -210,6 +211,12 @@ def test_ensembl_gene_id_digit_count_is_eleven() -> None:
 def test_fictional_phone_subscriber_min_is_below_max() -> None:
     # The FCC fictional subscriber range must be a valid non-empty interval.
     assert FICTIONAL_PHONE_SUBSCRIBER_MIN < FICTIONAL_PHONE_SUBSCRIBER_MAX
+
+
+def test_fictional_phone_subscriber_display_prefix_is_single_zero() -> None:
+    # NANP subscribers in the 555-0100–0199 range require a leading zero to pad
+    # to 4 digits. A change here silently breaks synthetic phone number format.
+    assert FICTIONAL_PHONE_SUBSCRIBER_DISPLAY_PREFIX == "0"
 
 
 def test_fictional_phone_exchange_is_555() -> None:

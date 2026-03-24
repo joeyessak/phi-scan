@@ -33,6 +33,7 @@ __all__ = [
     "EXIT_CODE_CLEAN",
     "EXIT_CODE_VIOLATION",
     "FICTIONAL_PHONE_EXCHANGE",
+    "FICTIONAL_PHONE_SUBSCRIBER_DISPLAY_PREFIX",
     "FICTIONAL_PHONE_SUBSCRIBER_MAX",
     "FICTIONAL_PHONE_SUBSCRIBER_MIN",
     "HIPAA_AGE_RESTRICTION_THRESHOLD",
@@ -262,6 +263,11 @@ ENSEMBL_GENE_ID_DIGIT_COUNT: int = 11
 # subscribers and are safe for use in synthetic test data. The scanner excludes
 # this range to avoid false positives on test fixtures.
 FICTIONAL_PHONE_EXCHANGE: int = 555
+# NANP subscriber numbers are displayed as 4 digits. The integer constants
+# FICTIONAL_PHONE_SUBSCRIBER_MIN (100) and FICTIONAL_PHONE_SUBSCRIBER_MAX (199)
+# represent the numeric values, but the display format requires a leading zero
+# (0100–0199). Use this prefix when building strings, not a bare "0" literal.
+FICTIONAL_PHONE_SUBSCRIBER_DISPLAY_PREFIX: str = "0"
 FICTIONAL_PHONE_SUBSCRIBER_MIN: int = 100
 FICTIONAL_PHONE_SUBSCRIBER_MAX: int = 199
 
