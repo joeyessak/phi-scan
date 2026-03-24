@@ -10,19 +10,21 @@ from typing import TextIO
 from phi_scan.exceptions import PhiScanLoggingError
 
 __all__ = [
+    "LOGGER_NAME",
     "LOG_FORMAT",
-    "configure_logging",
+    "configure_log_output",
     "get_logger",
 ]
 
-_LOGGER_NAME: str = "phi_scan"
+LOGGER_NAME: str = "phi_scan"
 LOG_FORMAT: str = "[%(asctime)s] %(levelname)s %(name)s: %(message)s"
 _DEFAULT_CONSOLE_LEVEL: int = logging.WARNING
 _MAX_LOG_FILE_BYTES: int = 10 * 1024 * 1024
 _LOG_FILE_BACKUP_COUNT: int = 5
 _SILENCED_LOG_LEVEL: int = logging.CRITICAL + 1
-_SYMLINK_LOG_PATH_ERROR: str = "Log file path must not be a symlink: "
-_SYMLINK_LOG_PARENT_ERROR: str = "Log file path resolves through a symlink: "
+_SYMLINK_LOG_PATH_ERROR: str = "Log file path must not be a symlink: {path}"
+_SYMLINK_LOG_PARENT_ERROR: str = "Log file path resolves through a symlink: {path}"
+_LOG_DIRECTORY_CREATION_ERROR: str = "Cannot create log directory: {path}"
 
 
 def get_logger(name: str | None = None) -> logging.Logger:
@@ -36,11 +38,11 @@ def get_logger(name: str | None = None) -> logging.Logger:
         A Logger instance under the phi_scan hierarchy.
     """
     if name is None:
-        return logging.getLogger(_LOGGER_NAME)
-    return logging.getLogger(f"{_LOGGER_NAME}.{name}")
+        return logging.getLogger(LOGGER_NAME)
+    return logging.getLogger(f"{LOGGER_NAME}.{name}")
 
 
-def configure_logging(
+def configure_log_output(
     console_level: int = _DEFAULT_CONSOLE_LEVEL,
     log_file_path: Path | None = None,
     is_quiet: bool = False,
@@ -60,9 +62,10 @@ def configure_logging(
             handler level to CRITICAL+1 (effectively silenced). File handler
             is unaffected.
     """
-    root_logger = logging.getLogger(_LOGGER_NAME)
+    root_logger = logging.getLogger(LOGGER_NAME)
     root_logger.setLevel(logging.DEBUG)
-    root_logger.handlers.clear()
+    for handler in root_logger.handlers[:]:
+        root_logger.removeHandler(handler)
 
     console_handler = _build_console_handler(
         level=_SILENCED_LOG_LEVEL if is_quiet else console_level,
@@ -100,20 +103,25 @@ def _build_file_handler(log_file_path: Path) -> logging.handlers.RotatingFileHan
         A configured RotatingFileHandler at DEBUG level.
 
     Raises:
-        PhiScanLoggingError: If log_file_path is a symlink or if any parent
-            directory component is a symlink. Either condition could redirect
-            log writes to an attacker-controlled destination.
+        PhiScanLoggingError: If log_file_path is a symlink, if any parent
+            directory component is a symlink, or if the log directory cannot
+            be created due to a permissions or OS error.
     """
     expanded_path = log_file_path.expanduser()
     if expanded_path.is_symlink():
-        raise PhiScanLoggingError(f"{_SYMLINK_LOG_PATH_ERROR}{expanded_path}")
+        raise PhiScanLoggingError(_SYMLINK_LOG_PATH_ERROR.format(path=expanded_path))
     resolved_path = expanded_path.resolve()
     # Detects symlinks in parent directory components: resolve() follows them
     # silently, so if resolved_path differs from the non-symlink-following
     # absolute path, a symlinked parent was traversed.
     if resolved_path != expanded_path.absolute():
-        raise PhiScanLoggingError(f"{_SYMLINK_LOG_PARENT_ERROR}{expanded_path}")
-    resolved_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        raise PhiScanLoggingError(_SYMLINK_LOG_PARENT_ERROR.format(path=expanded_path))
+    try:
+        resolved_path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+    except OSError as error:
+        raise PhiScanLoggingError(
+            _LOG_DIRECTORY_CREATION_ERROR.format(path=resolved_path.parent)
+        ) from error
 
     handler = logging.handlers.RotatingFileHandler(
         resolved_path,
