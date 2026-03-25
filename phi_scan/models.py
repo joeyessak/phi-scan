@@ -387,11 +387,27 @@ def _validate_include_extensions(include_extensions: object) -> None:
 
 
 def _validate_output_format(output_format: object) -> None:
+    """Raise ConfigurationError if output_format is not an OutputFormat member.
+
+    Args:
+        output_format: The value to validate.
+
+    Raises:
+        ConfigurationError: If output_format is not an instance of OutputFormat.
+    """
     if not isinstance(output_format, OutputFormat):
         raise ConfigurationError(_INVALID_OUTPUT_FORMAT_FIELD_ERROR.format(value=output_format))
 
 
 def _validate_database_path(database_path: object) -> None:
+    """Raise ConfigurationError if database_path is not a Path instance.
+
+    Args:
+        database_path: The value to validate.
+
+    Raises:
+        ConfigurationError: If database_path is not an instance of Path.
+    """
     if not isinstance(database_path, Path):
         raise ConfigurationError(_INVALID_DATABASE_PATH_FIELD_ERROR.format(value=database_path))
 

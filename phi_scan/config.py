@@ -192,7 +192,7 @@ def create_default_config(output_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _read_config_file(config_path: Path) -> dict[str, Any]:  # noqa: ANN401
+def _read_config_file(config_path: Path) -> dict[str, Any]:
     """Read and parse a YAML config file into a raw dict.
 
     Args:
@@ -211,16 +211,16 @@ def _read_config_file(config_path: Path) -> dict[str, Any]:  # noqa: ANN401
             _CONFIG_READ_ERROR.format(path=config_path, error=error)
         ) from error
     try:
-        raw = yaml.safe_load(content)
+        loaded_yaml = yaml.safe_load(content)
     except yaml.YAMLError as error:
         raise ConfigurationError(
             _CONFIG_PARSE_ERROR.format(path=config_path, error=error)
         ) from error
-    if not isinstance(raw, dict):
+    if not isinstance(loaded_yaml, dict):
         raise ConfigurationError(
-            _CONFIG_NOT_MAPPING_ERROR.format(path=config_path, type=type(raw).__name__)
+            _CONFIG_NOT_MAPPING_ERROR.format(path=config_path, type=type(loaded_yaml).__name__)
         )
-    return raw
+    return loaded_yaml
 
 
 def _reject_unsupported_version(raw_config: dict[str, Any]) -> None:
