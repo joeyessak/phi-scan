@@ -14,9 +14,11 @@ from phi_scan.constants import (
     CONFIDENCE_SCORE_MAXIMUM,
     CONFIDENCE_SCORE_MINIMUM,
     DEFAULT_CONFIDENCE_THRESHOLD,
+    DEFAULT_DATABASE_PATH,
     MAX_FILE_SIZE_MB,
     SHA256_HEX_DIGEST_LENGTH,
     DetectionLayer,
+    OutputFormat,
     PhiCategory,
     RiskLevel,
     SeverityLevel,
@@ -42,6 +44,14 @@ _MINIMUM_INCLUDE_EXTENSIONS_COUNT: int = 1
 # Extensions must start with a dot so they match pathlib.Path.suffix values
 # (e.g. ".py", not "py"). Bare extensions silently match nothing.
 _EXTENSION_DOT_PREFIX: str = "."
+# Distinct from config._INVALID_OUTPUT_FORMAT_ERROR (YAML key error) —
+# this fires when the ScanConfig field itself receives a non-OutputFormat value.
+_INVALID_OUTPUT_FORMAT_FIELD_ERROR: str = (
+    "output_format must be an OutputFormat member, got {value!r}"
+)
+# Distinct from config._INVALID_DATABASE_PATH_ERROR (YAML string-type error) —
+# this fires when the ScanConfig field itself receives a non-Path value.
+_INVALID_DATABASE_PATH_FIELD_ERROR: str = "database_path must be a Path, got {value!r}"
 
 
 class _ConfigField(StrEnum):
@@ -64,6 +74,8 @@ class _ConfigField(StrEnum):
     SEVERITY_THRESHOLD = "severity_threshold"
     EXCLUDE_PATHS = "exclude_paths"
     INCLUDE_EXTENSIONS = "include_extensions"
+    OUTPUT_FORMAT = "output_format"
+    DATABASE_PATH = "database_path"
 
 
 # Build the pattern string explicitly — avoids the non-obvious triple-brace
@@ -257,6 +269,9 @@ class ScanConfig:
         max_file_size_mb: Files larger than this value in megabytes are skipped.
         include_extensions: If set, only files with a suffix in this list are scanned.
             None (default) scans all non-binary text files regardless of extension.
+        output_format: Output format for scan results. Defaults to TABLE.
+        database_path: Path to the SQLite audit database. Tilde is expanded at
+            construction time via Path.expanduser().
     """
 
     # ScanConfig is intentionally mutable (not frozen=True) so callers can update
@@ -269,6 +284,8 @@ class ScanConfig:
     should_follow_symlinks: bool = False
     max_file_size_mb: int = MAX_FILE_SIZE_MB
     include_extensions: list[str] | None = None
+    output_format: OutputFormat = OutputFormat.TABLE
+    database_path: Path = field(default_factory=lambda: Path(DEFAULT_DATABASE_PATH).expanduser())
 
     def __post_init__(self) -> None:
         # __init__ already validated both list fields via __setattr__; make
@@ -369,6 +386,32 @@ def _validate_include_extensions(include_extensions: object) -> None:
         )
 
 
+def _validate_output_format(output_format: object) -> None:
+    """Raise ConfigurationError if output_format is not an OutputFormat member.
+
+    Args:
+        output_format: The value to validate.
+
+    Raises:
+        ConfigurationError: If output_format is not an instance of OutputFormat.
+    """
+    if not isinstance(output_format, OutputFormat):
+        raise ConfigurationError(_INVALID_OUTPUT_FORMAT_FIELD_ERROR.format(value=output_format))
+
+
+def _validate_database_path(database_path: object) -> None:
+    """Raise ConfigurationError if database_path is not a Path instance.
+
+    Args:
+        database_path: The value to validate.
+
+    Raises:
+        ConfigurationError: If database_path is not an instance of Path.
+    """
+    if not isinstance(database_path, Path):
+        raise ConfigurationError(_INVALID_DATABASE_PATH_FIELD_ERROR.format(value=database_path))
+
+
 # Dispatch table for ScanConfig.__setattr__ — maps each field name to its validator.
 # Defined after all _validate_* functions so the references are valid at module load.
 # __setattr__ resolves this name at call time (not at class definition time), so the
@@ -385,4 +428,6 @@ _FIELD_VALIDATORS: dict[str, Callable[[object], None]] = {
     _ConfigField.SEVERITY_THRESHOLD: _validate_severity_threshold,
     _ConfigField.EXCLUDE_PATHS: _validate_exclude_paths,
     _ConfigField.INCLUDE_EXTENSIONS: _validate_include_extensions,
+    _ConfigField.OUTPUT_FORMAT: _validate_output_format,
+    _ConfigField.DATABASE_PATH: _validate_database_path,
 }

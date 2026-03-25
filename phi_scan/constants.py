@@ -24,6 +24,7 @@ __all__ = [
     "CONFIDENCE_SCORE_MINIMUM",
     "DEFAULT_CONFIDENCE_THRESHOLD",
     "DEFAULT_CONFIG_FILENAME",
+    "DEFAULT_DATABASE_PATH",
     "DEFAULT_IGNORE_FILENAME",
     "DBSNP_RS_ID_MAX_DIGITS",
     "DBSNP_RS_ID_MIN_DIGITS",
@@ -61,6 +62,7 @@ __all__ = [
 # ---------------------------------------------------------------------------
 
 DEFAULT_CONFIG_FILENAME: str = ".phi-scanner.yml"
+DEFAULT_DATABASE_PATH: str = "~/.phi-scanner/audit.db"
 DEFAULT_IGNORE_FILENAME: str = ".phi-scanignore"
 
 # ---------------------------------------------------------------------------

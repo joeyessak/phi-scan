@@ -10,9 +10,11 @@ from phi_scan.constants import (
     CONFIDENCE_SCORE_MAXIMUM,
     CONFIDENCE_SCORE_MINIMUM,
     DEFAULT_CONFIDENCE_THRESHOLD,
+    DEFAULT_DATABASE_PATH,
     MAX_FILE_SIZE_MB,
     SHA256_HEX_DIGEST_LENGTH,
     DetectionLayer,
+    OutputFormat,
     PhiCategory,
     RiskLevel,
     SeverityLevel,
@@ -822,3 +824,51 @@ def test_scan_config_raises_when_include_extensions_entries_missing_dot_prefix()
     # silently scan nothing, a HIPAA coverage gap.
     with pytest.raises(ConfigurationError):
         ScanConfig(include_extensions=_INCLUDE_EXTENSIONS_MISSING_DOT_PREFIX)
+
+
+# ---------------------------------------------------------------------------
+# ScanConfig — output_format and database_path fields
+# ---------------------------------------------------------------------------
+
+_INVALID_OUTPUT_FORMAT: str = "not-a-format"
+_INVALID_DATABASE_PATH: int = 12345
+
+
+def test_scan_config_output_format_defaults_to_table() -> None:
+    config = ScanConfig()
+
+    assert config.output_format is OutputFormat.TABLE
+
+
+def test_scan_config_accepts_explicit_output_format() -> None:
+    config = ScanConfig(output_format=OutputFormat.JSON)
+
+    assert config.output_format is OutputFormat.JSON
+
+
+def test_scan_config_raises_configuration_error_for_invalid_output_format() -> None:
+    with pytest.raises(ConfigurationError):
+        ScanConfig(output_format=_INVALID_OUTPUT_FORMAT)  # type: ignore[arg-type]
+
+
+def test_scan_config_database_path_default_expands_tilde() -> None:
+    config = ScanConfig()
+
+    assert not config.database_path.parts[0].startswith("~")
+
+
+def test_scan_config_database_path_default_matches_default_database_path_constant() -> None:
+    config = ScanConfig()
+
+    assert config.database_path == Path(DEFAULT_DATABASE_PATH).expanduser()
+
+
+def test_scan_config_accepts_explicit_database_path(tmp_path: Path) -> None:
+    config = ScanConfig(database_path=tmp_path / "audit.db")
+
+    assert config.database_path == tmp_path / "audit.db"
+
+
+def test_scan_config_raises_configuration_error_for_non_path_database_path() -> None:
+    with pytest.raises(ConfigurationError):
+        ScanConfig(database_path=_INVALID_DATABASE_PATH)  # type: ignore[arg-type]
