@@ -47,7 +47,14 @@ reports = ["fpdf2>=2.7", "jinja2>=3.1", "matplotlib>=3.8"]
 full = ["phi-scan[nlp]", "phi-scan[fhir]", "phi-scan[reports]"]
 
 [dependency-groups]  # uv-native; pip users install dev deps via source checkout + uv sync
-dev = ["pytest>=8.0", "pytest-cov>=5.0", "ruff>=0.15.6", "mypy>=1.10", "faker>=24.0"]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=5.0",
+    "ruff>=0.15.6",
+    "mypy>=1.10",
+    "faker>=24.0",
+    "types-pyyaml>=6.0.12.20250915",
+]
 
 [build-system]
 requires = ["hatchling"]
