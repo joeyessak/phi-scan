@@ -12,6 +12,7 @@ from phi_scan.config import create_default_config, load_config
 from phi_scan.constants import (
     AUDIT_RETENTION_DAYS,
     DEFAULT_CONFIDENCE_THRESHOLD,
+    DEFAULT_DATABASE_PATH,
     MAX_FILE_SIZE_MB,
     OutputFormat,
     SeverityLevel,
@@ -60,6 +61,8 @@ def test_load_config_uses_scan_defaults_when_scan_section_is_absent(
     assert result.should_follow_symlinks is False
     assert result.include_extensions is None
     assert result.exclude_paths == []
+    assert result.output_format is OutputFormat.TABLE
+    assert result.database_path == Path(DEFAULT_DATABASE_PATH).expanduser()
 
 
 def test_load_config_maps_confidence_threshold_from_yaml(tmp_path: Path) -> None:
@@ -160,18 +163,22 @@ def test_load_config_accepts_gitlab_sast_output_format(tmp_path: Path) -> None:
     load_config(config_file)
 
 
-def test_load_config_maps_gitlab_sast_string_to_gitlab_sast_enum_member(
-    tmp_path: Path,
-) -> None:
-    # Verifies explicit value-based lookup, not a string transform like
-    # format.replace("-", "_").upper() which is banned by the spec.
+def test_load_config_maps_gitlab_sast_format_to_output_format_member(tmp_path: Path) -> None:
     config = _minimal_config()
     config["output"] = {"format": "gitlab-sast"}
+
     config_file = _write_config(tmp_path, config)
+    result = load_config(config_file)
 
-    load_config(config_file)
+    assert result.output_format is OutputFormat.GITLAB_SAST
 
-    assert OutputFormat("gitlab-sast") is OutputFormat.GITLAB_SAST
+
+def test_load_config_defaults_output_format_to_table(tmp_path: Path) -> None:
+    config_file = _write_config(tmp_path, _minimal_config())
+
+    result = load_config(config_file)
+
+    assert result.output_format is OutputFormat.TABLE
 
 
 def test_load_config_raises_configuration_error_for_invalid_output_format(
@@ -277,8 +284,9 @@ def test_load_config_expands_tilde_in_database_path(tmp_path: Path) -> None:
     config["audit"] = {"database_path": "~/.phi-scanner/audit.db"}
 
     config_file = _write_config(tmp_path, config)
+    result = load_config(config_file)
 
-    load_config(config_file)
+    assert not result.database_path.parts[0].startswith("~")
 
 
 # ---------------------------------------------------------------------------

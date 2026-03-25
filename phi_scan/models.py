@@ -14,9 +14,11 @@ from phi_scan.constants import (
     CONFIDENCE_SCORE_MAXIMUM,
     CONFIDENCE_SCORE_MINIMUM,
     DEFAULT_CONFIDENCE_THRESHOLD,
+    DEFAULT_DATABASE_PATH,
     MAX_FILE_SIZE_MB,
     SHA256_HEX_DIGEST_LENGTH,
     DetectionLayer,
+    OutputFormat,
     PhiCategory,
     RiskLevel,
     SeverityLevel,
@@ -64,6 +66,8 @@ class _ConfigField(StrEnum):
     SEVERITY_THRESHOLD = "severity_threshold"
     EXCLUDE_PATHS = "exclude_paths"
     INCLUDE_EXTENSIONS = "include_extensions"
+    OUTPUT_FORMAT = "output_format"
+    DATABASE_PATH = "database_path"
 
 
 # Build the pattern string explicitly — avoids the non-obvious triple-brace
@@ -257,6 +261,9 @@ class ScanConfig:
         max_file_size_mb: Files larger than this value in megabytes are skipped.
         include_extensions: If set, only files with a suffix in this list are scanned.
             None (default) scans all non-binary text files regardless of extension.
+        output_format: Output format for scan results. Defaults to TABLE.
+        database_path: Path to the SQLite audit database. Tilde is expanded at
+            construction time via Path.expanduser().
     """
 
     # ScanConfig is intentionally mutable (not frozen=True) so callers can update
@@ -269,6 +276,8 @@ class ScanConfig:
     should_follow_symlinks: bool = False
     max_file_size_mb: int = MAX_FILE_SIZE_MB
     include_extensions: list[str] | None = None
+    output_format: OutputFormat = OutputFormat.TABLE
+    database_path: Path = field(default_factory=lambda: Path(DEFAULT_DATABASE_PATH).expanduser())
 
     def __post_init__(self) -> None:
         # __init__ already validated both list fields via __setattr__; make
@@ -369,6 +378,18 @@ def _validate_include_extensions(include_extensions: object) -> None:
         )
 
 
+def _validate_output_format(output_format: object) -> None:
+    if not isinstance(output_format, OutputFormat):
+        raise ConfigurationError(
+            f"output_format must be an OutputFormat member, got {output_format!r}"
+        )
+
+
+def _validate_database_path(database_path: object) -> None:
+    if not isinstance(database_path, Path):
+        raise ConfigurationError(f"database_path must be a Path, got {database_path!r}")
+
+
 # Dispatch table for ScanConfig.__setattr__ — maps each field name to its validator.
 # Defined after all _validate_* functions so the references are valid at module load.
 # __setattr__ resolves this name at call time (not at class definition time), so the
@@ -385,4 +406,6 @@ _FIELD_VALIDATORS: dict[str, Callable[[object], None]] = {
     _ConfigField.SEVERITY_THRESHOLD: _validate_severity_threshold,
     _ConfigField.EXCLUDE_PATHS: _validate_exclude_paths,
     _ConfigField.INCLUDE_EXTENSIONS: _validate_include_extensions,
+    _ConfigField.OUTPUT_FORMAT: _validate_output_format,
+    _ConfigField.DATABASE_PATH: _validate_database_path,
 }
