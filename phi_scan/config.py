@@ -62,6 +62,8 @@ _INVALID_SEVERITY_ERROR: str = (
     "scan.severity_threshold {value!r} is not valid. Accepted values: {valid}"
 )
 _INVALID_DATABASE_PATH_ERROR: str = "audit.database_path must be a string, got {value!r}"
+_INVALID_CONFIDENCE_THRESHOLD_ERROR: str = "scan.confidence_threshold {value!r} must be a number"
+_INVALID_MAX_FILE_SIZE_MB_ERROR: str = "scan.max_file_size_mb {value!r} must be an integer"
 
 # ---------------------------------------------------------------------------
 # Default config template — written by create_default_config
@@ -146,8 +148,8 @@ def load_config(config_path: Path) -> ScanConfig:
     output_section: dict[str, Any] = raw_config.get(_YAML_SECTION_OUTPUT, {})
     audit_section: dict[str, Any] = raw_config.get(_YAML_SECTION_AUDIT, {})
     _reject_follow_symlinks_enabled(scan_section)
-    _parse_output_format(output_section)
-    _expand_database_path(audit_section)
+    _reject_invalid_output_format(output_section)
+    _reject_non_string_database_path(audit_section)
     return _build_scan_config(scan_section)
 
 
@@ -240,8 +242,8 @@ def _reject_follow_symlinks_enabled(scan_section: dict[str, Any]) -> None:
         raise ConfigurationError(_FOLLOW_SYMLINKS_ERROR)
 
 
-def _parse_output_format(output_section: dict[str, Any]) -> OutputFormat:
-    """Parse and validate the output format, defaulting to TABLE.
+def _reject_invalid_output_format(output_section: dict[str, Any]) -> None:
+    """Raise ConfigurationError if the output format is not a valid OutputFormat value.
 
     Maps "gitlab-sast" to OutputFormat.GITLAB_SAST via value-based enum
     lookup — never via string transformation such as replace() or upper().
@@ -249,15 +251,12 @@ def _parse_output_format(output_section: dict[str, Any]) -> OutputFormat:
     Args:
         output_section: The output: section of the parsed config.
 
-    Returns:
-        The resolved OutputFormat member.
-
     Raises:
         ConfigurationError: If the format string is not a valid OutputFormat value.
     """
     format_value = output_section.get(_YAML_KEY_OUTPUT_FORMAT, OutputFormat.TABLE.value)
     try:
-        return OutputFormat(format_value)
+        OutputFormat(format_value)
     except ValueError as error:
         valid = ", ".join(member.value for member in OutputFormat)
         raise ConfigurationError(
@@ -265,14 +264,11 @@ def _parse_output_format(output_section: dict[str, Any]) -> OutputFormat:
         ) from error
 
 
-def _expand_database_path(audit_section: dict[str, Any]) -> Path:
-    """Return the audit database path with ~ expanded via Path.expanduser().
+def _reject_non_string_database_path(audit_section: dict[str, Any]) -> None:
+    """Raise ConfigurationError if audit.database_path is present but not a string.
 
     Args:
         audit_section: The audit: section of the parsed config.
-
-    Returns:
-        The fully expanded Path to the audit database.
 
     Raises:
         ConfigurationError: If database_path is present but not a string.
@@ -280,7 +276,6 @@ def _expand_database_path(audit_section: dict[str, Any]) -> Path:
     raw_path = audit_section.get(_YAML_KEY_DATABASE_PATH, _DEFAULT_DATABASE_PATH)
     if not isinstance(raw_path, str):
         raise ConfigurationError(_INVALID_DATABASE_PATH_ERROR.format(value=raw_path))
-    return Path(raw_path).expanduser()
 
 
 def _build_scan_config(scan_section: dict[str, Any]) -> ScanConfig:
@@ -304,12 +299,24 @@ def _build_scan_config(scan_section: dict[str, Any]) -> ScanConfig:
         raise ConfigurationError(
             _INVALID_SEVERITY_ERROR.format(value=severity_value, valid=valid)
         ) from error
+    raw_confidence = scan_section.get(_YAML_KEY_CONFIDENCE_THRESHOLD, DEFAULT_CONFIDENCE_THRESHOLD)
+    try:
+        confidence_threshold = float(raw_confidence)
+    except (TypeError, ValueError) as error:
+        raise ConfigurationError(
+            _INVALID_CONFIDENCE_THRESHOLD_ERROR.format(value=raw_confidence)
+        ) from error
+    raw_max_file_size = scan_section.get(_YAML_KEY_MAX_FILE_SIZE_MB, MAX_FILE_SIZE_MB)
+    try:
+        max_file_size_mb = int(raw_max_file_size)
+    except (TypeError, ValueError) as error:
+        raise ConfigurationError(
+            _INVALID_MAX_FILE_SIZE_MB_ERROR.format(value=raw_max_file_size)
+        ) from error
     return ScanConfig(
-        confidence_threshold=float(
-            scan_section.get(_YAML_KEY_CONFIDENCE_THRESHOLD, DEFAULT_CONFIDENCE_THRESHOLD)
-        ),
+        confidence_threshold=confidence_threshold,
         severity_threshold=severity,
-        max_file_size_mb=int(scan_section.get(_YAML_KEY_MAX_FILE_SIZE_MB, MAX_FILE_SIZE_MB)),
+        max_file_size_mb=max_file_size_mb,
         should_follow_symlinks=False,
         include_extensions=scan_section.get(_YAML_KEY_INCLUDE_EXTENSIONS),
         exclude_paths=list(scan_section.get(_YAML_KEY_EXCLUDE_PATHS, [])),

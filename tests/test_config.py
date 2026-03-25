@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 import yaml
@@ -298,8 +299,8 @@ def test_create_default_config_output_is_valid_yaml(tmp_path: Path) -> None:
 
     create_default_config(output_path)
 
-    parsed = yaml.safe_load(output_path.read_text(encoding="utf-8"))
-    assert isinstance(parsed, dict)
+    config_document = yaml.safe_load(output_path.read_text(encoding="utf-8"))
+    assert isinstance(config_document, dict)
 
 
 def test_create_default_config_output_has_supported_version(tmp_path: Path) -> None:
@@ -307,8 +308,8 @@ def test_create_default_config_output_has_supported_version(tmp_path: Path) -> N
 
     create_default_config(output_path)
 
-    parsed = yaml.safe_load(output_path.read_text(encoding="utf-8"))
-    assert parsed["version"] == _SUPPORTED_VERSION
+    config_document = yaml.safe_load(output_path.read_text(encoding="utf-8"))
+    assert config_document["version"] == _SUPPORTED_VERSION
 
 
 def test_create_default_config_output_has_follow_symlinks_false(
@@ -318,8 +319,8 @@ def test_create_default_config_output_has_follow_symlinks_false(
 
     create_default_config(output_path)
 
-    parsed = yaml.safe_load(output_path.read_text(encoding="utf-8"))
-    assert parsed["scan"]["follow_symlinks"] is False
+    config_document = yaml.safe_load(output_path.read_text(encoding="utf-8"))
+    assert config_document["scan"]["follow_symlinks"] is False
 
 
 def test_create_default_config_output_sets_retention_days_to_hipaa_minimum(
@@ -329,8 +330,8 @@ def test_create_default_config_output_sets_retention_days_to_hipaa_minimum(
 
     create_default_config(output_path)
 
-    parsed = yaml.safe_load(output_path.read_text(encoding="utf-8"))
-    assert parsed["audit"]["retention_days"] == AUDIT_RETENTION_DAYS
+    config_document = yaml.safe_load(output_path.read_text(encoding="utf-8"))
+    assert config_document["audit"]["retention_days"] == AUDIT_RETENTION_DAYS
 
 
 def test_create_default_config_output_is_loadable_by_load_config(
@@ -347,9 +348,37 @@ def test_create_default_config_output_is_loadable_by_load_config(
 def test_create_default_config_raises_configuration_error_on_write_failure(
     tmp_path: Path,
 ) -> None:
-    read_only_dir = tmp_path / "readonly"
-    read_only_dir.mkdir(mode=0o555)
-    output_path = read_only_dir / ".phi-scanner.yml"
+    output_path = tmp_path / ".phi-scanner.yml"
+
+    with patch("pathlib.Path.write_text", side_effect=OSError("permission denied")):
+        with pytest.raises(ConfigurationError):
+            create_default_config(output_path)
+
+
+# ---------------------------------------------------------------------------
+# load_config — invalid field type coercions
+# ---------------------------------------------------------------------------
+
+
+def test_load_config_raises_configuration_error_for_non_numeric_confidence_threshold(
+    tmp_path: Path,
+) -> None:
+    config = _minimal_config()
+    config["scan"] = {"confidence_threshold": "banana"}
+
+    config_file = _write_config(tmp_path, config)
 
     with pytest.raises(ConfigurationError):
-        create_default_config(output_path)
+        load_config(config_file)
+
+
+def test_load_config_raises_configuration_error_for_non_integer_max_file_size_mb(
+    tmp_path: Path,
+) -> None:
+    config = _minimal_config()
+    config["scan"] = {"max_file_size_mb": "large"}
+
+    config_file = _write_config(tmp_path, config)
+
+    with pytest.raises(ConfigurationError):
+        load_config(config_file)
