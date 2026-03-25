@@ -28,7 +28,10 @@ _TEST_FILE_ENCODING: str = "utf-8"
 def _write_config(tmp_path: Path, content: dict[str, object]) -> Path:
     """Write a minimal valid config dict as YAML and return the file path."""
     config_file = tmp_path / ".phi-scanner.yml"
-    config_file.write_text(yaml.dump(content), encoding=_TEST_FILE_ENCODING)
+    config_file.write_text(
+        yaml.dump(content, default_flow_style=False, sort_keys=False),
+        encoding=_TEST_FILE_ENCODING,
+    )
     return config_file
 
 
@@ -265,6 +268,20 @@ def test_load_config_raises_configuration_error_for_non_string_database_path(
 ) -> None:
     config = _minimal_config()
     config["audit"] = {"database_path": 12345}
+
+    config_file = _write_config(tmp_path, config)
+
+    with pytest.raises(ConfigurationError):
+        load_config(config_file)
+
+
+def test_load_config_raises_configuration_error_for_null_confidence_threshold(
+    tmp_path: Path,
+) -> None:
+    # YAML null (None in Python) triggers TypeError in float() — distinct user mistake
+    # from passing a non-numeric string like "abc".
+    config = _minimal_config()
+    config["scan"] = {"confidence_threshold": None}
 
     config_file = _write_config(tmp_path, config)
 

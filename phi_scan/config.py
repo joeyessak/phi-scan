@@ -115,7 +115,7 @@ scan:
 output:
   # table, json, sarif, csv, pdf, html, junit, codequality, gitlab-sast
   format: table
-  quiet: false
+  # quiet is a CLI-only flag (--quiet); it is not read from this file.
 
 audit:
   # ~ is expanded via Path.expanduser() at runtime, not by the YAML parser.
@@ -153,6 +153,10 @@ def load_config(config_path: Path) -> ScanConfig:
     scan_section: dict[str, Any] = parsed_yaml.get(_YAML_SECTION_SCAN, {})
     output_section: dict[str, Any] = parsed_yaml.get(_YAML_SECTION_OUTPUT, {})
     audit_section: dict[str, Any] = parsed_yaml.get(_YAML_SECTION_AUDIT, {})
+    # The ai: section (enable_claude_review) is intentionally not read here —
+    # AI integration is deferred to Phase 7 (optional). Unknown top-level keys
+    # such as ai: are silently ignored by design; adding strict key validation
+    # is a Phase 7 concern when the ai: section is wired through.
     _reject_follow_symlinks_enabled(scan_section)
     output_format = _parse_output_format(output_section)
     database_path = _parse_database_path(audit_section)
