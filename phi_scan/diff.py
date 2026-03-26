@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import subprocess
+from collections.abc import Sequence
 from pathlib import Path
 
 from phi_scan.exceptions import TraversalError
@@ -38,14 +39,14 @@ _GIT_SUCCESS_EXIT_CODE: int = 0
 # scan targets are never built for files that no longer exist on disk.
 _DIFF_FILTER_SPECIFIER: str = "ACMR"
 _GIT_DIFF_FILTER_FLAG: str = f"--diff-filter={_DIFF_FILTER_SPECIFIER}"
-_GIT_TOPLEVEL_ARGS: list[str] = ["rev-parse", "--show-toplevel"]
-_GIT_DIFF_BASE_ARGS: list[str] = ["diff", "--name-only", _GIT_DIFF_FILTER_FLAG]
-_GIT_STAGED_DIFF_ARGS: list[str] = [
+_GIT_TOPLEVEL_ARGS: tuple[str, ...] = ("rev-parse", "--show-toplevel")
+_GIT_DIFF_BASE_ARGS: tuple[str, ...] = ("diff", "--name-only", _GIT_DIFF_FILTER_FLAG)
+_GIT_STAGED_DIFF_ARGS: tuple[str, ...] = (
     "diff",
     "--cached",
     "--name-only",
     _GIT_DIFF_FILTER_FLAG,
-]
+)
 
 
 # ---------------------------------------------------------------------------
@@ -123,7 +124,7 @@ def _get_git_repository_root() -> Path:
     return Path(root_output.strip())
 
 
-def _run_git_command(git_args: list[str]) -> str:
+def _run_git_command(git_args: Sequence[str]) -> str:
     """Run a git subcommand and return its stdout.
 
     Args:
@@ -142,8 +143,8 @@ def _run_git_command(git_args: list[str]) -> str:
             capture_output=True,
             text=True,
         )
-    except FileNotFoundError:
-        raise TraversalError(_GIT_NOT_FOUND_ERROR)
+    except FileNotFoundError as not_found_error:
+        raise TraversalError(_GIT_NOT_FOUND_ERROR) from not_found_error
     except OSError as execution_error:
         raise TraversalError(
             _GIT_EXECUTION_ERROR.format(detail=execution_error)
@@ -159,11 +160,13 @@ def _run_git_command(git_args: list[str]) -> str:
 
 
 def _resolve_existing_paths(git_output: str, repo_root: Path) -> list[Path]:
-    """Parse git --name-only output and return only paths that exist on disk.
+    """Parse git --name-only output and return only non-symlink paths that exist on disk.
 
     Paths are resolved relative to repo_root so the result is correct
-    regardless of the caller's working directory. Deleted files and blank
-    lines in the git output are silently excluded.
+    regardless of the caller's working directory. Deleted files, blank
+    lines, and symlinks in the git output are silently excluded.
+    Symlinks are excluded to prevent a staged symlink from redirecting
+    the scanner to an arbitrary filesystem location outside the repository.
 
     Args:
         git_output: Raw stdout from a ``git diff --name-only`` command.
@@ -179,6 +182,6 @@ def _resolve_existing_paths(git_output: str, repo_root: Path) -> list[Path]:
         if not file_name:
             continue
         candidate_path = repo_root / file_name
-        if candidate_path.exists():
+        if candidate_path.exists() and not candidate_path.is_symlink():
             existing_paths.append(candidate_path)
     return existing_paths

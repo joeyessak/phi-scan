@@ -32,6 +32,8 @@ _SINGLE_FILE_GIT_OUTPUT: str = f"{_SINGLE_FILE_NAME}\n"
 _SECOND_FILE_NAME: str = "lib/utils.py"
 _MULTI_FILE_GIT_OUTPUT: str = f"{_SINGLE_FILE_NAME}\n{_SECOND_FILE_NAME}\n"
 _DELETED_FILE_NAME: str = "removed/gone.py"
+_SYMLINKED_FILE_NAME: str = "link/target.py"
+_EXPECTED_MULTI_FILE_COUNT: int = 2
 _GIT_FAILURE_EXIT_CODE: int = 128
 _GIT_STDERR_INVALID_REF: str = "fatal: ambiguous argument 'HEAD~99': unknown revision"
 _GIT_STDERR_NOT_A_REPO: str = "fatal: not a git repository"
@@ -94,6 +96,22 @@ def test_resolve_existing_paths_excludes_file_not_on_disk(
     assert result == []
 
 
+def test_resolve_existing_paths_excludes_symlinked_file(
+    tmp_path: Path,
+) -> None:
+    target_path = tmp_path / _SINGLE_FILE_NAME
+    target_path.parent.mkdir(parents=True, exist_ok=True)
+    target_path.write_text(_SAMPLE_FILE_CONTENT, encoding=DEFAULT_TEXT_ENCODING)
+    symlink_path = tmp_path / _SYMLINKED_FILE_NAME
+    symlink_path.parent.mkdir(parents=True, exist_ok=True)
+    symlink_path.symlink_to(target_path)
+    symlink_output = f"{_SYMLINKED_FILE_NAME}\n"
+
+    result = _resolve_existing_paths(symlink_output, tmp_path)
+
+    assert result == []
+
+
 def test_resolve_existing_paths_returns_only_existing_files_from_mixed_output(
     tmp_path: Path,
 ) -> None:
@@ -117,7 +135,7 @@ def test_resolve_existing_paths_returns_multiple_existing_files(
 
     result = _resolve_existing_paths(_MULTI_FILE_GIT_OUTPUT, tmp_path)
 
-    assert len(result) == 2  # noqa: PLR2004 — two files created above
+    assert len(result) == _EXPECTED_MULTI_FILE_COUNT
     assert tmp_path / _SINGLE_FILE_NAME in result
     assert tmp_path / _SECOND_FILE_NAME in result
 
@@ -275,7 +293,7 @@ def test_get_changed_files_from_diff_returns_existing_changed_files(
 
 def test_get_changed_files_from_diff_raises_traversal_error_for_invalid_diff_ref() -> None:
     with (
-        patch("phi_scan.diff._get_git_repository_root", return_value=Path("/repo")),
+        patch("phi_scan.diff._get_git_repository_root", return_value=Path(_SAMPLE_REPO_ROOT_STR)),
         patch(
             "phi_scan.diff._run_git_command",
             side_effect=TraversalError(_GIT_STDERR_INVALID_REF),
@@ -289,7 +307,7 @@ def test_get_changed_files_from_diff_error_includes_diff_ref() -> None:
     invalid_ref = "HEAD~99"
 
     with (
-        patch("phi_scan.diff._get_git_repository_root", return_value=Path("/repo")),
+        patch("phi_scan.diff._get_git_repository_root", return_value=Path(_SAMPLE_REPO_ROOT_STR)),
         patch(
             "phi_scan.diff._run_git_command",
             side_effect=TraversalError(_GIT_STDERR_INVALID_REF),
