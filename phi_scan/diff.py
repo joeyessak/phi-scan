@@ -168,14 +168,31 @@ def _run_git_command(git_args: Sequence[str]) -> str:
     return completed_process.stdout
 
 
+def _is_safe_scannable_path(candidate_path: Path) -> bool:
+    """Return True if candidate_path exists on disk and is not a symlink.
+
+    Symlinks are rejected and logged at WARNING level — a staged symlink
+    pointing outside the repository is a suspicious security event that
+    operators should be aware of.
+
+    Args:
+        candidate_path: Absolute path to test.
+
+    Returns:
+        True if the path is a regular file or directory that exists on disk.
+    """
+    if candidate_path.is_symlink():
+        _logger.warning("Skipping symlink in diff output: %s", candidate_path)
+        return False
+    return candidate_path.exists()
+
+
 def _resolve_existing_paths(git_output: str, repo_root: Path) -> list[Path]:
-    """Parse git --name-only output and return only non-symlink paths that exist on disk.
+    """Parse git --name-only output and return only safe, existing paths.
 
     Paths are resolved relative to repo_root so the result is correct
-    regardless of the caller's working directory. Deleted files and blank
-    lines are excluded. Symlinks are excluded and logged at WARNING level —
-    a staged symlink pointing outside the repository is a suspicious security
-    event that operators should be aware of.
+    regardless of the caller's working directory. Deleted files, blank
+    lines, and symlinks are excluded.
 
     Args:
         git_output: Raw stdout from a ``git diff --name-only`` command.
@@ -191,9 +208,6 @@ def _resolve_existing_paths(git_output: str, repo_root: Path) -> list[Path]:
         if not relative_file_path:
             continue
         candidate_path = repo_root / relative_file_path
-        if candidate_path.is_symlink():
-            _logger.warning("Skipping symlink in diff output: %s", candidate_path)
-            continue
-        if candidate_path.exists():
+        if _is_safe_scannable_path(candidate_path):
             existing_paths.append(candidate_path)
     return existing_paths

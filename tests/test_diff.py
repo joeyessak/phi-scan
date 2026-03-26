@@ -12,6 +12,7 @@ from phi_scan.constants import DEFAULT_TEXT_ENCODING
 from phi_scan.diff import (
     _GIT_SUCCESS_EXIT_CODE,
     _get_git_repository_root,
+    _is_safe_scannable_path,
     _resolve_existing_paths,
     _run_git_command,
     get_changed_files_from_diff,
@@ -101,6 +102,61 @@ def test_resolve_existing_paths_excludes_file_not_on_disk(
     result = _resolve_existing_paths(deleted_output, tmp_path)
 
     assert result == []
+
+
+# ---------------------------------------------------------------------------
+# _is_safe_scannable_path
+# ---------------------------------------------------------------------------
+
+
+def test_is_safe_scannable_path_returns_true_for_existing_regular_file(
+    tmp_path: Path,
+) -> None:
+    regular_file = tmp_path / _SINGLE_FILE_NAME
+    regular_file.parent.mkdir(parents=True)
+    regular_file.write_text(_SAMPLE_FILE_CONTENT, encoding=DEFAULT_TEXT_ENCODING)
+
+    assert _is_safe_scannable_path(regular_file) is True
+
+
+def test_is_safe_scannable_path_returns_false_for_nonexistent_path(
+    tmp_path: Path,
+) -> None:
+    missing_path = tmp_path / _DELETED_FILE_NAME
+
+    assert _is_safe_scannable_path(missing_path) is False
+
+
+def test_is_safe_scannable_path_returns_false_for_symlink(tmp_path: Path) -> None:
+    target = tmp_path / _SINGLE_FILE_NAME
+    target.parent.mkdir(parents=True)
+    target.write_text(_SAMPLE_FILE_CONTENT, encoding=DEFAULT_TEXT_ENCODING)
+    symlink = tmp_path / _SYMLINKED_FILE_NAME
+    symlink.parent.mkdir(parents=True, exist_ok=True)
+    symlink.symlink_to(target)
+
+    assert _is_safe_scannable_path(symlink) is False
+
+
+def test_is_safe_scannable_path_logs_warning_for_symlink(
+    tmp_path: Path,
+) -> None:
+    target = tmp_path / _SINGLE_FILE_NAME
+    target.parent.mkdir(parents=True)
+    target.write_text(_SAMPLE_FILE_CONTENT, encoding=DEFAULT_TEXT_ENCODING)
+    symlink = tmp_path / _SYMLINKED_FILE_NAME
+    symlink.parent.mkdir(parents=True, exist_ok=True)
+    symlink.symlink_to(target)
+
+    with patch("phi_scan.diff._logger") as mock_logger:
+        _is_safe_scannable_path(symlink)
+
+    mock_logger.warning.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# _resolve_existing_paths — symlink exclusion (delegates to _is_safe_scannable_path)
+# ---------------------------------------------------------------------------
 
 
 def test_resolve_existing_paths_excludes_symlinked_file(
