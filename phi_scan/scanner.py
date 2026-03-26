@@ -176,6 +176,8 @@ def collect_scan_targets(
                 continue
             if _should_skip_directory_candidate(candidate):
                 continue
+            # relative_to cannot raise ValueError — every candidate is yielded by
+            # root_path.rglob(), which guarantees it is a descendant of root_path.
             relative_path = candidate.relative_to(root_path)
             if _should_skip_excluded_candidate(relative_path, exclusion_spec):
                 continue
@@ -260,8 +262,10 @@ def _build_scan_result(
     Returns:
         A fully populated, immutable ScanResult.
     """
-    is_clean = len(findings) == 0
-    files_with_findings = len({f.file_path for f in findings})
+    is_clean = not findings
+    # file_path is location metadata — not a PHI value, not subject to the
+    # hash-storage policy that governs detected PHI content (value_hash).
+    files_with_findings = len({finding.file_path for finding in findings})
     return ScanResult(
         findings=findings,
         files_scanned=files_scanned,

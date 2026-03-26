@@ -47,7 +47,9 @@ _OVERSIZED_FILE_SIZE_BYTES: int = MAX_FILE_SIZE_MB * BYTES_PER_MEGABYTE + 1
 _MULTI_FILE_SCAN_COUNT: int = 3
 # Minimum acceptable scan duration — time.monotonic() guarantees non-negative values.
 _MINIMUM_SCAN_DURATION: float = 0.0
-# Number of non-blank, non-comment patterns in a two-pattern ignore file fixture.
+# Number of non-blank, non-comment patterns written by
+# test_load_ignore_patterns_skips_blank_lines: _SAMPLE_IGNORE_PATTERN ("*.log") and "*.tmp".
+# Update this constant if that test's fixture content changes.
 _EXPECTED_NON_BLANK_NON_COMMENT_PATTERN_COUNT: int = 2
 
 
