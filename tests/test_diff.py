@@ -18,6 +18,11 @@ from phi_scan.diff import (
 )
 from phi_scan.exceptions import TraversalError
 
+# Private symbols (_resolve_existing_paths, _run_git_command, _get_git_repository_root)
+# are imported directly even though they are excluded from __all__. Their boundary
+# conditions (symlink exclusion, git failure modes, path resolution) are not fully
+# exercisable through the public API alone, so direct unit tests are warranted.
+
 # ---------------------------------------------------------------------------
 # Module-level test constants — no magic values in test logic
 # ---------------------------------------------------------------------------
@@ -305,8 +310,6 @@ def test_get_changed_files_from_diff_raises_traversal_error_for_invalid_diff_ref
 
 
 def test_get_changed_files_from_diff_error_includes_diff_ref() -> None:
-    invalid_ref = _INVALID_DIFF_REF
-
     with (
         patch("phi_scan.diff._get_git_repository_root", return_value=Path(_SAMPLE_REPO_ROOT_STR)),
         patch(
@@ -315,9 +318,9 @@ def test_get_changed_files_from_diff_error_includes_diff_ref() -> None:
         ),
     ):
         with pytest.raises(TraversalError) as exc_info:
-            get_changed_files_from_diff(invalid_ref)
+            get_changed_files_from_diff(_INVALID_DIFF_REF)
 
-    assert invalid_ref in str(exc_info.value)
+    assert _INVALID_DIFF_REF in str(exc_info.value)
 
 
 def test_get_changed_files_from_diff_excludes_deleted_files(tmp_path: Path) -> None:

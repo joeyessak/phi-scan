@@ -165,10 +165,10 @@ def _resolve_existing_paths(git_output: str, repo_root: Path) -> list[Path]:
     """Parse git --name-only output and return only non-symlink paths that exist on disk.
 
     Paths are resolved relative to repo_root so the result is correct
-    regardless of the caller's working directory. Deleted files, blank
-    lines, and symlinks in the git output are silently excluded.
-    Symlinks are excluded to prevent a staged symlink from redirecting
-    the scanner to an arbitrary filesystem location outside the repository.
+    regardless of the caller's working directory. Deleted files and blank
+    lines are excluded. Symlinks are excluded and logged at WARNING level —
+    a staged symlink pointing outside the repository is a suspicious security
+    event that operators should be aware of.
 
     Args:
         git_output: Raw stdout from a ``git diff --name-only`` command.
@@ -180,10 +180,13 @@ def _resolve_existing_paths(git_output: str, repo_root: Path) -> list[Path]:
     """
     existing_paths: list[Path] = []
     for raw_line in git_output.splitlines():
-        file_name = raw_line.strip()
-        if not file_name:
+        relative_file_path = raw_line.strip()
+        if not relative_file_path:
             continue
-        candidate_path = repo_root / file_name
-        if candidate_path.exists() and not candidate_path.is_symlink():
+        candidate_path = repo_root / relative_file_path
+        if candidate_path.is_symlink():
+            _logger.warning("Skipping symlink in diff output: %s", candidate_path)
+            continue
+        if candidate_path.exists():
             existing_paths.append(candidate_path)
     return existing_paths
