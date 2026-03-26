@@ -305,19 +305,19 @@ def _reject_invalid_scan_root(root_path: Path) -> None:
 
 
 def _should_skip_directory_candidate(candidate: Path) -> bool:
-    """Return True if candidate is a real (non-symlink) directory.
+    """Return True if candidate is a directory.
 
-    ``Path.is_dir()`` returns True for symlinks pointing to directories. The
-    explicit ``is_symlink()`` guard ensures symlinked directories are not
-    treated as plain directories regardless of call order in the traversal loop.
+    Called after ``_should_skip_symlink_candidate`` in the traversal loop —
+    symlinks (including symlinks pointing to directories) are already handled
+    before this function is reached.
 
     Args:
         candidate: The filesystem entry to check.
 
     Returns:
-        True if the candidate is a non-symlink directory and should be skipped.
+        True if the candidate is a directory and should be skipped.
     """
-    return not candidate.is_symlink() and candidate.is_dir()
+    return candidate.is_dir()
 
 
 def _should_skip_symlink_candidate(candidate: Path) -> bool:
@@ -440,7 +440,7 @@ def _derive_risk_level(findings: tuple[ScanFinding, ...]) -> RiskLevel:
         return RiskLevel.MODERATE
     if SeverityLevel.INFO in severity_levels:
         return RiskLevel.LOW
-    raise PhiDetectionError(_UNMAPPED_SEVERITY_LEVELS_ERROR.format(levels=severity_levels))
+    raise PhiDetectionError(_UNMAPPED_SEVERITY_LEVELS_ERROR.format(levels=sorted(severity_levels)))
 
 
 def _count_by_severity(
