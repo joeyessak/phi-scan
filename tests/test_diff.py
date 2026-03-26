@@ -69,17 +69,17 @@ def _build_subprocess_result(
 def test_resolve_existing_paths_returns_empty_list_for_empty_output(
     tmp_path: Path,
 ) -> None:
-    result = _resolve_existing_paths(_EMPTY_GIT_OUTPUT, tmp_path)
+    resolved_paths = _resolve_existing_paths(_EMPTY_GIT_OUTPUT, tmp_path)
 
-    assert result == []
+    assert resolved_paths == []
 
 
 def test_resolve_existing_paths_returns_empty_list_for_blank_line_output(
     tmp_path: Path,
 ) -> None:
-    result = _resolve_existing_paths(_BLANK_LINE_GIT_OUTPUT, tmp_path)
+    resolved_paths = _resolve_existing_paths(_BLANK_LINE_GIT_OUTPUT, tmp_path)
 
-    assert result == []
+    assert resolved_paths == []
 
 
 def test_resolve_existing_paths_returns_absolute_path_for_existing_file(
@@ -89,9 +89,9 @@ def test_resolve_existing_paths_returns_absolute_path_for_existing_file(
     source_file.parent.mkdir(parents=True)
     source_file.write_text(_SAMPLE_FILE_CONTENT, encoding=DEFAULT_TEXT_ENCODING)
 
-    result = _resolve_existing_paths(_SINGLE_FILE_GIT_OUTPUT, tmp_path)
+    resolved_paths = _resolve_existing_paths(_SINGLE_FILE_GIT_OUTPUT, tmp_path)
 
-    assert result == [tmp_path / _SINGLE_FILE_NAME]
+    assert resolved_paths == [tmp_path / _SINGLE_FILE_NAME]
 
 
 def test_resolve_existing_paths_excludes_file_not_on_disk(
@@ -99,9 +99,9 @@ def test_resolve_existing_paths_excludes_file_not_on_disk(
 ) -> None:
     deleted_output = f"{_DELETED_FILE_NAME}\n"
 
-    result = _resolve_existing_paths(deleted_output, tmp_path)
+    resolved_paths = _resolve_existing_paths(deleted_output, tmp_path)
 
-    assert result == []
+    assert resolved_paths == []
 
 
 # ---------------------------------------------------------------------------
@@ -170,9 +170,9 @@ def test_resolve_existing_paths_excludes_symlinked_file(
     symlink_path.symlink_to(target_path)
     symlink_output = f"{_SYMLINKED_FILE_NAME}\n"
 
-    result = _resolve_existing_paths(symlink_output, tmp_path)
+    resolved_paths = _resolve_existing_paths(symlink_output, tmp_path)
 
-    assert result == []
+    assert resolved_paths == []
 
 
 def test_resolve_existing_paths_returns_only_existing_files_from_mixed_output(
@@ -183,9 +183,9 @@ def test_resolve_existing_paths_returns_only_existing_files_from_mixed_output(
     existing_file.write_text(_SAMPLE_FILE_CONTENT, encoding=DEFAULT_TEXT_ENCODING)
     mixed_output = f"{_SINGLE_FILE_NAME}\n{_DELETED_FILE_NAME}\n"
 
-    result = _resolve_existing_paths(mixed_output, tmp_path)
+    resolved_paths = _resolve_existing_paths(mixed_output, tmp_path)
 
-    assert result == [tmp_path / _SINGLE_FILE_NAME]
+    assert resolved_paths == [tmp_path / _SINGLE_FILE_NAME]
 
 
 def test_resolve_existing_paths_returns_multiple_existing_files(
@@ -196,11 +196,11 @@ def test_resolve_existing_paths_returns_multiple_existing_files(
         file_path.parent.mkdir(parents=True, exist_ok=True)
         file_path.write_text(_SAMPLE_FILE_CONTENT, encoding=DEFAULT_TEXT_ENCODING)
 
-    result = _resolve_existing_paths(_MULTI_FILE_GIT_OUTPUT, tmp_path)
+    resolved_paths = _resolve_existing_paths(_MULTI_FILE_GIT_OUTPUT, tmp_path)
 
-    assert len(result) == _EXPECTED_MULTI_FILE_COUNT
-    assert tmp_path / _SINGLE_FILE_NAME in result
-    assert tmp_path / _SECOND_FILE_NAME in result
+    assert len(resolved_paths) == _EXPECTED_MULTI_FILE_COUNT
+    assert tmp_path / _SINGLE_FILE_NAME in resolved_paths
+    assert tmp_path / _SECOND_FILE_NAME in resolved_paths
 
 
 def test_resolve_existing_paths_resolves_paths_relative_to_repo_root(
@@ -210,10 +210,10 @@ def test_resolve_existing_paths_resolves_paths_relative_to_repo_root(
     source_file.parent.mkdir(parents=True)
     source_file.write_text(_SAMPLE_FILE_CONTENT, encoding=DEFAULT_TEXT_ENCODING)
 
-    result = _resolve_existing_paths(_SINGLE_FILE_GIT_OUTPUT, tmp_path)
+    resolved_paths = _resolve_existing_paths(_SINGLE_FILE_GIT_OUTPUT, tmp_path)
 
-    assert result[0].is_absolute()
-    assert result[0] == tmp_path / _SINGLE_FILE_NAME
+    assert resolved_paths[0].is_absolute()
+    assert resolved_paths[0] == tmp_path / _SINGLE_FILE_NAME
 
 
 # ---------------------------------------------------------------------------
@@ -358,9 +358,9 @@ def test_get_changed_files_from_diff_returns_existing_changed_files(
         patch("phi_scan.diff._get_git_repository_root", return_value=tmp_path),
         patch("phi_scan.diff._run_git_command", return_value=_SINGLE_FILE_GIT_OUTPUT),
     ):
-        result = get_changed_files_from_diff(_SAMPLE_DIFF_REF)
+        changed_files = get_changed_files_from_diff(_SAMPLE_DIFF_REF)
 
-    assert result == [tmp_path / _SINGLE_FILE_NAME]
+    assert changed_files == [tmp_path / _SINGLE_FILE_NAME]
 
 
 def test_get_changed_files_from_diff_raises_traversal_error_for_invalid_diff_ref() -> None:
@@ -396,9 +396,9 @@ def test_get_changed_files_from_diff_excludes_deleted_files(tmp_path: Path) -> N
         patch("phi_scan.diff._get_git_repository_root", return_value=tmp_path),
         patch("phi_scan.diff._run_git_command", return_value=deleted_only_output),
     ):
-        result = get_changed_files_from_diff(_SAMPLE_DIFF_REF)
+        changed_files = get_changed_files_from_diff(_SAMPLE_DIFF_REF)
 
-    assert result == []
+    assert changed_files == []
 
 
 def test_get_changed_files_from_diff_returns_empty_list_when_no_changes(
@@ -408,9 +408,9 @@ def test_get_changed_files_from_diff_returns_empty_list_when_no_changes(
         patch("phi_scan.diff._get_git_repository_root", return_value=tmp_path),
         patch("phi_scan.diff._run_git_command", return_value=_EMPTY_GIT_OUTPUT),
     ):
-        result = get_changed_files_from_diff(_SAMPLE_DIFF_REF)
+        changed_files = get_changed_files_from_diff(_SAMPLE_DIFF_REF)
 
-    assert result == []
+    assert changed_files == []
 
 
 def test_get_changed_files_from_diff_passes_diff_ref_to_git_command(
@@ -460,9 +460,9 @@ def test_get_staged_files_returns_staged_files(tmp_path: Path) -> None:
         patch("phi_scan.diff._get_git_repository_root", return_value=tmp_path),
         patch("phi_scan.diff._run_git_command", return_value=_SINGLE_FILE_GIT_OUTPUT),
     ):
-        result = get_staged_files()
+        staged_files = get_staged_files()
 
-    assert result == [tmp_path / _SINGLE_FILE_NAME]
+    assert staged_files == [tmp_path / _SINGLE_FILE_NAME]
 
 
 def test_get_staged_files_returns_empty_list_when_nothing_staged(
@@ -472,9 +472,9 @@ def test_get_staged_files_returns_empty_list_when_nothing_staged(
         patch("phi_scan.diff._get_git_repository_root", return_value=tmp_path),
         patch("phi_scan.diff._run_git_command", return_value=_EMPTY_GIT_OUTPUT),
     ):
-        result = get_staged_files()
+        staged_files = get_staged_files()
 
-    assert result == []
+    assert staged_files == []
 
 
 def test_get_staged_files_excludes_deleted_files(tmp_path: Path) -> None:
@@ -484,9 +484,9 @@ def test_get_staged_files_excludes_deleted_files(tmp_path: Path) -> None:
         patch("phi_scan.diff._get_git_repository_root", return_value=tmp_path),
         patch("phi_scan.diff._run_git_command", return_value=deleted_only_output),
     ):
-        result = get_staged_files()
+        staged_files = get_staged_files()
 
-    assert result == []
+    assert staged_files == []
 
 
 def test_get_staged_files_uses_cached_flag(tmp_path: Path) -> None:
