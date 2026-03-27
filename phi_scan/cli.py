@@ -240,6 +240,7 @@ _FORMAT_SERIALIZERS: dict[str, Callable[[ScanResult], str]] = {
 # ---------------------------------------------------------------------------
 
 _EXIT_CODE_ERROR: int = 2
+_RGLOB_ALL_FILES_PATTERN: str = "*"
 
 # ---------------------------------------------------------------------------
 # Watch file-count helper and event handler
@@ -257,12 +258,12 @@ def _count_files_in_directory(directory: Path) -> int:
     """
     return sum(
         1
-        for candidate in directory.rglob("*")
+        for candidate in directory.rglob(_RGLOB_ALL_FILES_PATTERN)
         if candidate.is_file() and not candidate.is_symlink()
     )
 
 
-class _PhiScanWatchEventHandler(FileSystemEventHandler):
+class _FileChangeReporter(FileSystemEventHandler):
     """Watchdog event handler for Phase 1 watch mode.
 
     Phase 1 behavior: on any non-directory file system event, traverse the
@@ -569,7 +570,7 @@ def _observe_directory(watch_path: Path) -> None:
     Args:
         watch_path: Root directory to watch recursively.
     """
-    event_handler = _PhiScanWatchEventHandler(watch_path)
+    event_handler = _FileChangeReporter(watch_path)
     observer = Observer()
     observer.schedule(event_handler, str(watch_path), recursive=True)
     observer.start()
@@ -589,7 +590,7 @@ def _observe_directory(watch_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _version_callback(is_version_requested: bool) -> None:
+def _echo_version(is_version_requested: bool) -> None:
     """Print the installed phi-scan version and exit.
 
     Args:
@@ -612,7 +613,7 @@ def main_callback(
         typer.Option(
             "--version",
             "-V",
-            callback=_version_callback,
+            callback=_echo_version,
             is_eager=True,
             help=_VERSION_FLAG_HELP,
         ),
