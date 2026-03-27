@@ -76,7 +76,7 @@ _CREATE_SCAN_EVENTS_SQL: str = f"""
         id               INTEGER PRIMARY KEY AUTOINCREMENT,
         timestamp        TEXT    NOT NULL,
         scanner_version  TEXT    NOT NULL,
-        repository       TEXT    NOT NULL,
+        repository_hash  TEXT    NOT NULL,
         branch           TEXT    NOT NULL,
         files_scanned    INTEGER NOT NULL,
         findings_count   INTEGER NOT NULL,
@@ -95,7 +95,7 @@ _INSERT_META_SQL: str = f"INSERT OR IGNORE INTO {_SCHEMA_META_TABLE} (key, value
 _UPDATE_META_SQL: str = f"INSERT OR REPLACE INTO {_SCHEMA_META_TABLE} (key, value) VALUES (?, ?)"
 _INSERT_SCAN_EVENT_SQL: str = f"""
     INSERT INTO {_SCAN_EVENTS_TABLE}
-        (timestamp, scanner_version, repository, branch,
+        (timestamp, scanner_version, repository_hash, branch,
          files_scanned, findings_count, findings_json, is_clean, scan_duration)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
 """
@@ -153,6 +153,9 @@ def insert_scan_event(database_path: Path, scan_result: ScanResult) -> None:
 
     findings_json stores only value_hash and metadata fields — raw detected
     values and code_context (which may contain raw PHI) are never persisted.
+    repository_hash and file_path_hash store SHA-256 digests — repository
+    root paths and file names can be PHI-revealing and must not be stored
+    in plaintext (e.g. /home/patient_records/ssn_exports).
 
     Args:
         database_path: Path to the SQLite audit database file.
@@ -162,10 +165,11 @@ def insert_scan_event(database_path: Path, scan_result: ScanResult) -> None:
         AuditLogError: If the database cannot be written to.
     """
     is_clean_flag = _BOOLEAN_TRUE if scan_result.is_clean else _BOOLEAN_FALSE
-    row = (
+    repository_hash = hashlib.sha256(_get_current_repository_path().encode()).hexdigest()
+    scan_event_row = (
         _get_current_timestamp(),
         __version__,
-        _get_current_repository_path(),
+        repository_hash,
         _get_current_branch(),
         scan_result.files_scanned,
         len(scan_result.findings),
@@ -175,7 +179,7 @@ def insert_scan_event(database_path: Path, scan_result: ScanResult) -> None:
     )
     connection = _open_database(database_path)
     try:
-        connection.execute(_INSERT_SCAN_EVENT_SQL, row)
+        connection.execute(_INSERT_SCAN_EVENT_SQL, scan_event_row)
         connection.commit()
     except sqlite3.Error as db_error:
         connection.rollback()

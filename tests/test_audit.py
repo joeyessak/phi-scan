@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import datetime
+import hashlib
 import json
 import sqlite3
 from pathlib import Path
@@ -58,6 +59,7 @@ _SAMPLE_FILES_SCANNED: int = 10
 _SAMPLE_FILES_WITH_FINDINGS: int = 1
 _SAMPLE_GIT_BRANCH: str = "main"
 _SAMPLE_GIT_REPO_ROOT: str = "/repo"
+_SAMPLE_REPOSITORY_HASH: str = hashlib.sha256(_SAMPLE_GIT_REPO_ROOT.encode()).hexdigest()
 _SAMPLE_GIT_BRANCH_OUTPUT: str = f"{_SAMPLE_GIT_BRANCH}\n"
 _SAMPLE_GIT_REPO_OUTPUT: str = f"{_SAMPLE_GIT_REPO_ROOT}\n"
 _EMPTY_GIT_OUTPUT: str = ""
@@ -502,13 +504,13 @@ def test_query_recent_scans_excludes_events_older_than_cutoff(tmp_path: Path) ->
     connection = sqlite3.connect(str(database_path))
     connection.execute(
         f"INSERT INTO {_SCAN_EVENTS_TABLE} "
-        "(timestamp, scanner_version, repository, branch, files_scanned, "
+        "(timestamp, scanner_version, repository_hash, branch, files_scanned, "
         "findings_count, findings_json, is_clean, scan_duration) "
         "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
             old_timestamp,
             __version__,
-            _SAMPLE_GIT_REPO_ROOT,
+            _SAMPLE_REPOSITORY_HASH,
             _SAMPLE_GIT_BRANCH,
             _SAMPLE_FILES_SCANNED,
             0,
