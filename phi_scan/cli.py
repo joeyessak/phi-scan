@@ -247,7 +247,11 @@ def _count_files_in_directory(directory: Path) -> int:
     Returns:
         Count of all regular files found via rglob.
     """
-    return sum(1 for candidate in directory.rglob("*") if candidate.is_file())
+    return sum(
+        1
+        for candidate in directory.rglob("*")
+        if candidate.is_file() and not candidate.is_symlink()
+    )
 
 
 class _PhiScanWatchEventHandler(FileSystemEventHandler):
@@ -532,6 +536,8 @@ def _run_watch_loop(watch_path: Path) -> None:
         while True:
             time.sleep(_WATCH_POLL_INTERVAL_SECONDS)
     except KeyboardInterrupt:
+        pass
+    finally:
         observer.stop()
     observer.join()
 
@@ -600,6 +606,10 @@ def scan(
 ) -> None:
     """Scan a directory or file for PHI/PII."""
     _configure_logging(log_level, log_file, is_quiet)
+    # no_cache is a declared Phase 2 flag. It is accepted now so existing CI
+    # scripts can pass --no-cache without breaking; the cache layer activates
+    # in Phase 2 and will honour it then.
+    _logger.debug("--no-cache flag received (no-op until Phase 2): %s", no_cache)
     scan_config = _load_scan_config(config_path, severity_threshold)
     target_options = _ScanTargetOptions(
         scan_root=path,
@@ -660,7 +670,7 @@ def history(
 def install_hook() -> None:
     """Install phi-scan as a git pre-commit hook."""
     hook_path = Path(_PRE_COMMIT_HOOK_PATH)
-    if hook_path.exists():
+    if hook_path.exists() or hook_path.is_symlink():
         typer.echo(_HOOK_ALREADY_EXISTS_MESSAGE.format(path=hook_path))
         return
     hook_path.parent.mkdir(parents=True, exist_ok=True)
@@ -690,14 +700,14 @@ def init() -> None:
     typer.echo(_INIT_STUB_MESSAGE)
 
 
-@app.command()
-def setup() -> None:
+@app.command("setup")
+def download_models() -> None:
     """Download spaCy NLP models and verify optional dependencies."""
     typer.echo(_SETUP_STUB_MESSAGE)
 
 
-@app.command()
-def dashboard() -> None:
+@app.command("dashboard")
+def show_dashboard() -> None:
     """Rich Live real-time scan dashboard."""
     typer.echo(_DASHBOARD_STUB_MESSAGE)
 
