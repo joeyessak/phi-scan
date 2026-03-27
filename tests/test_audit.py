@@ -21,8 +21,8 @@ from phi_scan.audit import (
     _SCHEMA_VERSION_KEY,
     _UNKNOWN_BRANCH,
     _get_current_branch,
+    _get_current_repository_path,
     _get_current_timestamp,
-    _get_repository_path,
     _open_database,
     _reject_symlink_database_path,
     _serialize_findings,
@@ -73,6 +73,7 @@ _SCHEMA_META_COUNT_QUERY: str = f"SELECT COUNT(*) FROM {_SCHEMA_META_TABLE}"
 _SCHEMA_VERSION_QUERY: str = (
     f"SELECT value FROM {_SCHEMA_META_TABLE} WHERE key = '{_SCHEMA_VERSION_KEY}'"
 )
+_CREATED_AT_QUERY: str = f"SELECT value FROM {_SCHEMA_META_TABLE} WHERE key = '{_CREATED_AT_KEY}'"
 
 
 # ---------------------------------------------------------------------------
@@ -134,11 +135,6 @@ def _build_subprocess_result(
     mock_result.stdout = stdout
     mock_result.returncode = returncode
     return mock_result
-
-
-def _setup_schema(database_path: Path) -> None:
-    """Create the audit schema so other tests can insert/query rows."""
-    create_audit_schema(database_path)
 
 
 # ---------------------------------------------------------------------------
@@ -287,9 +283,7 @@ def test_create_audit_schema_seeds_created_at(tmp_path: Path) -> None:
     create_audit_schema(database_path)
 
     connection = sqlite3.connect(str(database_path))
-    cursor = connection.execute(
-        f"SELECT value FROM {_SCHEMA_META_TABLE} WHERE key = '{_CREATED_AT_KEY}'"
-    )
+    cursor = connection.execute(_CREATED_AT_QUERY)
     row = cursor.fetchone()
     connection.close()
     assert row is not None
@@ -327,11 +321,11 @@ def test_create_audit_schema_raises_audit_log_error_for_symlink(
 
 def test_insert_scan_event_inserts_one_row(tmp_path: Path) -> None:
     database_path = tmp_path / "audit.db"
-    _setup_schema(database_path)
+    create_audit_schema(database_path)
     scan_result = _build_clean_scan_result()
 
     with (
-        patch("phi_scan.audit._get_repository_path", return_value=_SAMPLE_GIT_REPO_ROOT),
+        patch("phi_scan.audit._get_current_repository_path", return_value=_SAMPLE_GIT_REPO_ROOT),
         patch("phi_scan.audit._get_current_branch", return_value=_SAMPLE_GIT_BRANCH),
     ):
         insert_scan_event(database_path, scan_result)
@@ -345,11 +339,11 @@ def test_insert_scan_event_inserts_one_row(tmp_path: Path) -> None:
 
 def test_insert_scan_event_sets_scanner_version(tmp_path: Path) -> None:
     database_path = tmp_path / "audit.db"
-    _setup_schema(database_path)
+    create_audit_schema(database_path)
     scan_result = _build_clean_scan_result()
 
     with (
-        patch("phi_scan.audit._get_repository_path", return_value=_SAMPLE_GIT_REPO_ROOT),
+        patch("phi_scan.audit._get_current_repository_path", return_value=_SAMPLE_GIT_REPO_ROOT),
         patch("phi_scan.audit._get_current_branch", return_value=_SAMPLE_GIT_BRANCH),
     ):
         insert_scan_event(database_path, scan_result)
@@ -363,11 +357,11 @@ def test_insert_scan_event_sets_scanner_version(tmp_path: Path) -> None:
 
 def test_insert_scan_event_sets_is_clean_true_for_clean_result(tmp_path: Path) -> None:
     database_path = tmp_path / "audit.db"
-    _setup_schema(database_path)
+    create_audit_schema(database_path)
     scan_result = _build_clean_scan_result()
 
     with (
-        patch("phi_scan.audit._get_repository_path", return_value=_SAMPLE_GIT_REPO_ROOT),
+        patch("phi_scan.audit._get_current_repository_path", return_value=_SAMPLE_GIT_REPO_ROOT),
         patch("phi_scan.audit._get_current_branch", return_value=_SAMPLE_GIT_BRANCH),
     ):
         insert_scan_event(database_path, scan_result)
@@ -381,11 +375,11 @@ def test_insert_scan_event_sets_is_clean_true_for_clean_result(tmp_path: Path) -
 
 def test_insert_scan_event_sets_is_clean_false_for_dirty_result(tmp_path: Path) -> None:
     database_path = tmp_path / "audit.db"
-    _setup_schema(database_path)
+    create_audit_schema(database_path)
     scan_result = _build_dirty_scan_result(tmp_path / "src" / "main.py")
 
     with (
-        patch("phi_scan.audit._get_repository_path", return_value=_SAMPLE_GIT_REPO_ROOT),
+        patch("phi_scan.audit._get_current_repository_path", return_value=_SAMPLE_GIT_REPO_ROOT),
         patch("phi_scan.audit._get_current_branch", return_value=_SAMPLE_GIT_BRANCH),
     ):
         insert_scan_event(database_path, scan_result)
@@ -399,11 +393,11 @@ def test_insert_scan_event_sets_is_clean_false_for_dirty_result(tmp_path: Path) 
 
 def test_insert_scan_event_stores_findings_count(tmp_path: Path) -> None:
     database_path = tmp_path / "audit.db"
-    _setup_schema(database_path)
+    create_audit_schema(database_path)
     scan_result = _build_dirty_scan_result(tmp_path / "src" / "main.py")
 
     with (
-        patch("phi_scan.audit._get_repository_path", return_value=_SAMPLE_GIT_REPO_ROOT),
+        patch("phi_scan.audit._get_current_repository_path", return_value=_SAMPLE_GIT_REPO_ROOT),
         patch("phi_scan.audit._get_current_branch", return_value=_SAMPLE_GIT_BRANCH),
     ):
         insert_scan_event(database_path, scan_result)
@@ -417,11 +411,11 @@ def test_insert_scan_event_stores_findings_count(tmp_path: Path) -> None:
 
 def test_insert_scan_event_stores_scan_duration(tmp_path: Path) -> None:
     database_path = tmp_path / "audit.db"
-    _setup_schema(database_path)
+    create_audit_schema(database_path)
     scan_result = _build_clean_scan_result()
 
     with (
-        patch("phi_scan.audit._get_repository_path", return_value=_SAMPLE_GIT_REPO_ROOT),
+        patch("phi_scan.audit._get_current_repository_path", return_value=_SAMPLE_GIT_REPO_ROOT),
         patch("phi_scan.audit._get_current_branch", return_value=_SAMPLE_GIT_BRANCH),
     ):
         insert_scan_event(database_path, scan_result)
@@ -451,7 +445,7 @@ def test_insert_scan_event_raises_audit_log_error_for_symlink(tmp_path: Path) ->
 
 def test_query_recent_scans_returns_empty_list_when_no_scans(tmp_path: Path) -> None:
     database_path = tmp_path / "audit.db"
-    _setup_schema(database_path)
+    create_audit_schema(database_path)
 
     result = query_recent_scans(database_path, _RECENT_SCANS_DAYS)
 
@@ -460,11 +454,11 @@ def test_query_recent_scans_returns_empty_list_when_no_scans(tmp_path: Path) -> 
 
 def test_query_recent_scans_returns_scan_within_cutoff(tmp_path: Path) -> None:
     database_path = tmp_path / "audit.db"
-    _setup_schema(database_path)
+    create_audit_schema(database_path)
     scan_result = _build_clean_scan_result()
 
     with (
-        patch("phi_scan.audit._get_repository_path", return_value=_SAMPLE_GIT_REPO_ROOT),
+        patch("phi_scan.audit._get_current_repository_path", return_value=_SAMPLE_GIT_REPO_ROOT),
         patch("phi_scan.audit._get_current_branch", return_value=_SAMPLE_GIT_BRANCH),
     ):
         insert_scan_event(database_path, scan_result)
@@ -476,11 +470,11 @@ def test_query_recent_scans_returns_scan_within_cutoff(tmp_path: Path) -> None:
 
 def test_query_recent_scans_returns_dicts(tmp_path: Path) -> None:
     database_path = tmp_path / "audit.db"
-    _setup_schema(database_path)
+    create_audit_schema(database_path)
     scan_result = _build_clean_scan_result()
 
     with (
-        patch("phi_scan.audit._get_repository_path", return_value=_SAMPLE_GIT_REPO_ROOT),
+        patch("phi_scan.audit._get_current_repository_path", return_value=_SAMPLE_GIT_REPO_ROOT),
         patch("phi_scan.audit._get_current_branch", return_value=_SAMPLE_GIT_BRANCH),
     ):
         insert_scan_event(database_path, scan_result)
@@ -492,7 +486,7 @@ def test_query_recent_scans_returns_dicts(tmp_path: Path) -> None:
 
 def test_query_recent_scans_excludes_events_older_than_cutoff(tmp_path: Path) -> None:
     database_path = tmp_path / "audit.db"
-    _setup_schema(database_path)
+    create_audit_schema(database_path)
     # Insert a row with a timestamp far in the past
     old_timestamp = (
         datetime.datetime.now(datetime.UTC) - datetime.timedelta(days=_RECENT_SCANS_DAYS + 1)
@@ -527,11 +521,11 @@ def test_query_recent_scans_returns_rows_ordered_by_timestamp_descending(
     tmp_path: Path,
 ) -> None:
     database_path = tmp_path / "audit.db"
-    _setup_schema(database_path)
+    create_audit_schema(database_path)
     scan_result = _build_clean_scan_result()
 
     with (
-        patch("phi_scan.audit._get_repository_path", return_value=_SAMPLE_GIT_REPO_ROOT),
+        patch("phi_scan.audit._get_current_repository_path", return_value=_SAMPLE_GIT_REPO_ROOT),
         patch("phi_scan.audit._get_current_branch", return_value=_SAMPLE_GIT_BRANCH),
     ):
         insert_scan_event(database_path, scan_result)
@@ -560,7 +554,7 @@ def test_query_recent_scans_raises_audit_log_error_for_symlink(tmp_path: Path) -
 
 def test_get_last_scan_returns_none_when_no_scans_exist(tmp_path: Path) -> None:
     database_path = tmp_path / "audit.db"
-    _setup_schema(database_path)
+    create_audit_schema(database_path)
 
     result = get_last_scan(database_path)
 
@@ -569,11 +563,11 @@ def test_get_last_scan_returns_none_when_no_scans_exist(tmp_path: Path) -> None:
 
 def test_get_last_scan_returns_dict_after_scan_inserted(tmp_path: Path) -> None:
     database_path = tmp_path / "audit.db"
-    _setup_schema(database_path)
+    create_audit_schema(database_path)
     scan_result = _build_clean_scan_result()
 
     with (
-        patch("phi_scan.audit._get_repository_path", return_value=_SAMPLE_GIT_REPO_ROOT),
+        patch("phi_scan.audit._get_current_repository_path", return_value=_SAMPLE_GIT_REPO_ROOT),
         patch("phi_scan.audit._get_current_branch", return_value=_SAMPLE_GIT_BRANCH),
     ):
         insert_scan_event(database_path, scan_result)
@@ -585,12 +579,12 @@ def test_get_last_scan_returns_dict_after_scan_inserted(tmp_path: Path) -> None:
 
 def test_get_last_scan_returns_most_recent_scan(tmp_path: Path) -> None:
     database_path = tmp_path / "audit.db"
-    _setup_schema(database_path)
+    create_audit_schema(database_path)
     clean_result = _build_clean_scan_result()
     dirty_result = _build_dirty_scan_result(tmp_path / "src" / "main.py")
 
     with (
-        patch("phi_scan.audit._get_repository_path", return_value=_SAMPLE_GIT_REPO_ROOT),
+        patch("phi_scan.audit._get_current_repository_path", return_value=_SAMPLE_GIT_REPO_ROOT),
         patch("phi_scan.audit._get_current_branch", return_value=_SAMPLE_GIT_BRANCH),
     ):
         insert_scan_event(database_path, clean_result)
@@ -619,7 +613,7 @@ def test_get_last_scan_raises_audit_log_error_for_symlink(tmp_path: Path) -> Non
 
 def test_get_schema_version_returns_audit_schema_version(tmp_path: Path) -> None:
     database_path = tmp_path / "audit.db"
-    _setup_schema(database_path)
+    create_audit_schema(database_path)
 
     version = get_schema_version(database_path)
 
@@ -628,7 +622,7 @@ def test_get_schema_version_returns_audit_schema_version(tmp_path: Path) -> None
 
 def test_get_schema_version_returns_integer(tmp_path: Path) -> None:
     database_path = tmp_path / "audit.db"
-    _setup_schema(database_path)
+    create_audit_schema(database_path)
 
     version = get_schema_version(database_path)
 
@@ -668,7 +662,7 @@ def test_get_schema_version_raises_audit_log_error_for_symlink(tmp_path: Path) -
 
 def test_migrate_schema_is_noop_when_from_equals_to(tmp_path: Path) -> None:
     database_path = tmp_path / "audit.db"
-    _setup_schema(database_path)
+    create_audit_schema(database_path)
 
     migrate_schema(database_path, AUDIT_SCHEMA_VERSION, AUDIT_SCHEMA_VERSION)  # must not raise
 
@@ -677,7 +671,7 @@ def test_migrate_schema_raises_schema_migration_error_for_downgrade(
     tmp_path: Path,
 ) -> None:
     database_path = tmp_path / "audit.db"
-    _setup_schema(database_path)
+    create_audit_schema(database_path)
 
     with pytest.raises(SchemaMigrationError):
         migrate_schema(database_path, _SCHEMA_VERSION_TO, _SCHEMA_VERSION_FROM)
@@ -685,7 +679,7 @@ def test_migrate_schema_raises_schema_migration_error_for_downgrade(
 
 def test_migrate_schema_downgrade_error_mentions_versions(tmp_path: Path) -> None:
     database_path = tmp_path / "audit.db"
-    _setup_schema(database_path)
+    create_audit_schema(database_path)
 
     with pytest.raises(SchemaMigrationError) as exc_info:
         migrate_schema(database_path, _SCHEMA_VERSION_TO, _SCHEMA_VERSION_FROM)
@@ -699,7 +693,7 @@ def test_migrate_schema_raises_schema_migration_error_when_migration_missing(
     tmp_path: Path,
 ) -> None:
     database_path = tmp_path / "audit.db"
-    _setup_schema(database_path)
+    create_audit_schema(database_path)
 
     # _MIGRATIONS is empty for schema v1 — no path from 1 to 2 exists
     with pytest.raises(SchemaMigrationError):
@@ -708,7 +702,7 @@ def test_migrate_schema_raises_schema_migration_error_when_migration_missing(
 
 def test_migrate_schema_applies_migration_and_updates_version(tmp_path: Path) -> None:
     database_path = tmp_path / "audit.db"
-    _setup_schema(database_path)
+    create_audit_schema(database_path)
 
     patched_migrations = {_SCHEMA_VERSION_FROM: _SAMPLE_MIGRATION_SQL}
     with patch("phi_scan.audit._MIGRATIONS", patched_migrations):
@@ -894,51 +888,51 @@ def test_get_current_branch_returns_unknown_when_output_is_empty() -> None:
 
 
 # ---------------------------------------------------------------------------
-# _get_repository_path
+# _get_current_repository_path
 # ---------------------------------------------------------------------------
 
 
-def test_get_repository_path_returns_path_from_git() -> None:
+def test_get_current_repository_path_returns_path_from_git() -> None:
     mock_result = _build_subprocess_result(
         stdout=_SAMPLE_GIT_REPO_OUTPUT,
         returncode=_GIT_SUCCESS_RETURN_CODE,
     )
 
     with patch("phi_scan.audit.subprocess.run", return_value=mock_result):
-        repo_path = _get_repository_path()
+        repo_path = _get_current_repository_path()
 
     assert repo_path == _SAMPLE_GIT_REPO_ROOT
 
 
-def test_get_repository_path_strips_trailing_newline() -> None:
+def test_get_current_repository_path_strips_trailing_newline() -> None:
     mock_result = _build_subprocess_result(
         stdout=_SAMPLE_GIT_REPO_OUTPUT,
         returncode=_GIT_SUCCESS_RETURN_CODE,
     )
 
     with patch("phi_scan.audit.subprocess.run", return_value=mock_result):
-        repo_path = _get_repository_path()
+        repo_path = _get_current_repository_path()
 
     assert "\n" not in repo_path
 
 
-def test_get_repository_path_returns_cwd_on_git_failure() -> None:
+def test_get_current_repository_path_returns_cwd_on_git_failure() -> None:
     mock_result = _build_subprocess_result(
         stdout=_EMPTY_GIT_OUTPUT,
         returncode=_GIT_FAILURE_RETURN_CODE,
     )
 
     with patch("phi_scan.audit.subprocess.run", return_value=mock_result):
-        repo_path = _get_repository_path()
+        repo_path = _get_current_repository_path()
 
     # Should return something (CWD), not raise
     assert isinstance(repo_path, str)
     assert repo_path  # not empty
 
 
-def test_get_repository_path_returns_cwd_on_os_error() -> None:
+def test_get_current_repository_path_returns_cwd_on_os_error() -> None:
     with patch("phi_scan.audit.subprocess.run", side_effect=OSError("no git")):
-        repo_path = _get_repository_path()
+        repo_path = _get_current_repository_path()
 
     assert isinstance(repo_path, str)
     assert repo_path  # not empty
