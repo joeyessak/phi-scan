@@ -364,12 +364,6 @@ def _ensure_database_parent_exists(database_path: Path) -> None:
 def _open_database(database_path: Path) -> sqlite3.Connection:
     """Open and configure a SQLite connection to the audit database.
 
-    # TODO(security): TOCTOU race — a symlink could be inserted between the
-    # is_symlink() check in _reject_symlink_database_path and the sqlite3.connect
-    # call below. Full mitigation requires os.open with O_NOFOLLOW, which is not
-    # portable on Windows. The window is narrow and requires local filesystem write
-    # access on the CI runner — outside the HIPAA threat model. Defer to Phase 5.
-
     Args:
         database_path: Path to the SQLite file to open or create.
 
@@ -380,6 +374,8 @@ def _open_database(database_path: Path) -> sqlite3.Connection:
         AuditLogError: If the path is a symlink, the parent directory cannot
             be created, or the database cannot be opened or configured.
     """
+    # TODO(security): TOCTOU race between is_symlink() and sqlite3.connect —
+    # full fix requires os.open with O_NOFOLLOW (not portable on Windows). Deferred to Phase 5.
     _reject_symlink_database_path(database_path)
     _ensure_database_parent_exists(database_path)
     try:
@@ -419,7 +415,7 @@ def _serialize_findings(findings: tuple[ScanFinding, ...]) -> str:
     Returns:
         A JSON array string safe for storage in the audit database.
     """
-    serialized = [
+    serialized_findings = [
         {
             "file_path_hash": hashlib.sha256(str(finding.file_path).encode()).hexdigest(),
             "line_number": finding.line_number,
@@ -433,7 +429,7 @@ def _serialize_findings(findings: tuple[ScanFinding, ...]) -> str:
         }
         for finding in findings
     ]
-    return json.dumps(serialized)
+    return json.dumps(serialized_findings)
 
 
 def _get_current_branch() -> str:
