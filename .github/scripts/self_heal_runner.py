@@ -89,7 +89,8 @@ def _print_run_outcome(result_subtype: str) -> None:
     if result_subtype == RESULT_SUBTYPE_SUCCESS:
         print("Self-heal completed successfully.")
     elif result_subtype == RESULT_SUBTYPE_MAX_BUDGET:
-        print(f"Self-heal hit the ${MAX_BUDGET_USD:.2f} budget cap — increase MAX_BUDGET_USD if needed.")
+        print(f"Self-heal hit the ${MAX_BUDGET_USD:.2f} budget cap.")
+        print("Increase MAX_BUDGET_USD in self_heal_runner.py if needed.")
     elif result_subtype == RESULT_SUBTYPE_MAX_TURNS:
         print(f"Self-heal hit the {MAX_TURNS}-turn limit — increase MAX_TURNS if needed.")
     else:
