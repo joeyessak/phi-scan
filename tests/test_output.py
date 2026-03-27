@@ -12,13 +12,13 @@ from rich.table import Table
 from phi_scan.constants import DetectionLayer, PhiCategory, RiskLevel, SeverityLevel
 from phi_scan.models import ScanConfig, ScanFinding, ScanResult
 from phi_scan.output import (
+    create_scan_progress,
     display_banner,
     display_category_breakdown,
     display_clean_result,
     display_file_tree,
     display_findings_table,
     display_scan_header,
-    display_scan_progress,
     display_summary_panel,
     display_violation_alert,
     format_csv,
@@ -411,13 +411,13 @@ def test_display_category_breakdown_does_not_raise_for_dirty_result() -> None:
 
 
 def test_display_scan_progress_context_manager_does_not_raise() -> None:
-    with display_scan_progress(total_files=5) as (progress, task_id):
+    with create_scan_progress(total_files=5) as (progress, task_id):
         assert progress is not None
         assert task_id is not None
 
 
 def test_display_scan_progress_yields_progress_and_task_id() -> None:
-    with display_scan_progress(total_files=3) as (progress, task_id):
+    with create_scan_progress(total_files=3) as (progress, task_id):
         # Verify callers can advance the progress bar without error.
         progress.update(task_id, advance=1)
 

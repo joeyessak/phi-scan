@@ -37,7 +37,7 @@ __all__ = [
     "display_file_tree",
     "display_findings_table",
     "display_scan_header",
-    "display_scan_progress",
+    "create_scan_progress",
     "display_summary_panel",
     "display_violation_alert",
     "format_csv",
@@ -206,6 +206,7 @@ _SINGULAR_COUNT: int = 1
 _ZERO_FINDINGS: int = 0
 _LINE_LABEL: str = "line"
 _EMPTY_LINE: str = ""
+_EM_DASH_SEPARATOR: str = " — "
 
 # ---------------------------------------------------------------------------
 # Private helper functions
@@ -459,7 +460,7 @@ def _group_findings_by_file(
     groups: dict[Path, list[ScanFinding]] = {}
     for finding in findings:
         if finding.file_path not in groups:
-            groups[finding.file_path] = []
+            groups[finding.file_path] = list()
         groups[finding.file_path].append(finding)
     return groups
 
@@ -567,19 +568,22 @@ def display_banner() -> None:
     _console.rule(style=_RULE_STYLE)
 
 
-def _build_scan_header_markup(path: Path, config: ScanConfig) -> str:
-    """Build the Rich markup content string for the scan header panel.
+def _build_scan_header_markup(path: Path, config: ScanConfig, timestamp: str) -> str:
+    """Build the Rich markup string for the scan header panel.
+
+    Pure function — timestamp is passed in so the caller (display_scan_header)
+    owns the datetime.now() side effect and this builder remains testable.
 
     Args:
         path: The directory or file being scanned.
         config: Active scan configuration.
+        timestamp: ISO-format timestamp string to display in the header.
 
     Returns:
         Newline-separated Rich markup string with target, thresholds, and timestamp.
     """
-    timestamp = datetime.now().isoformat(timespec=_TIMESTAMP_TIMESPEC)
     label_style = _PANEL_LABEL_STYLE
-    scan_header_markup = "\n".join(
+    return "\n".join(
         [
             f"[{label_style}]Target:[/{label_style}] {path}",
             f"[{label_style}]Severity threshold:[/{label_style}] {config.severity_threshold.value}",
@@ -588,7 +592,6 @@ def _build_scan_header_markup(path: Path, config: ScanConfig) -> str:
             f"[{label_style}]Timestamp:[/{label_style}] {timestamp}",
         ]
     )
-    return scan_header_markup
 
 
 def display_scan_header(path: Path, config: ScanConfig) -> None:
@@ -598,14 +601,15 @@ def display_scan_header(path: Path, config: ScanConfig) -> None:
         path: The directory or file being scanned.
         config: Active scan configuration (severity threshold, confidence, etc.).
     """
-    scan_header_markup = _build_scan_header_markup(path, config)
+    timestamp = datetime.now().isoformat(timespec=_TIMESTAMP_TIMESPEC)
+    scan_header_markup = _build_scan_header_markup(path, config, timestamp)
     _console.print(
         Panel(scan_header_markup, title=_SCAN_HEADER_TITLE, border_style=_PANEL_BORDER_STYLE)
     )
 
 
 @contextmanager
-def display_scan_progress(total_files: int) -> Generator[tuple[Progress, TaskID], None, None]:
+def create_scan_progress(total_files: int) -> Generator[tuple[Progress, TaskID], None, None]:
     """Yield a configured Rich Progress bar for file-by-file scan updates.
 
     Usage::
@@ -656,7 +660,8 @@ def display_file_tree(findings: tuple[ScanFinding, ...]) -> None:
         for finding in file_findings:
             style = _SEVERITY_STYLE[finding.severity]
             branch.add(
-                f"[{style}]{_LINE_LABEL} {finding.line_number}[/{style}] — {finding.entity_type}"
+                f"[{style}]{_LINE_LABEL} {finding.line_number}[/{style}]"
+                f"{_EM_DASH_SEPARATOR}{finding.entity_type}"
             )
     _console.print(tree)
 
