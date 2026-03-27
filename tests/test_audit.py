@@ -68,6 +68,9 @@ _SCHEMA_VERSION_TO: int = 2
 _SAMPLE_MIGRATION_SQL: str = "ALTER TABLE scan_events ADD COLUMN extra TEXT"
 _RECENT_SCANS_DAYS: int = 7
 _ZERO_DAYS: int = 0
+_EMPTY_TABLE_ROW_COUNT: int = 0
+_MINIMUM_SEEDED_META_ROWS: int = 1
+_SINGLE_INSERTED_ROW_COUNT: int = 1
 _SCAN_EVENTS_COUNT_QUERY: str = f"SELECT COUNT(*) FROM {_SCAN_EVENTS_TABLE}"
 _SCHEMA_META_COUNT_QUERY: str = f"SELECT COUNT(*) FROM {_SCHEMA_META_TABLE}"
 _SCHEMA_VERSION_QUERY: str = (
@@ -248,9 +251,9 @@ def test_create_audit_schema_creates_scan_events_table(tmp_path: Path) -> None:
 
     connection = sqlite3.connect(str(database_path))
     cursor = connection.execute(_SCAN_EVENTS_COUNT_QUERY)
-    count = cursor.fetchone()[0]
+    scan_event_row_count = cursor.fetchone()[0]
     connection.close()
-    assert count == 0  # table exists and is empty
+    assert scan_event_row_count == _EMPTY_TABLE_ROW_COUNT  # table exists and is empty
 
 
 def test_create_audit_schema_creates_schema_meta_table(tmp_path: Path) -> None:
@@ -260,9 +263,10 @@ def test_create_audit_schema_creates_schema_meta_table(tmp_path: Path) -> None:
 
     connection = sqlite3.connect(str(database_path))
     cursor = connection.execute(_SCHEMA_META_COUNT_QUERY)
-    count = cursor.fetchone()[0]
+    schema_meta_row_count = cursor.fetchone()[0]
     connection.close()
-    assert count >= 1  # at least schema_version key was seeded
+    # at least schema_version key was seeded
+    assert schema_meta_row_count >= _MINIMUM_SEEDED_META_ROWS
 
 
 def test_create_audit_schema_seeds_schema_version(tmp_path: Path) -> None:
@@ -332,9 +336,9 @@ def test_insert_scan_event_inserts_one_row(tmp_path: Path) -> None:
 
     connection = sqlite3.connect(str(database_path))
     cursor = connection.execute(_SCAN_EVENTS_COUNT_QUERY)
-    count = cursor.fetchone()[0]
+    scan_event_row_count = cursor.fetchone()[0]
     connection.close()
-    assert count == 1
+    assert scan_event_row_count == _SINGLE_INSERTED_ROW_COUNT
 
 
 def test_insert_scan_event_sets_scanner_version(tmp_path: Path) -> None:
@@ -846,6 +850,25 @@ def test_serialize_findings_serializes_multiple_findings(tmp_path: Path) -> None
 
     parsed = json.loads(serialized)
     assert len(parsed) == 2  # noqa: PLR2004 — two findings passed above
+
+
+def test_serialize_findings_includes_file_path_hash(tmp_path: Path) -> None:
+    finding = _build_scan_finding(tmp_path / "src" / "main.py")
+
+    serialized = _serialize_findings((finding,))
+
+    parsed = json.loads(serialized)
+    assert "file_path_hash" in parsed[0]
+    assert len(parsed[0]["file_path_hash"]) == 64  # noqa: PLR2004 — SHA-256 hex digest length
+
+
+def test_serialize_findings_excludes_plaintext_file_path(tmp_path: Path) -> None:
+    finding = _build_scan_finding(tmp_path / "src" / "main.py")
+
+    serialized = _serialize_findings((finding,))
+
+    parsed = json.loads(serialized)
+    assert "file_path" not in parsed[0]
 
 
 # ---------------------------------------------------------------------------

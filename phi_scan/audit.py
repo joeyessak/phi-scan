@@ -9,6 +9,7 @@ never modifications to existing rows.
 from __future__ import annotations
 
 import datetime
+import hashlib
 import json
 import logging
 import sqlite3
@@ -164,7 +165,7 @@ def insert_scan_event(database_path: Path, scan_result: ScanResult) -> None:
     row = (
         _get_current_timestamp(),
         __version__,
-        _get_repository_path(),
+        _get_current_repository_path(),
         _get_current_branch(),
         scan_result.files_scanned,
         len(scan_result.findings),
@@ -336,6 +337,21 @@ def _reject_symlink_database_path(database_path: Path) -> None:
         raise AuditLogError(_SYMLINK_DATABASE_PATH_ERROR.format(path=database_path))
 
 
+def _ensure_database_parent_exists(database_path: Path) -> None:
+    """Create the parent directory of database_path if it does not exist.
+
+    Args:
+        database_path: Path to the SQLite file whose parent must exist.
+
+    Raises:
+        AuditLogError: If the parent directory cannot be created.
+    """
+    try:
+        database_path.parent.mkdir(parents=True, exist_ok=True)
+    except OSError as io_error:
+        raise AuditLogError(_DATABASE_ERROR.format(detail=io_error)) from io_error
+
+
 def _open_database(database_path: Path) -> sqlite3.Connection:
     """Open and configure a SQLite connection to the audit database.
 
@@ -350,11 +366,9 @@ def _open_database(database_path: Path) -> sqlite3.Connection:
             be created, or the database cannot be opened.
     """
     _reject_symlink_database_path(database_path)
+    _ensure_database_parent_exists(database_path)
     try:
-        database_path.parent.mkdir(parents=True, exist_ok=True)
         connection = sqlite3.connect(str(database_path))
-    except OSError as io_error:
-        raise AuditLogError(_DATABASE_ERROR.format(detail=io_error)) from io_error
     except sqlite3.Error as db_error:
         raise AuditLogError(_DATABASE_ERROR.format(detail=db_error)) from db_error
     connection.row_factory = sqlite3.Row
@@ -377,8 +391,8 @@ def _serialize_findings(findings: tuple[ScanFinding, ...]) -> str:
     Only fields that cannot contain raw PHI are included. ``code_context``
     is deliberately excluded — it stores surrounding source lines that may
     contain the detected value in plaintext. ``file_path`` is stored as a
-    plain string — paths can be PHI-revealing (e.g. patient_ssn_export.csv);
-    this is a known limitation deferred to Phase 2 security hardening.
+    SHA-256 hash (``file_path_hash``) — paths can be PHI-revealing (e.g.
+    patient_ssn_export.csv) and must not be persisted in plaintext.
 
     Args:
         findings: The findings tuple from a completed ScanResult.
@@ -388,7 +402,7 @@ def _serialize_findings(findings: tuple[ScanFinding, ...]) -> str:
     """
     serialized = [
         {
-            "file_path": str(finding.file_path),
+            "file_path_hash": hashlib.sha256(str(finding.file_path).encode()).hexdigest(),
             "line_number": finding.line_number,
             "entity_type": finding.entity_type,
             "hipaa_category": finding.hipaa_category.value,
@@ -423,7 +437,7 @@ def _get_current_branch() -> str:
         return _UNKNOWN_BRANCH
 
 
-def _get_repository_path() -> str:
+def _get_current_repository_path() -> str:
     """Return the git repository root path, or the current directory if unavailable.
 
     Returns:
