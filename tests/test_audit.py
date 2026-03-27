@@ -71,6 +71,10 @@ _ZERO_DAYS: int = 0
 _EMPTY_TABLE_ROW_COUNT: int = 0
 _MINIMUM_SEEDED_META_ROWS: int = 1
 _SINGLE_INSERTED_ROW_COUNT: int = 1
+_SCANNER_VERSION_COLUMN: str = "scanner_version"
+_IS_CLEAN_COLUMN: str = "is_clean"
+_FINDINGS_COUNT_COLUMN: str = "findings_count"
+_SCAN_DURATION_COLUMN: str = "scan_duration"
 _SCAN_EVENTS_COUNT_QUERY: str = f"SELECT COUNT(*) FROM {_SCAN_EVENTS_TABLE}"
 _SCHEMA_META_COUNT_QUERY: str = f"SELECT COUNT(*) FROM {_SCHEMA_META_TABLE}"
 _SCHEMA_VERSION_QUERY: str = (
@@ -353,7 +357,7 @@ def test_insert_scan_event_sets_scanner_version(tmp_path: Path) -> None:
         insert_scan_event(database_path, scan_result)
 
     connection = sqlite3.connect(str(database_path))
-    cursor = connection.execute(f"SELECT scanner_version FROM {_SCAN_EVENTS_TABLE}")
+    cursor = connection.execute(f"SELECT {_SCANNER_VERSION_COLUMN} FROM {_SCAN_EVENTS_TABLE}")
     version = cursor.fetchone()[0]
     connection.close()
     assert version == __version__
@@ -371,7 +375,7 @@ def test_insert_scan_event_sets_is_clean_true_for_clean_result(tmp_path: Path) -
         insert_scan_event(database_path, scan_result)
 
     connection = sqlite3.connect(str(database_path))
-    cursor = connection.execute(f"SELECT is_clean FROM {_SCAN_EVENTS_TABLE}")
+    cursor = connection.execute(f"SELECT {_IS_CLEAN_COLUMN} FROM {_SCAN_EVENTS_TABLE}")
     is_clean_value = cursor.fetchone()[0]
     connection.close()
     assert is_clean_value == _BOOLEAN_TRUE
@@ -389,7 +393,7 @@ def test_insert_scan_event_sets_is_clean_false_for_dirty_result(tmp_path: Path) 
         insert_scan_event(database_path, scan_result)
 
     connection = sqlite3.connect(str(database_path))
-    cursor = connection.execute(f"SELECT is_clean FROM {_SCAN_EVENTS_TABLE}")
+    cursor = connection.execute(f"SELECT {_IS_CLEAN_COLUMN} FROM {_SCAN_EVENTS_TABLE}")
     is_clean_value = cursor.fetchone()[0]
     connection.close()
     assert is_clean_value == _BOOLEAN_FALSE
@@ -407,7 +411,7 @@ def test_insert_scan_event_stores_findings_count(tmp_path: Path) -> None:
         insert_scan_event(database_path, scan_result)
 
     connection = sqlite3.connect(str(database_path))
-    cursor = connection.execute(f"SELECT findings_count FROM {_SCAN_EVENTS_TABLE}")
+    cursor = connection.execute(f"SELECT {_FINDINGS_COUNT_COLUMN} FROM {_SCAN_EVENTS_TABLE}")
     findings_count = cursor.fetchone()[0]
     connection.close()
     assert findings_count == len(scan_result.findings)
@@ -425,7 +429,7 @@ def test_insert_scan_event_stores_scan_duration(tmp_path: Path) -> None:
         insert_scan_event(database_path, scan_result)
 
     connection = sqlite3.connect(str(database_path))
-    cursor = connection.execute(f"SELECT scan_duration FROM {_SCAN_EVENTS_TABLE}")
+    cursor = connection.execute(f"SELECT {_SCAN_DURATION_COLUMN} FROM {_SCAN_EVENTS_TABLE}")
     stored_duration = cursor.fetchone()[0]
     connection.close()
     assert stored_duration == _SAMPLE_SCAN_DURATION
@@ -903,6 +907,18 @@ def test_get_current_branch_returns_unknown_on_os_error() -> None:
 
 def test_get_current_branch_returns_unknown_when_output_is_empty() -> None:
     mock_result = _build_subprocess_result(stdout=_EMPTY_GIT_OUTPUT)
+
+    with patch("phi_scan.audit.subprocess.run", return_value=mock_result):
+        branch = _get_current_branch()
+
+    assert branch == _UNKNOWN_BRANCH
+
+
+def test_get_current_branch_returns_unknown_on_git_failure() -> None:
+    mock_result = _build_subprocess_result(
+        stdout=_EMPTY_GIT_OUTPUT,
+        returncode=_GIT_FAILURE_RETURN_CODE,
+    )
 
     with patch("phi_scan.audit.subprocess.run", return_value=mock_result):
         branch = _get_current_branch()

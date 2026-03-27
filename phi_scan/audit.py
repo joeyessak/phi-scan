@@ -355,6 +355,12 @@ def _ensure_database_parent_exists(database_path: Path) -> None:
 def _open_database(database_path: Path) -> sqlite3.Connection:
     """Open and configure a SQLite connection to the audit database.
 
+    Note: _reject_symlink_database_path is subject to a TOCTOU race — a
+    symlink could be inserted between the is_symlink() check and the
+    sqlite3.connect call. Full mitigation requires os.open with O_NOFOLLOW,
+    which is platform-specific. The window is narrow and requires local
+    filesystem access, which is outside the HIPAA threat model for CI runners.
+
     Args:
         database_path: Path to the SQLite file to open or create.
 
@@ -363,7 +369,7 @@ def _open_database(database_path: Path) -> sqlite3.Connection:
 
     Raises:
         AuditLogError: If the path is a symlink, the parent directory cannot
-            be created, or the database cannot be opened.
+            be created, or the database cannot be opened or configured.
     """
     _reject_symlink_database_path(database_path)
     _ensure_database_parent_exists(database_path)
@@ -371,8 +377,12 @@ def _open_database(database_path: Path) -> sqlite3.Connection:
         connection = sqlite3.connect(str(database_path))
     except sqlite3.Error as db_error:
         raise AuditLogError(_DATABASE_ERROR.format(detail=db_error)) from db_error
-    connection.row_factory = sqlite3.Row
-    connection.execute(_PRAGMA_WAL_MODE)
+    try:
+        connection.row_factory = sqlite3.Row
+        connection.execute(_PRAGMA_WAL_MODE)
+    except sqlite3.Error as config_error:
+        connection.close()
+        raise AuditLogError(_DATABASE_ERROR.format(detail=config_error)) from config_error
     return connection
 
 
@@ -430,11 +440,12 @@ def _get_current_branch() -> str:
             text=True,
             timeout=_GIT_SUBPROCESS_TIMEOUT_SECONDS,
         )
-        branch = completed_process.stdout.strip()
-        return branch if branch else _UNKNOWN_BRANCH
+        if completed_process.returncode == 0:
+            branch = completed_process.stdout.strip()
+            return branch if branch else _UNKNOWN_BRANCH
     except (OSError, subprocess.TimeoutExpired) as git_error:
         _logger.warning("Could not determine git branch: %s", git_error)
-        return _UNKNOWN_BRANCH
+    return _UNKNOWN_BRANCH
 
 
 def _get_current_repository_path() -> str:
