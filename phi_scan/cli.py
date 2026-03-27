@@ -497,16 +497,16 @@ def _parse_lookback_days(period: str) -> int:
     return int(day_count_str)
 
 
-def _display_scan_event_row(audit_row: dict[str, Any]) -> None:
+def _display_scan_event_row(scan_event_record: dict[str, Any]) -> None:
     """Print a single audit scan event as a one-line summary.
 
     Args:
-        audit_row: Audit row dict as returned by get_last_scan or query_recent_scans.
+        scan_event_record: Audit row dict as returned by get_last_scan or query_recent_scans.
     """
-    scanned_at = audit_row.get(_AUDIT_KEY_SCANNED_AT, _UNKNOWN_LABEL)
-    is_clean = audit_row.get(_AUDIT_KEY_IS_CLEAN, False)
-    risk_level = audit_row.get(_AUDIT_KEY_RISK_LEVEL, _UNKNOWN_LABEL)
-    files_scanned = audit_row.get(_AUDIT_KEY_FILES_SCANNED, _ZERO_FILES_SCANNED)
+    scanned_at = scan_event_record.get(_AUDIT_KEY_SCANNED_AT, _UNKNOWN_LABEL)
+    is_clean = scan_event_record.get(_AUDIT_KEY_IS_CLEAN, False)
+    risk_level = scan_event_record.get(_AUDIT_KEY_RISK_LEVEL, _UNKNOWN_LABEL)
+    files_scanned = scan_event_record.get(_AUDIT_KEY_FILES_SCANNED, _ZERO_FILES_SCANNED)
     status = _CLEAN_STATUS_LABEL if is_clean else _VIOLATION_STATUS_LABEL
     typer.echo(
         _HISTORY_ROW_FORMAT.format(
@@ -683,8 +683,8 @@ def watch(
     _observe_directory(path)
 
 
-@app.command()
-def report() -> None:
+@app.command("report")
+def display_last_scan() -> None:
     """Display the most recent scan result from the audit log."""
     database_path = Path(DEFAULT_DATABASE_PATH).expanduser()
     create_audit_schema(database_path)
@@ -696,8 +696,8 @@ def report() -> None:
     _display_scan_event_row(last_scan_event)
 
 
-@app.command()
-def history(
+@app.command("history")
+def display_history(
     last: Annotated[str, typer.Option("--last", help=_HISTORY_LAST_HELP)] = _DEFAULT_HISTORY_PERIOD,
 ) -> None:
     """Query the audit log for recent scan history."""
@@ -740,8 +740,8 @@ def uninstall_hook() -> None:
     typer.echo(_HOOK_REMOVED_MESSAGE.format(path=hook_path))
 
 
-@app.command()
-def init() -> None:
+@app.command("init")
+def initialize_project() -> None:
     """Guided first-run wizard: config, ignore file, hook, model download."""
     typer.echo(_INIT_STUB_MESSAGE)
 
@@ -759,7 +759,7 @@ def display_dashboard() -> None:
 
 
 @config_app.command("init")
-def config_init() -> None:
+def initialize_config() -> None:
     """Generate a default .phi-scanner.yml configuration file."""
     config_file_path = Path(DEFAULT_CONFIG_FILENAME)
     if config_file_path.exists():
