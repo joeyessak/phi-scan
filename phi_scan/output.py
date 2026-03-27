@@ -124,6 +124,9 @@ _BANNER_TEXT: str = "PhiScan"
 _BANNER_TAGLINE_TEMPLATE: str = "v{version}  —  HIPAA-Compliant PHI/PII Scanner"
 _BANNER_STYLE: str = _STYLE_BOLD_CYAN
 _BANNER_TAGLINE_STYLE: str = _STYLE_DIM
+_BANNER_PYFIGLET_MISSING_NOTE: str = (
+    "note: install pyfiglet for ASCII art banner (pip install pyfiglet)"
+)
 
 # ---------------------------------------------------------------------------
 # Panel and table titles
@@ -357,8 +360,10 @@ def _build_sarif_finding_message(finding: ScanFinding) -> str:
         A sentence describing the category, layer, confidence, and remediation.
     """
     confidence_str = _CONFIDENCE_FORMAT.format(finding.confidence)
-    # remediation_hint must never contain raw PHI — see _serialize_finding_to_dict.
-    # SARIF output is consumed by GitHub Advanced Security and other CI platforms.
+    # remediation_hint must never contain raw PHI — SARIF is consumed by GitHub
+    # Advanced Security and other external CI platforms. Enforcement of this
+    # constraint belongs in ScanFinding.__post_init__, not here; output.py trusts
+    # the model-layer contract. See _serialize_finding_to_dict for the full note.
     return (
         f"{finding.hipaa_category.value} identifier detected by the "
         f"{finding.detection_layer.value} layer "
@@ -554,12 +559,12 @@ def format_csv(scan_result: ScanResult) -> str:
     Returns:
         CSV-formatted string with a header row and one data row per finding.
     """
-    buffer = io.StringIO()
-    writer = csv.DictWriter(buffer, fieldnames=_CSV_FIELD_NAMES)
+    csv_buffer = io.StringIO()
+    writer = csv.DictWriter(csv_buffer, fieldnames=_CSV_FIELD_NAMES)
     writer.writeheader()
     for finding in scan_result.findings:
         writer.writerow(_serialize_finding_to_csv_row(finding))
-    return buffer.getvalue()
+    return csv_buffer.getvalue()
 
 
 def format_sarif(scan_result: ScanResult) -> str:
@@ -586,11 +591,6 @@ def format_sarif(scan_result: ScanResult) -> str:
 # ---------------------------------------------------------------------------
 # Display functions — render Rich components to the console
 # ---------------------------------------------------------------------------
-
-
-_BANNER_PYFIGLET_MISSING_NOTE: str = (
-    "note: install pyfiglet for ASCII art banner (pip install pyfiglet)"
-)
 
 
 def _build_ascii_banner_text() -> str:
@@ -709,8 +709,8 @@ def display_file_tree(findings: tuple[ScanFinding, ...]) -> None:
     # Path objects sort lexicographically — produces alphabetical file order intentionally.
     for file_path, file_findings in sorted(findings_by_file.items()):
         count = len(file_findings)
-        word = _FINDING_WORD if count == _SINGULAR_COUNT else _FINDING_WORD_PLURAL
-        branch = tree.add(f"{file_path} ({count} {word})")
+        finding_word = _FINDING_WORD if count == _SINGULAR_COUNT else _FINDING_WORD_PLURAL
+        branch = tree.add(f"{file_path} ({count} {finding_word})")
         for finding in file_findings:
             style = _SEVERITY_STYLE[finding.severity]
             branch.add(
@@ -783,10 +783,10 @@ def _build_violation_panel_markup(scan_result: ScanResult) -> str:
     """
     count = len(scan_result.findings)
     risk_style = _RISK_LEVEL_STYLE[scan_result.risk_level]
-    word = _FINDING_WORD if count == _SINGULAR_COUNT else _FINDING_WORD_PLURAL
+    finding_word = _FINDING_WORD if count == _SINGULAR_COUNT else _FINDING_WORD_PLURAL
     return "\n".join(
         [
-            f"[{_STYLE_BOLD}]{count} {word} {_VIOLATION_DETECTED_SUFFIX}[/{_STYLE_BOLD}]",
+            f"[{_STYLE_BOLD}]{count} {finding_word} {_VIOLATION_DETECTED_SUFFIX}[/{_STYLE_BOLD}]",
             f"{_VIOLATION_RISK_LEVEL_LABEL}"
             f"[{risk_style}]{_format_risk_level_display(scan_result.risk_level)}[/{risk_style}]",
         ]
