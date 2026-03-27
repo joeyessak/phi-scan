@@ -63,6 +63,7 @@ _STYLE_YELLOW: str = "yellow"
 _STYLE_GREEN: str = "green"
 _STYLE_BOLD_GREEN: str = "bold green"
 _STYLE_DIM: str = "dim"
+_STYLE_BOLD: str = "bold"
 _STYLE_BOLD_CYAN: str = "bold cyan"
 
 # ---------------------------------------------------------------------------
@@ -134,6 +135,7 @@ _CATEGORY_TABLE_TITLE: str = "PHI Category Breakdown"
 _FINDINGS_TABLE_TITLE: str = "Findings"
 _FILE_TREE_TITLE: str = "Affected Files"
 _VIOLATION_ALERT_TITLE: str = "PHI/PII Violation Detected"
+_VIOLATION_RISK_LEVEL_LABEL: str = "Risk Level: "
 
 # ---------------------------------------------------------------------------
 # Findings table column headers
@@ -396,7 +398,7 @@ def _build_sarif_run(scan_result: ScanResult) -> dict[str, object]:
                 "rules": _build_sarif_rules(scan_result),
             }
         },
-        "results": [_build_sarif_result(f) for f in scan_result.findings],
+        "results": [_build_sarif_result(finding) for finding in scan_result.findings],
     }
 
 
@@ -492,7 +494,7 @@ def format_json(scan_result: ScanResult) -> str:
         "risk_level": scan_result.risk_level.value,
         "severity_counts": {k.value: v for k, v in scan_result.severity_counts.items()},
         "category_counts": {k.value: v for k, v in scan_result.category_counts.items()},
-        "findings": [_finding_to_dict(f) for f in scan_result.findings],
+        "findings": [_finding_to_dict(finding) for finding in scan_result.findings],
     }
     return json.dumps(payload, indent=_JSON_INDENT)
 
@@ -566,14 +568,15 @@ def display_scan_header(path: Path, config: ScanConfig) -> None:
         config: Active scan configuration (severity threshold, confidence, etc.).
     """
     timestamp = datetime.now().isoformat(timespec=_TIMESTAMP_TIMESPEC)
-    lbl = _PANEL_LABEL_STYLE
+    label_style = _PANEL_LABEL_STYLE
     content = "\n".join(
         [
-            f"[{lbl}]Target:[/{lbl}]               {path}",
-            f"[{lbl}]Severity threshold:[/{lbl}]   {config.severity_threshold.value}",
-            f"[{lbl}]Confidence threshold:[/{lbl}]"
+            f"[{label_style}]Target:[/{label_style}]               {path}",
+            f"[{label_style}]Severity threshold:[/{label_style}]"
+            f"   {config.severity_threshold.value}",
+            f"[{label_style}]Confidence threshold:[/{label_style}]"
             f" {_CONFIDENCE_FORMAT.format(config.confidence_threshold)}",
-            f"[{lbl}]Timestamp:[/{lbl}]            {timestamp}",
+            f"[{label_style}]Timestamp:[/{label_style}]            {timestamp}",
         ]
     )
     _console.print(Panel(content, title=_SCAN_HEADER_TITLE, border_style=_PANEL_BORDER_STYLE))
@@ -641,15 +644,16 @@ def display_summary_panel(scan_result: ScanResult) -> None:
         scan_result: The completed scan result to summarise.
     """
     risk_style = _RISK_LEVEL_STYLE[scan_result.risk_level]
-    lbl = _PANEL_LABEL_STYLE
+    label_style = _PANEL_LABEL_STYLE
     duration_str = _DURATION_FORMAT.format(scan_result.scan_duration)
     content = "\n".join(
         [
-            f"[{lbl}]Risk Level:[/{lbl}]          [{risk_style}]"
+            f"[{label_style}]Risk Level:[/{label_style}]          [{risk_style}]"
             f"{scan_result.risk_level.value.upper()}[/{risk_style}]",
-            f"[{lbl}]Files Scanned:[/{lbl}]       {scan_result.files_scanned}",
-            f"[{lbl}]Files with Findings:[/{lbl}] {scan_result.files_with_findings}",
-            f"[{lbl}]Scan Duration:[/{lbl}]       {duration_str}",
+            f"[{label_style}]Files Scanned:[/{label_style}]       {scan_result.files_scanned}",
+            f"[{label_style}]Files with Findings:[/{label_style}]"
+            f" {scan_result.files_with_findings}",
+            f"[{label_style}]Scan Duration:[/{label_style}]       {duration_str}",
             "",
             _build_severity_breakdown(scan_result.severity_counts),
         ]
@@ -678,8 +682,8 @@ def display_violation_alert(scan_result: ScanResult) -> None:
     word = _FINDING_WORD if count == 1 else _FINDING_WORD_PLURAL
     content = "\n".join(
         [
-            f"[bold]{count} {word} detected[/bold]",
-            f"Risk Level: [{risk_style}]{scan_result.risk_level.value.upper()}[/{risk_style}]",
+            f"[{_STYLE_BOLD}]{count} {word} detected[/{_STYLE_BOLD}]",
+            f"{_VIOLATION_RISK_LEVEL_LABEL}[{risk_style}]{scan_result.risk_level.value.upper()}[/{risk_style}]",
         ]
     )
     _console.print(
