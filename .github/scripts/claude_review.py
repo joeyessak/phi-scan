@@ -65,7 +65,19 @@ BANNED:
 
 Provide a concise, constructive review. Format your response as markdown.
 Start with a one-line summary, then list specific issues found (if any) with file:line references.
-If the code looks good, say so clearly. Be direct and specific — not vague."""
+If the code looks good, say so clearly. Be direct and specific — not vague.
+
+IMPORTANT: At the very end of your response, after all human-readable content, append a
+machine-readable findings block in this exact format (do not omit it):
+
+<!-- REVIEW_RESULT
+verdict: CLEAN | CRITICAL | WARNING
+critical_count: <integer>
+warning_count: <integer>
+-->
+
+Use CLEAN when no issues are found. Use CRITICAL when there are security, PHI, or logic
+errors. Use WARNING when there are code standard violations but no security issues."""
 
 
 def load_diff() -> str:
@@ -133,12 +145,27 @@ def request_claude_review(pr_title: str, diff: str) -> str:
     raise RuntimeError("All retry attempts exhausted without returning or raising")
 
 
+REVIEW_RESULT_FILE = "review_result.txt"
+
+
 def write_review_comment(review_text: str) -> None:
-    """Write the review to the output file for the workflow to post."""
+    """Write the human-readable review and machine-readable result to their output files."""
     header = "## Claude Code Review\n\n"
 
     with open(REVIEW_OUTPUT_FILE, "w", encoding="utf-8") as output_file:
         output_file.write(header + review_text)
+
+    # Extract the machine-readable verdict for the auto-resolve workflow.
+    # Defaults to WARNING so unreadable results trigger a fix attempt rather than silently pass.
+    verdict = "WARNING"
+    for line in review_text.splitlines():
+        stripped = line.strip()
+        if stripped.startswith("verdict:"):
+            verdict = stripped.split(":", maxsplit=1)[1].strip()
+            break
+
+    with open(REVIEW_RESULT_FILE, "w", encoding="utf-8") as result_file:
+        result_file.write(verdict)
 
 
 def run_review() -> None:

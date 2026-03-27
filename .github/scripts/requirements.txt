@@ -1,0 +1,4 @@
+# Dependencies for GitHub Actions CI scripts only.
+# Not part of the phi-scan package — do not add these to pyproject.toml.
+anthropic>=0.84.0
+claude-agent-sdk>=0.1.0
