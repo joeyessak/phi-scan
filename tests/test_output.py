@@ -37,8 +37,10 @@ _TEST_LINE_NUMBER: int = 42
 _TEST_ENTITY_TYPE: str = "us_ssn"
 _TEST_CONFIDENCE_HIGH: float = 0.95
 _TEST_CONFIDENCE_MEDIUM: float = 0.75
-# Deliberately not PHI-shaped — the SSN 000-00-0000 is in the SSN_EXCLUDED_AREA_NUMBERS
-# reserved range (area 000) and is therefore structurally invalid as a real identifier.
+# SYNTHETIC TEST FIXTURE — NOT A REAL SSN.
+# Area 000 is in SSN_EXCLUDED_AREA_NUMBERS (the SSA has never issued area 000).
+# 000-00-0000 is structurally invalid as a real Social Security Number and
+# cannot identify any individual. Used only to exercise code-context formatting.
 _TEST_CODE_CONTEXT: str = 'field = "000-00-0000"'
 _TEST_REMEDIATION_HINT: str = "Replace SSN with synthetic value"
 _TEST_FILES_SCANNED: int = 10

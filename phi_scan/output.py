@@ -204,6 +204,7 @@ _FINDING_WORD: str = "finding"
 _FINDING_WORD_PLURAL: str = "findings"
 _SINGULAR_COUNT: int = 1
 _ZERO_FINDINGS: int = 0
+_MIN_VALID_MAX_COUNT: int = 1
 _LINE_LABEL: str = "line"
 _EMPTY_LINE: str = ""
 _EM_DASH_SEPARATOR: str = " — "
@@ -213,6 +214,7 @@ _ZERO_MAX_COUNT_ERROR: str = (
     "max_count must be greater than zero — "
     "callers must pass default=_CATEGORY_BAR_DENOMINATOR_FLOOR to max()"
 )
+_VIOLATION_DETECTED_SUFFIX: str = "detected"
 
 # ---------------------------------------------------------------------------
 # Private helper functions
@@ -453,7 +455,7 @@ def _build_count_bar(count: int, max_count: int) -> str:
     Raises:
         ValueError: If max_count is zero or less.
     """
-    if max_count <= _ZERO_FINDINGS:
+    if max_count < _MIN_VALID_MAX_COUNT:
         raise ValueError(_ZERO_MAX_COUNT_ERROR)
     filled = round(count / max_count * _CATEGORY_BAR_MAX_WIDTH)
     empty = _CATEGORY_BAR_MAX_WIDTH - filled
@@ -580,21 +582,36 @@ def format_sarif(scan_result: ScanResult) -> str:
 # ---------------------------------------------------------------------------
 
 
-def display_banner() -> None:
-    """Render the PhiScan ASCII art banner with Rich styling.
+_BANNER_PYFIGLET_MISSING_NOTE: str = (
+    "note: install pyfiglet for ASCII art banner (pip install pyfiglet)"
+)
 
-    Uses pyfiglet for ASCII art when available. Falls back to plain text if
-    pyfiglet is not installed so the CLI remains functional without it.
+
+def _render_ascii_banner() -> str:
+    """Return the PhiScan ASCII art string, falling back to plain text.
+
+    pyfiglet is an optional dependency. When absent, emits a dim console note
+    so operators know the tool is in fallback mode, then returns plain text.
+
+    Returns:
+        ASCII art string from pyfiglet, or the plain _BANNER_TEXT fallback.
     """
     try:
         import pyfiglet  # noqa: PLC0415 — optional dependency, import deferred
 
-        ascii_art: str = pyfiglet.figlet_format(_BANNER_TEXT, font=_BANNER_FONT)
+        return str(pyfiglet.figlet_format(_BANNER_TEXT, font=_BANNER_FONT))
     except ImportError:
-        ascii_art = _BANNER_TEXT
-    _console.print(ascii_art, style=_BANNER_STYLE)
-    tagline = _BANNER_TAGLINE_TEMPLATE.format(version=__version__)
-    _console.print(tagline, style=_BANNER_TAGLINE_STYLE)
+        _console.print(_BANNER_PYFIGLET_MISSING_NOTE, style=_STYLE_DIM)
+        return _BANNER_TEXT
+
+
+def display_banner() -> None:
+    """Render the PhiScan ASCII art banner, tagline, and separator rule."""
+    _console.print(_render_ascii_banner(), style=_BANNER_STYLE)
+    _console.print(
+        _BANNER_TAGLINE_TEMPLATE.format(version=__version__),
+        style=_BANNER_TAGLINE_STYLE,
+    )
     _console.rule(style=_RULE_STYLE)
 
 
@@ -741,8 +758,9 @@ def display_violation_alert(scan_result: ScanResult) -> None:
     word = _FINDING_WORD if count == _SINGULAR_COUNT else _FINDING_WORD_PLURAL
     violation_panel_markup = "\n".join(
         [
-            f"[{_STYLE_BOLD}]{count} {word} detected[/{_STYLE_BOLD}]",
-            f"{_VIOLATION_RISK_LEVEL_LABEL}[{risk_style}]{_format_risk_level_display(scan_result.risk_level)}[/{risk_style}]",
+            f"[{_STYLE_BOLD}]{count} {word} {_VIOLATION_DETECTED_SUFFIX}[/{_STYLE_BOLD}]",
+            f"{_VIOLATION_RISK_LEVEL_LABEL}"
+            f"[{risk_style}]{_format_risk_level_display(scan_result.risk_level)}[/{risk_style}]",
         ]
     )
     _console.print(
