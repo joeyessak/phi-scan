@@ -176,12 +176,12 @@ _VIOLATION_RISK_LEVEL_LABEL: str = "Risk Level: "
 
 # Severity levels ordered from highest to lowest — used when selecting the
 # most severe icon to represent a group of findings.
-_SEVERITY_DESCENDING_ORDER: list[SeverityLevel] = [
+_SEVERITY_DESCENDING_ORDER: tuple[SeverityLevel, ...] = (
     SeverityLevel.HIGH,
     SeverityLevel.MEDIUM,
     SeverityLevel.LOW,
     SeverityLevel.INFO,
-]
+)
 
 # ---------------------------------------------------------------------------
 # Findings table column headers
@@ -303,6 +303,7 @@ _DASHBOARD_COL_FINDINGS: str = "Findings"
 _DASHBOARD_COL_DURATION: str = "Duration"
 _DASHBOARD_COL_CATEGORY: str = "HIPAA Category"
 _DASHBOARD_COL_TOTAL: str = "Total"
+# 19 = len("YYYY-MM-DD HH:MM:SS") — ISO-8601 local datetime without microseconds.
 _DASHBOARD_TIMESTAMP_DISPLAY_LENGTH: int = 19
 
 # ---------------------------------------------------------------------------
@@ -868,7 +869,9 @@ def display_file_type_summary(scan_targets: list[Path]) -> None:
         _console.print(_FILE_TYPE_SUMMARY_ZERO_FILES_MESSAGE, style=_FILE_TYPE_SUMMARY_STYLE)
         return
     counts = _count_files_by_extension(scan_targets)
-    sorted_extensions = sorted(counts.items(), key=lambda pair: pair[1], reverse=True)
+    sorted_extensions = sorted(
+        counts.items(), key=lambda extension_count_pair: extension_count_pair[1], reverse=True
+    )
     top_extensions = sorted_extensions[:_FILE_TYPE_SUMMARY_MAX_EXTENSIONS]
     overflow_extensions = sorted_extensions[_FILE_TYPE_SUMMARY_MAX_EXTENSIONS:]
     overflow_count = sum(count for _, count in overflow_extensions)

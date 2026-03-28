@@ -740,9 +740,9 @@ def scan(
         display_phase_audit()
     with display_status_spinner(_SPINNER_AUDIT_WRITE_MESSAGE, is_active=is_rich_mode):
         _write_audit_record(scan_result, scan_config.database_path)
+    if not is_quiet and is_rich_mode:
+        display_phase_report()
     if not is_quiet:
-        if is_rich_mode:
-            display_phase_report()
         _emit_scan_output(scan_result, output_format, is_rich_mode)
     raise typer.Exit(code=EXIT_CODE_CLEAN if scan_result.is_clean else EXIT_CODE_VIOLATION)
 
@@ -842,16 +842,23 @@ def _aggregate_category_totals(recent_scans: list[dict[str, Any]]) -> dict[str, 
     """
     totals: dict[str, int] = {}
     for row in recent_scans:
-        findings = json.loads(row.get(_DASHBOARD_FINDINGS_JSON_KEY, _DASHBOARD_EMPTY_FINDINGS_JSON))
-        for finding in findings:
-            category = finding.get(_DASHBOARD_CATEGORY_KEY, _DASHBOARD_UNKNOWN_CATEGORY)
+        category_finding_records = json.loads(
+            row.get(_DASHBOARD_FINDINGS_JSON_KEY, _DASHBOARD_EMPTY_FINDINGS_JSON)
+        )
+        for finding_record in category_finding_records:
+            category = finding_record.get(_DASHBOARD_CATEGORY_KEY, _DASHBOARD_UNKNOWN_CATEGORY)
             totals[category] = totals.get(category, 0) + 1
     return totals
 
 
 @app.command("dashboard")
 def display_dashboard() -> None:
-    """Rich Live real-time scan dashboard."""
+    """Rich Live real-time scan dashboard.
+
+    Ctrl+C (KeyboardInterrupt) is the expected and only exit mechanism for this
+    command. The signal is caught here as an intentional boundary — not a domain
+    error — solely to stop the Rich Live display cleanly before process exit.
+    """
     database_path = Path(DEFAULT_DATABASE_PATH)
     try:
         with Live(refresh_per_second=_DASHBOARD_REFRESH_RATE, screen=True) as live:
@@ -867,6 +874,8 @@ def display_dashboard() -> None:
                 live.update(layout)
                 time.sleep(_DASHBOARD_REFRESH_SECONDS)
     except KeyboardInterrupt:
+        # Ctrl+C is the standard exit for a live dashboard — caught here to
+        # suppress the default traceback and allow Rich to close the screen buffer.
         raise typer.Exit(code=EXIT_CODE_CLEAN)
 
 
