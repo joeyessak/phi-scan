@@ -13,10 +13,10 @@ import pytest
 from rich.console import Console
 from rich.table import Table
 
-from phi_scan.cli import _WATCH_RESULT_VIOLATION_FORMAT
 from phi_scan.constants import DetectionLayer, PhiCategory, RiskLevel, SeverityLevel
 from phi_scan.models import ScanConfig, ScanFinding, ScanResult
 from phi_scan.output import (
+    _WATCH_RESULT_VIOLATION_FORMAT,
     WatchEvent,
     build_dashboard_layout,
     build_watch_layout,

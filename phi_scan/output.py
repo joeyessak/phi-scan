@@ -335,6 +335,10 @@ _WATCH_TIMESTAMP_FORMAT: str = "%H:%M:%S"
 # Kept here (display layer) so WatchEvent only carries the typed is_clean bool.
 _WATCH_RESULT_CLEAN_STYLE: str = "bold green"
 _WATCH_RESULT_VIOLATION_STYLE: str = "bold red"
+# Result text constants kept here so cli.py's _build_watch_result and output.py
+# share a single source of truth for watch event display strings.
+_WATCH_RESULT_CLEAN_TEXT: str = "✅ Clean"
+_WATCH_RESULT_VIOLATION_FORMAT: str = "⚠  {count} findings detected"
 # Filler for the two unused columns in the empty-state placeholder row.
 _WATCH_EMPTY_CELL: str = ""
 

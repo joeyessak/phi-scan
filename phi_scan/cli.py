@@ -40,6 +40,8 @@ from phi_scan.exceptions import AuditLogError, ConfigurationError
 from phi_scan.logging_config import get_logger, replace_logger_handlers
 from phi_scan.models import ScanConfig, ScanFinding, ScanResult
 from phi_scan.output import (
+    _WATCH_RESULT_CLEAN_TEXT,
+    _WATCH_RESULT_VIOLATION_FORMAT,
     WatchEvent,
     build_dashboard_layout,
     build_watch_layout,
@@ -127,8 +129,6 @@ _WATCH_PATH_HELP: str = "Directory to watch for file system changes."
 _WATCH_POLL_INTERVAL_SECONDS: float = 1.0
 _WATCH_LIVE_REFRESH_RATE: float = 4.0
 _WATCH_LOG_MAX_EVENTS: int = 10
-_WATCH_RESULT_CLEAN_TEXT: str = "✅ Clean"
-_WATCH_RESULT_VIOLATION_FORMAT: str = "⚠  {count} findings detected"
 
 # ---------------------------------------------------------------------------
 # History command
@@ -301,10 +301,10 @@ def _count_files_in_directory(directory: Path) -> int:
 
 @dataclass(frozen=True)
 class _WatchScanOutcome:
-    """Structured return value from _build_watch_result.
+    """The outcome of scanning one file during watch mode.
 
-    Replaces the raw tuple[str, str] so callers unpack named fields rather
-    than positional strings, and is_clean is typed rather than a style literal.
+    Carries the human-readable result text and a typed boolean that
+    output.py uses to derive the Rich style for the rolling event table.
     """
 
     result_text: str
@@ -317,6 +317,8 @@ class _WatchState:
 
     Introduced so _append_watch_event can access watch_root (needed to compute a
     PHI-safe relative display path) without exceeding the three-argument limit.
+    Not frozen: watch_events is an intentionally mutable shared rolling buffer
+    appended to by the watchdog background thread.
     """
 
     watch_root: Path
@@ -710,6 +712,9 @@ def _append_watch_event(
         scan_outcome: Structured result from _scan_changed_file.
         context: Shared watch state; provides the deque and watch root.
     """
+    # deque.append is atomic under CPython's GIL, so no explicit lock is needed here.
+    # The main thread reads the deque via list(watch_events) (also atomic), making
+    # this cross-thread access safe without threading.Lock for CPython.
     context.watch_events.append(
         WatchEvent(
             event_time=datetime.now(),
@@ -744,25 +749,21 @@ def _display_watch_live_screen(
     watch_path: Path,
     watch_events: deque[WatchEvent],
 ) -> None:
-    """Drive the Rich Live display loop until the user presses Ctrl+C.
+    """Drive the Rich Live render loop, refreshing until the caller's context ends.
 
-    KeyboardInterrupt (a BaseException subclass, not Exception) is caught here
-    to close the Rich alternate-screen buffer cleanly before raising typer.Exit.
-    typer.Exit propagates out through watch()'s try/finally, which stops and
-    joins the observer — no teardown is skipped. Raising typer.Exit rather than
-    returning makes the clean-exit intent explicit and matches display_dashboard.
+    Single responsibility: render only. KeyboardInterrupt is not caught here —
+    it propagates naturally to watch(), which translates it to a clean exit code.
+    Rich's Live context manager handles alternate-screen teardown via __exit__
+    when any exception (including KeyboardInterrupt) unwinds the with block.
 
     Args:
         watch_path: The watched directory, shown in the persistent header.
         watch_events: Shared deque updated by _FileChangeMonitor on the watchdog thread.
     """
-    try:
-        with Live(refresh_per_second=_WATCH_LIVE_REFRESH_RATE, screen=True) as live:
-            while True:
-                live.update(build_watch_layout(watch_path, list(watch_events)))
-                time.sleep(_WATCH_POLL_INTERVAL_SECONDS)
-    except KeyboardInterrupt:
-        raise typer.Exit(code=EXIT_CODE_CLEAN)
+    with Live(refresh_per_second=_WATCH_LIVE_REFRESH_RATE, screen=True) as live:
+        while True:
+            live.update(build_watch_layout(watch_path, list(watch_events)))
+            time.sleep(_WATCH_POLL_INTERVAL_SECONDS)
 
 
 # ---------------------------------------------------------------------------
@@ -885,6 +886,10 @@ def watch(
     observer.start()
     try:
         _display_watch_live_screen(watch_path, watch_context.watch_events)
+    except KeyboardInterrupt:
+        # Ctrl+C is the standard exit for watch mode. Translate the BaseException
+        # into a clean exit code before the finally block tears down the observer.
+        raise typer.Exit(code=EXIT_CODE_CLEAN)
     finally:
         observer.stop()
         observer.join()
