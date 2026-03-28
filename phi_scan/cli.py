@@ -6,7 +6,9 @@ import dataclasses
 import json
 import logging
 import time
+from collections import deque
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any
 
@@ -38,7 +40,12 @@ from phi_scan.exceptions import AuditLogError, ConfigurationError
 from phi_scan.logging_config import get_logger, replace_logger_handlers
 from phi_scan.models import ScanConfig, ScanFinding, ScanResult
 from phi_scan.output import (
+    WATCH_EVENT_KEY_FILE,
+    WATCH_EVENT_KEY_RESULT_STYLE,
+    WATCH_EVENT_KEY_RESULT_TEXT,
+    WATCH_EVENT_KEY_TIME,
     build_dashboard_layout,
+    build_watch_layout,
     create_scan_progress,
     display_banner,
     display_category_breakdown,
@@ -121,12 +128,18 @@ _SCAN_NO_CACHE_HELP: str = (
 
 _WATCH_PATH_HELP: str = "Directory to watch for file system changes."
 _WATCH_PHASE_ONE_NOTE: str = (
-    "Detection engine not active — install phi-scan[nlp] for full scanning."
+    "Detection engine not loaded — run `phi-scan setup` to enable full scanning."
 )
-_WATCH_STARTED_MESSAGE: str = "Watching {path} for changes. Press Ctrl+C to stop."
-_WATCH_CHANGE_EVENT_FORMAT: str = "Change detected: {event_path} — {file_count} file(s) in tree"
 _WATCH_POLL_INTERVAL_SECONDS: float = 1.0
-_WATCH_STOPPED_MESSAGE: str = "\nWatch stopped."
+_WATCH_LIVE_REFRESH_RATE: float = 4.0
+_WATCH_LOG_MAX_EVENTS: int = 10
+_WATCH_TIMESTAMP_FORMAT: str = "%H:%M:%S"
+_WATCH_RESULT_CLEAN_TEXT: str = "✅ Clean"
+_WATCH_RESULT_VIOLATION_FORMAT: str = "⚠  {count} findings detected"
+_WATCH_RESULT_INACTIVE_TEXT: str = "⚪ Detection not active"
+_WATCH_RESULT_CLEAN_STYLE: str = "bold green"
+_WATCH_RESULT_VIOLATION_STYLE: str = "bold red"
+_WATCH_RESULT_INACTIVE_STYLE: str = "dim"
 
 # ---------------------------------------------------------------------------
 # History command
@@ -298,31 +311,41 @@ def _count_files_in_directory(directory: Path) -> int:
 
 
 class _FileChangeMonitor(FileSystemEventHandler):
-    """Watchdog event handler for Phase 1 watch mode.
+    """Watchdog event handler — appends a watch event to the rolling log on each file change.
 
-    Phase 1 behavior: on any non-directory file system event, traverse the
-    watch root and report the total file count. Detection is not active until
-    Phase 2; a note is printed once at startup by the watch command.
+    Phase 1: scan_file returns no findings so result is always clean. The Phase 1
+    note is displayed in the watch header; per-event result shows the actual outcome.
     """
 
-    def __init__(self, watch_root: Path) -> None:
+    def __init__(
+        self,
+        watch_root: Path,
+        watch_events: deque[dict[str, str]],
+        scan_config: ScanConfig,
+    ) -> None:
         super().__init__()
         self._watch_root = watch_root
+        self._watch_events = watch_events
+        self._scan_config = scan_config
 
     def on_any_event(self, event: FileSystemEvent) -> None:
-        """Log a file count on any non-directory change event.
+        """Append a timestamped event record on any non-directory file change.
 
         Args:
             event: The watchdog file system event.
         """
         if event.is_directory:
             return
-        file_count = _count_files_in_directory(self._watch_root)
-        typer.echo(
-            _WATCH_CHANGE_EVENT_FORMAT.format(
-                event_path=str(event.src_path),
-                file_count=file_count,
-            )
+        changed_path = Path(str(event.src_path))
+        findings = scan_file(changed_path, self._scan_config)
+        result_text, result_style = _build_watch_result(findings)
+        self._watch_events.append(
+            {
+                WATCH_EVENT_KEY_TIME: datetime.now().strftime(_WATCH_TIMESTAMP_FORMAT),
+                WATCH_EVENT_KEY_FILE: str(changed_path),
+                WATCH_EVENT_KEY_RESULT_TEXT: result_text,
+                WATCH_EVENT_KEY_RESULT_STYLE: result_style,
+            }
         )
 
 
@@ -627,25 +650,46 @@ def _reject_hook_path_with_symlinked_component(hook_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _observe_directory(watch_path: Path) -> None:
-    """Start the watchdog observer and block until Ctrl+C.
+def _build_watch_result(findings: list[ScanFinding]) -> tuple[str, str]:
+    """Return display text and Rich style for a per-file watch scan result.
+
+    Phase 1: scan_file always returns an empty list, so this always returns
+    the inactive result. Phase 2+ will surface real finding counts.
 
     Args:
-        watch_path: Root directory to watch recursively.
+        findings: Findings returned by scan_file for the changed file.
+
+    Returns:
+        Tuple of (result_text, result_style) for the rolling event table.
     """
-    event_handler = _FileChangeMonitor(watch_path)
-    observer = Observer()
-    observer.schedule(event_handler, str(watch_path), recursive=True)
-    observer.start()
-    typer.echo(_WATCH_STARTED_MESSAGE.format(path=watch_path))
+    if findings:
+        text = _WATCH_RESULT_VIOLATION_FORMAT.format(count=len(findings))
+        return text, _WATCH_RESULT_VIOLATION_STYLE
+    return _WATCH_RESULT_CLEAN_TEXT, _WATCH_RESULT_CLEAN_STYLE
+
+
+def _run_watch_live_loop(
+    watch_path: Path,
+    watch_events: deque[dict[str, str]],
+) -> None:
+    """Drive the Rich Live display loop until Ctrl+C.
+
+    Ctrl+C (KeyboardInterrupt) is the expected exit mechanism for watch mode —
+    caught here to stop the Rich Live display cleanly before process exit.
+
+    Args:
+        watch_path: The watched directory, shown in the persistent header.
+        watch_events: Shared deque updated by _FileChangeMonitor on the watchdog thread.
+    """
     try:
-        while True:
-            time.sleep(_WATCH_POLL_INTERVAL_SECONDS)
+        with Live(refresh_per_second=_WATCH_LIVE_REFRESH_RATE, screen=True) as live:
+            while True:
+                live.update(build_watch_layout(watch_path, list(watch_events)))
+                time.sleep(_WATCH_POLL_INTERVAL_SECONDS)
     except KeyboardInterrupt:
-        typer.echo(_WATCH_STOPPED_MESSAGE)
-    finally:
-        observer.stop()
-        observer.join()
+        pass
+
+
 
 
 # ---------------------------------------------------------------------------
@@ -751,9 +795,20 @@ def scan(
 def watch(
     path: Annotated[Path, typer.Argument(help=_WATCH_PATH_HELP)] = Path("."),
 ) -> None:
-    """Watch a directory and report file changes. Detection active from Phase 2."""
+    """Watch a directory and re-scan changed files. Detection active from Phase 2."""
+    watch_path = path.resolve()
+    scan_config = ScanConfig()
+    watch_events: deque[dict[str, str]] = deque(maxlen=_WATCH_LOG_MAX_EVENTS)
     typer.echo(_WATCH_PHASE_ONE_NOTE)
-    _observe_directory(path)
+    event_handler = _FileChangeMonitor(watch_path, watch_events, scan_config)
+    observer = Observer()
+    observer.schedule(event_handler, str(watch_path), recursive=True)
+    observer.start()
+    try:
+        _run_watch_live_loop(watch_path, watch_events)
+    finally:
+        observer.stop()
+        observer.join()
 
 
 @app.command("report")

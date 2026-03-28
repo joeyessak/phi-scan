@@ -474,3 +474,74 @@ def test_aggregate_category_totals_missing_findings_json_skips_row() -> None:
     totals = _aggregate_category_totals(scans)
 
     assert totals == {}
+
+
+# ---------------------------------------------------------------------------
+# _build_watch_result (1C.6b–1C.6c)
+# ---------------------------------------------------------------------------
+
+
+def test_build_watch_result_returns_clean_text_for_no_findings() -> None:
+    from phi_scan.cli import (
+        _WATCH_RESULT_CLEAN_STYLE,
+        _WATCH_RESULT_CLEAN_TEXT,
+        _build_watch_result,
+    )
+
+    result_text, result_style = _build_watch_result([])
+
+    assert result_text == _WATCH_RESULT_CLEAN_TEXT
+    assert result_style == _WATCH_RESULT_CLEAN_STYLE
+
+
+def test_build_watch_result_returns_violation_text_for_findings(
+    tmp_path: Path,
+) -> None:
+    import hashlib
+
+    from phi_scan.cli import _WATCH_RESULT_VIOLATION_STYLE, _build_watch_result
+    from phi_scan.constants import DetectionLayer, PhiCategory, SeverityLevel
+    from phi_scan.models import ScanFinding
+
+    finding = ScanFinding(
+        file_path=tmp_path / "f.py",
+        line_number=1,
+        entity_type="ssn",
+        hipaa_category=PhiCategory.SSN,
+        confidence=0.9,
+        detection_layer=DetectionLayer.REGEX,
+        value_hash=hashlib.sha256(b"x").hexdigest(),
+        severity=SeverityLevel.HIGH,
+        code_context="",
+        remediation_hint="",
+    )
+    result_text, result_style = _build_watch_result([finding])
+
+    assert "1" in result_text
+    assert result_style == _WATCH_RESULT_VIOLATION_STYLE
+
+
+def test_build_watch_result_violation_count_matches_findings_length(
+    tmp_path: Path,
+) -> None:
+    import hashlib
+
+    from phi_scan.cli import _build_watch_result
+    from phi_scan.constants import DetectionLayer, PhiCategory, SeverityLevel
+    from phi_scan.models import ScanFinding
+
+    finding = ScanFinding(
+        file_path=tmp_path / "f.py",
+        line_number=1,
+        entity_type="ssn",
+        hipaa_category=PhiCategory.SSN,
+        confidence=0.9,
+        detection_layer=DetectionLayer.REGEX,
+        value_hash=hashlib.sha256(b"x").hexdigest(),
+        severity=SeverityLevel.HIGH,
+        code_context="",
+        remediation_hint="",
+    )
+    result_text, _ = _build_watch_result([finding, finding])
+
+    assert "2" in result_text

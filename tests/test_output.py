@@ -13,6 +13,7 @@ from phi_scan.constants import DetectionLayer, PhiCategory, RiskLevel, SeverityL
 from phi_scan.models import ScanConfig, ScanFinding, ScanResult
 from phi_scan.output import (
     build_dashboard_layout,
+    build_watch_layout,
     create_scan_progress,
     display_banner,
     display_category_breakdown,
@@ -910,3 +911,67 @@ def test_build_dashboard_layout_with_data_does_not_raise() -> None:
     scans = [_DASHBOARD_CLEAN_SCAN_ROW, _DASHBOARD_VIOLATION_SCAN_ROW]
 
     build_dashboard_layout(scans, _DASHBOARD_CATEGORY_TOTALS_SAMPLE, _DASHBOARD_CLEAN_SCAN_ROW)
+
+
+# ---------------------------------------------------------------------------
+# build_watch_layout (1C.6a–1C.6d)
+# ---------------------------------------------------------------------------
+
+_WATCH_PATH: Path = Path("/tmp/src")
+_WATCH_EMPTY_EVENTS: list[dict[str, str]] = []
+_WATCH_SAMPLE_EVENTS: list[dict[str, str]] = [
+    {
+        "time": "14:32:05",
+        "file": "src/api/patient.py",
+        "result_text": "✅ Clean",
+        "result_style": "bold green",
+    },
+    {
+        "time": "14:33:10",
+        "file": "src/models/user.py",
+        "result_text": "⚠  2 findings detected",
+        "result_style": "bold red",
+    },
+]
+
+
+def test_build_watch_layout_empty_events_does_not_raise() -> None:
+    build_watch_layout(_WATCH_PATH, _WATCH_EMPTY_EVENTS)
+
+
+def test_build_watch_layout_with_events_does_not_raise() -> None:
+    build_watch_layout(_WATCH_PATH, _WATCH_SAMPLE_EVENTS)
+
+
+def test_build_watch_header_panel_contains_path() -> None:
+    from phi_scan.output import _build_watch_header_panel
+
+    panel = _build_watch_header_panel(_WATCH_PATH)
+
+    assert str(_WATCH_PATH) in str(panel.renderable)
+
+
+def test_build_watch_event_table_empty_shows_waiting_text() -> None:
+    from phi_scan.output import _WATCH_NO_EVENTS_TEXT, _build_watch_event_table
+
+    table = _build_watch_event_table([])
+
+    assert table.row_count == 1
+    assert _WATCH_NO_EVENTS_TEXT in str(table.columns[0]._cells[0])
+
+
+def test_build_watch_event_table_has_three_columns() -> None:
+    from phi_scan.output import _build_watch_event_table
+
+    expected_column_count: int = 3
+    table = _build_watch_event_table([])
+
+    assert len(table.columns) == expected_column_count
+
+
+def test_build_watch_event_table_non_empty_has_correct_row_count() -> None:
+    from phi_scan.output import _build_watch_event_table
+
+    table = _build_watch_event_table(_WATCH_SAMPLE_EVENTS)
+
+    assert table.row_count == len(_WATCH_SAMPLE_EVENTS)
