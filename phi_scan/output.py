@@ -6,8 +6,9 @@ import csv
 import io
 import json
 import operator
-from collections.abc import Generator
+from collections.abc import Generator, Sequence
 from contextlib import contextmanager
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from types import MappingProxyType
@@ -36,6 +37,8 @@ from phi_scan.models import ScanConfig, ScanFinding, ScanResult
 
 __all__ = [
     "build_dashboard_layout",
+    "build_watch_layout",
+    "WatchEvent",
     "display_banner",
     "display_category_breakdown",
     "display_clean_result",
@@ -305,6 +308,63 @@ _DASHBOARD_COL_CATEGORY: str = "HIPAA Category"
 _DASHBOARD_COL_TOTAL: str = "Total"
 # 19 = len("YYYY-MM-DD HH:MM:SS") — ISO-8601 local datetime without microseconds.
 _DASHBOARD_TIMESTAMP_DISPLAY_LENGTH: int = 19
+
+# ---------------------------------------------------------------------------
+# Watch mode display
+# ---------------------------------------------------------------------------
+
+_WATCH_HEADER_PANEL_TITLE: str = "PhiScan — Watch Mode"
+_WATCH_HEADER_FORMAT: str = "Watching: {path}  —  Press [bold]Ctrl+C[/bold] to stop"
+# Shown in the panel subtitle so it appears inside the Rich alternate-screen buffer,
+# not on stdout before Live() takes over (which would immediately scroll out of view).
+_WATCH_PHASE_ONE_NOTE: str = (
+    "Detection engine not loaded — run `phi-scan setup` to enable full scanning."
+)
+_WATCH_HEADER_HEIGHT: int = 4
+_WATCH_HEADER_SECTION: str = "watch_header"
+_WATCH_BODY_SECTION: str = "watch_body"
+_WATCH_LOG_PANEL_TITLE: str = "Recent Events"
+_WATCH_NO_EVENTS_TEXT: str = "Waiting for file changes…"
+_WATCH_COL_TIME: str = "Time"
+_WATCH_COL_FILE: str = "Changed File"
+_WATCH_COL_RESULT: str = "Result"
+# Timestamp format applied in _build_watch_event_table — kept in output.py so the
+# display concern (how to render a datetime) stays in the same module that renders it.
+_WATCH_TIMESTAMP_FORMAT: str = "%H:%M:%S"
+# Style strings derived from WatchEvent.is_clean in _build_watch_event_table.
+# Kept here (display layer) so WatchEvent only carries the typed is_clean bool.
+_WATCH_RESULT_CLEAN_STYLE: str = "bold green"
+_WATCH_RESULT_VIOLATION_STYLE: str = "bold red"
+# Result text constants are public (no underscore) because cli.py imports them to
+# build _WatchScanOutcome. Keeping them here rather than in constants.py preserves
+# the display-layer boundary — they format terminal strings, not domain values.
+WATCH_RESULT_CLEAN_TEXT: str = "✅ Clean"
+WATCH_RESULT_VIOLATION_FORMAT: str = "⚠  {count} findings detected"
+# Rich inline markup template: "[{style}]text[/{style}]". Extracted so the
+# literal tag syntax does not appear as a magic string in rendering logic.
+_RICH_STYLED_TEXT_FORMAT: str = "[{style}]{text}[/{style}]"
+# Filler for the two unused columns in the empty-state placeholder row.
+_WATCH_EMPTY_CELL: str = ""
+
+
+@dataclass(frozen=True)
+class WatchEvent:
+    """A single watch-mode event record rendered in the rolling event table.
+
+    Created by cli.py when watchdog fires and scan_file completes; consumed
+    by output.py to render the rolling log table. Frozen to prevent mutation
+    across the shared deque boundary between the watchdog thread and main thread.
+    event_time is stored as datetime so formatting stays in output.py and events
+    remain sortable/comparable without reparsing a formatted string.
+    """
+
+    event_time: datetime
+    file_path: str
+    result_text: str
+    # Typed boolean rather than a raw Rich style string — keeps the data model free of
+    # display concerns. The rendering layer (_build_watch_event_table) derives the style.
+    is_clean: bool
+
 
 # ---------------------------------------------------------------------------
 # CSV field names (in output column order)
@@ -1283,6 +1343,85 @@ def display_category_breakdown(scan_result: ScanResult) -> None:
         if count > _ZERO_FINDINGS:
             table.add_row(category.value, str(count), _build_count_bar(count, max_count))
     _console.print(table)
+
+
+# ---------------------------------------------------------------------------
+# Watch mode layout builders
+# ---------------------------------------------------------------------------
+
+
+def _build_watch_header_panel(watch_path: Path) -> Panel:
+    """Build the persistent header panel shown at the top of the watch display.
+
+    Args:
+        watch_path: The directory currently being watched.
+
+    Returns:
+        Rich Panel with the watching path and Ctrl+C instruction.
+    """
+    watch_header_text = _WATCH_HEADER_FORMAT.format(path=str(watch_path))
+    return Panel(
+        watch_header_text,
+        title=_WATCH_HEADER_PANEL_TITLE,
+        subtitle=_WATCH_PHASE_ONE_NOTE,
+        style=_STYLE_BOLD_CYAN,
+    )
+
+
+def _build_watch_event_table(events: Sequence[WatchEvent]) -> Table:
+    """Build the rolling event log table from recent watch events.
+
+    Args:
+        events: Sequence of WatchEvent records (most recent last).
+
+    Returns:
+        Rich Table with time, changed file, and mini scan result columns.
+    """
+    table = Table(
+        title=_WATCH_LOG_PANEL_TITLE,
+        box=rich_box.SIMPLE,
+        show_header=True,
+        expand=True,
+    )
+    table.add_column(_WATCH_COL_TIME, style=_STYLE_DIM, no_wrap=True)
+    table.add_column(_WATCH_COL_FILE)
+    table.add_column(_WATCH_COL_RESULT, no_wrap=True)
+    if not events:
+        table.add_row(_WATCH_NO_EVENTS_TEXT, _WATCH_EMPTY_CELL, _WATCH_EMPTY_CELL)
+        return table
+    for event in events:
+        result_cell_style = (
+            _WATCH_RESULT_CLEAN_STYLE if event.is_clean else _WATCH_RESULT_VIOLATION_STYLE
+        )
+        result_markup = _RICH_STYLED_TEXT_FORMAT.format(
+            style=result_cell_style, text=event.result_text
+        )
+        table.add_row(
+            event.event_time.strftime(_WATCH_TIMESTAMP_FORMAT),
+            event.file_path,
+            result_markup,
+        )
+    return table
+
+
+def build_watch_layout(watch_path: Path, events: Sequence[WatchEvent]) -> Layout:
+    """Build the Rich Layout for the watch mode live display.
+
+    Args:
+        watch_path: The directory currently being watched.
+        events: Recent watch events for the rolling event log.
+
+    Returns:
+        Layout with a persistent header panel and rolling event table.
+    """
+    layout = Layout()
+    layout.split_column(
+        Layout(name=_WATCH_HEADER_SECTION, size=_WATCH_HEADER_HEIGHT),
+        Layout(name=_WATCH_BODY_SECTION),
+    )
+    layout[_WATCH_HEADER_SECTION].update(_build_watch_header_panel(watch_path))
+    layout[_WATCH_BODY_SECTION].update(_build_watch_event_table(events))
+    return layout
 
 
 # ---------------------------------------------------------------------------

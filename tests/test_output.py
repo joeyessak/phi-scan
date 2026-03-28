@@ -3,16 +3,23 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
+from datetime import datetime
 from pathlib import Path
 from types import MappingProxyType
 
+import pytest
+from rich.console import Console
 from rich.table import Table
 
 from phi_scan.constants import DetectionLayer, PhiCategory, RiskLevel, SeverityLevel
 from phi_scan.models import ScanConfig, ScanFinding, ScanResult
 from phi_scan.output import (
+    WATCH_RESULT_VIOLATION_FORMAT,
+    WatchEvent,
     build_dashboard_layout,
+    build_watch_layout,
     create_scan_progress,
     display_banner,
     display_category_breakdown,
@@ -910,3 +917,91 @@ def test_build_dashboard_layout_with_data_does_not_raise() -> None:
     scans = [_DASHBOARD_CLEAN_SCAN_ROW, _DASHBOARD_VIOLATION_SCAN_ROW]
 
     build_dashboard_layout(scans, _DASHBOARD_CATEGORY_TOTALS_SAMPLE, _DASHBOARD_CLEAN_SCAN_ROW)
+
+
+# ---------------------------------------------------------------------------
+# build_watch_layout (1C.6a–1C.6d)
+# ---------------------------------------------------------------------------
+
+_WATCH_EMPTY_EVENTS: tuple[WatchEvent, ...] = ()
+_WATCH_SAMPLE_DATETIME_ONE: datetime = datetime(2026, 3, 28, 14, 32, 5)
+_WATCH_SAMPLE_FILE_ONE: str = "src/api/patient.py"
+_WATCH_SAMPLE_RESULT_TEXT_CLEAN: str = "✅ Clean"
+_WATCH_SAMPLE_DATETIME_TWO: datetime = datetime(2026, 3, 28, 14, 33, 10)
+_WATCH_SAMPLE_FILE_TWO: str = "src/models/user.py"
+_WATCH_SAMPLE_VIOLATION_COUNT: int = 2
+_WATCH_SAMPLE_RESULT_TEXT_VIOLATION: str = WATCH_RESULT_VIOLATION_FORMAT.format(
+    count=_WATCH_SAMPLE_VIOLATION_COUNT
+)
+
+
+@pytest.fixture()
+def watch_sample_events() -> list[WatchEvent]:
+    """Fresh list of two sample WatchEvent records per test."""
+    return [
+        WatchEvent(
+            event_time=_WATCH_SAMPLE_DATETIME_ONE,
+            file_path=_WATCH_SAMPLE_FILE_ONE,
+            result_text=_WATCH_SAMPLE_RESULT_TEXT_CLEAN,
+            is_clean=True,
+        ),
+        WatchEvent(
+            event_time=_WATCH_SAMPLE_DATETIME_TWO,
+            file_path=_WATCH_SAMPLE_FILE_TWO,
+            result_text=_WATCH_SAMPLE_RESULT_TEXT_VIOLATION,
+            is_clean=False,
+        ),
+    ]
+
+
+def test_build_watch_layout_empty_events_does_not_raise(tmp_path: Path) -> None:
+    build_watch_layout(tmp_path, _WATCH_EMPTY_EVENTS)
+
+
+def test_build_watch_layout_with_events_does_not_raise(
+    tmp_path: Path, watch_sample_events: list[WatchEvent]
+) -> None:
+    build_watch_layout(tmp_path, watch_sample_events)
+
+
+def test_build_watch_header_panel_contains_path(tmp_path: Path) -> None:
+    from phi_scan.output import _build_watch_header_panel
+
+    panel = _build_watch_header_panel(tmp_path)
+
+    assert str(tmp_path) in str(panel.renderable)
+
+
+def test_build_watch_event_table_empty_shows_waiting_text() -> None:
+    from phi_scan.output import _WATCH_NO_EVENTS_TEXT, _build_watch_event_table
+
+    table = _build_watch_event_table([])
+
+    rendered = io.StringIO()
+    Console(file=rendered, no_color=True).print(table)
+    assert table.row_count == 1
+    assert _WATCH_NO_EVENTS_TEXT in rendered.getvalue()
+
+
+def test_build_watch_event_table_has_three_columns() -> None:
+    from phi_scan.output import (
+        _WATCH_COL_FILE,
+        _WATCH_COL_RESULT,
+        _WATCH_COL_TIME,
+        _build_watch_event_table,
+    )
+
+    expected_column_count: int = len([_WATCH_COL_TIME, _WATCH_COL_FILE, _WATCH_COL_RESULT])
+    table = _build_watch_event_table([])
+
+    assert len(table.columns) == expected_column_count
+
+
+def test_build_watch_event_table_non_empty_has_correct_row_count(
+    watch_sample_events: list[WatchEvent],
+) -> None:
+    from phi_scan.output import _build_watch_event_table
+
+    table = _build_watch_event_table(watch_sample_events)
+
+    assert table.row_count == len(watch_sample_events)
