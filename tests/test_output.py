@@ -1069,6 +1069,7 @@ def test_phase_separator_style_is_bold_cyan() -> None:
 _EXPECTED_CLEAN_ICON_UNICODE: str = "✅"
 _EXPECTED_VIOLATION_ICON_UNICODE: str = "⚠"
 _EXPECTED_FOLDER_ICON_UNICODE: str = "📁"
+_EXPECTED_FOLDER_ICON_ASCII: str = "[d]"
 _EXPECTED_CONTEXT_ARROW_UNICODE: str = "►"
 _EXPECTED_CONTEXT_ARROW_ASCII: str = ">"
 _EXPECTED_CONFIDENCE_DOT_FILLED_UNICODE: str = "●"
@@ -1123,7 +1124,7 @@ def test_folder_icon_unicode_raw_value_is_correct() -> None:
 def test_folder_icon_ascii_fallback_is_correct() -> None:
     from phi_scan.output import _ASCII_ICON_FOLDER
 
-    assert _ASCII_ICON_FOLDER == "[d]"
+    assert _ASCII_ICON_FOLDER == _EXPECTED_FOLDER_ICON_ASCII
 
 
 def test_build_confidence_dots_all_empty_for_zero() -> None:
@@ -1171,9 +1172,9 @@ def test_build_confidence_dots_partial_for_mid_confidence() -> None:
 def test_detect_unicode_support_returns_bool() -> None:
     from phi_scan.output import _detect_unicode_support
 
-    result = _detect_unicode_support()
+    is_unicode_supported = _detect_unicode_support()
 
-    assert isinstance(result, bool)
+    assert isinstance(is_unicode_supported, bool)
 
 
 def test_resolve_symbol_returns_unicode_when_supported(

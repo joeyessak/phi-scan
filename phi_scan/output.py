@@ -156,6 +156,10 @@ _RISK_LEVEL_STYLE: dict[RiskLevel, str] = {
 # Unicode symbols — raw pairs and resolved constants
 # Each symbol has a Unicode form (UTF-8 terminals) and an ASCII fallback
 # (legacy terminals, ASCII-only pipes). _resolve_symbol selects at import time.
+# IMPORTANT: The resolved _ICON_* / _CODE_CONTEXT_ARROW / _CONFIDENCE_DOT_* constants
+# below are frozen at module import and are NOT affected by later monkeypatching of
+# _UNICODE_SUPPORTED. Tests must call _resolve_symbol directly (not read the resolved
+# constants) to exercise the Unicode vs ASCII selection paths.
 # ---------------------------------------------------------------------------
 
 _UNICODE_ICON_CLEAN: str = "✅"
@@ -202,6 +206,8 @@ _CONFIDENCE_DOT_COUNT: int = 5
 
 # Banner gradient colors — applied line-by-line across the pyfiglet ASCII art.
 _BANNER_GRADIENT_COLORS: tuple[str, ...] = ("cyan", "blue", "magenta")
+# Offset to convert a 1-based color count to a 0-based maximum valid index.
+_COLOR_INDEX_OFFSET: int = 1
 
 # ---------------------------------------------------------------------------
 # SARIF 2.1.0 protocol constants
@@ -544,7 +550,8 @@ def _select_banner_gradient_color(line_index: int, total_lines: int) -> str:
         A Rich color name from _BANNER_GRADIENT_COLORS.
     """
     color_count = len(_BANNER_GRADIENT_COLORS)
-    color_index = min(int(line_index * color_count / total_lines), color_count - 1)
+    max_color_index = color_count - _COLOR_INDEX_OFFSET
+    color_index = min(int(line_index * color_count / total_lines), max_color_index)
     return _BANNER_GRADIENT_COLORS[color_index]
 
 
