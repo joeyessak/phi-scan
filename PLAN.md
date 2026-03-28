@@ -445,11 +445,11 @@ polished, informative, and visually striking. Users should enjoy running this to
 
 #### 1C.6 — Watch Mode Visuals (`phi-scan watch`)
 
-- [ ] **1C.6a** Persistent header: "Watching: ./src — Press Ctrl+C to stop"
-- [ ] **1C.6b** File change detection notification: `[14:32:05] Changed: src/api/patient.py`
-- [ ] **1C.6c** Mini scan result inline after each re-scan: `✅ Clean` or `⚠ 2 findings detected`
-- [ ] **1C.6d** Rolling log of last 10 watch events
-- [ ] **1C.6e** Clear message when detection not active: "Detection engine not loaded — run `phi-scan setup` to enable full scanning"
+- [x] **1C.6a** Persistent header: "Watching: ./src — Press Ctrl+C to stop"
+- [x] **1C.6b** File change detection notification: `[14:32:05] Changed: src/api/patient.py`
+- [x] **1C.6c** Mini scan result inline after each re-scan: `✅ Clean` or `⚠ 2 findings detected`
+- [x] **1C.6d** Rolling log of last 10 watch events
+- [x] **1C.6e** Clear message when detection not active: "Detection engine not loaded — run `phi-scan setup` to enable full scanning"
 
 #### 1C.7 — Color Theme & Consistency
 

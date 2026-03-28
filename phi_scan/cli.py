@@ -6,7 +6,9 @@ import dataclasses
 import json
 import logging
 import time
+from collections import deque
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any
 
@@ -38,7 +40,11 @@ from phi_scan.exceptions import AuditLogError, ConfigurationError
 from phi_scan.logging_config import get_logger, replace_logger_handlers
 from phi_scan.models import ScanConfig, ScanFinding, ScanResult
 from phi_scan.output import (
+    WATCH_RESULT_CLEAN_TEXT,
+    WATCH_RESULT_VIOLATION_FORMAT,
+    WatchEvent,
     build_dashboard_layout,
+    build_watch_layout,
     create_scan_progress,
     display_banner,
     display_category_breakdown,
@@ -120,13 +126,12 @@ _SCAN_NO_CACHE_HELP: str = (
 # ---------------------------------------------------------------------------
 
 _WATCH_PATH_HELP: str = "Directory to watch for file system changes."
-_WATCH_PHASE_ONE_NOTE: str = (
-    "Detection engine not active — install phi-scan[nlp] for full scanning."
-)
-_WATCH_STARTED_MESSAGE: str = "Watching {path} for changes. Press Ctrl+C to stop."
-_WATCH_CHANGE_EVENT_FORMAT: str = "Change detected: {event_path} — {file_count} file(s) in tree"
 _WATCH_POLL_INTERVAL_SECONDS: float = 1.0
-_WATCH_STOPPED_MESSAGE: str = "\nWatch stopped."
+_WATCH_LIVE_REFRESH_RATE: float = 4.0
+_WATCH_LOG_MAX_EVENTS: int = 10
+# Sentinel shown when a changed path cannot be relativised to watch_root (edge case).
+# The bare filename is NOT used because filenames may contain PHI (patient IDs, MRNs).
+_WATCH_PATH_OUTSIDE_ROOT_DISPLAY: str = "[outside watch root]"
 
 # ---------------------------------------------------------------------------
 # History command
@@ -297,33 +302,64 @@ def _count_files_in_directory(directory: Path) -> int:
     )
 
 
-class _FileChangeMonitor(FileSystemEventHandler):
-    """Watchdog event handler for Phase 1 watch mode.
+@dataclass(frozen=True)
+class _WatchScanOutcome:
+    """The outcome of scanning one file during watch mode.
 
-    Phase 1 behavior: on any non-directory file system event, traverse the
-    watch root and report the total file count. Detection is not active until
-    Phase 2; a note is printed once at startup by the watch command.
+    Carries the human-readable result text and a typed boolean that
+    output.py uses to derive the Rich style for the rolling event table.
     """
 
-    def __init__(self, watch_root: Path) -> None:
+    result_text: str
+    is_clean: bool
+
+
+@dataclass
+class _WatchState:
+    """Groups the three shared objects passed between watch() and _FileChangeMonitor.
+
+    Introduced so _append_watch_event can access watch_root (needed to compute a
+    PHI-safe relative display path) without exceeding the three-argument limit.
+    Not frozen: watch_events is an intentionally mutable shared rolling buffer
+    appended to by the watchdog background thread.
+    scan_config is mutable by type but must not be modified after construction —
+    it is read-only shared state; mutation on the watchdog thread would be an
+    unsynchronized write with no lock protection.
+    """
+
+    watch_root: Path
+    watch_events: deque[WatchEvent]
+    scan_config: ScanConfig
+
+
+class _FileChangeMonitor(FileSystemEventHandler):
+    """Watchdog event handler — appends a watch event to the rolling log on each file change.
+
+    Phase 1: scan_file returns no findings so result is always clean. The Phase 1
+    note is displayed in the watch header; per-event result shows the actual outcome.
+    """
+
+    def __init__(self, watch_state: _WatchState) -> None:
         super().__init__()
-        self._watch_root = watch_root
+        self._watch_state = watch_state
 
     def on_any_event(self, event: FileSystemEvent) -> None:
-        """Log a file count on any non-directory change event.
+        """Append a timestamped event record on any non-directory file change.
 
         Args:
             event: The watchdog file system event.
         """
         if event.is_directory:
             return
-        file_count = _count_files_in_directory(self._watch_root)
-        typer.echo(
-            _WATCH_CHANGE_EVENT_FORMAT.format(
-                event_path=str(event.src_path),
-                file_count=file_count,
-            )
-        )
+        changed_path = Path(str(event.src_path))
+        # HIPAA traversal rule: never follow symlinks — a watchdog event can fire
+        # for a symlinked path, which could point outside the watched directory and
+        # expose files containing PHI that were never intended to be scanned.
+        if changed_path.is_symlink():
+            return
+        scan_outcome = _scan_changed_file(changed_path, self._watch_state)
+        if scan_outcome is not None:
+            _append_watch_event(changed_path, scan_outcome, self._watch_state)
 
 
 # ---------------------------------------------------------------------------
@@ -627,25 +663,116 @@ def _reject_hook_path_with_symlinked_component(hook_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _observe_directory(watch_path: Path) -> None:
-    """Start the watchdog observer and block until Ctrl+C.
+def _build_relative_display_path(changed_path: Path, watch_root: Path) -> str:
+    """Return changed_path relative to watch_root for PHI-safe display.
+
+    File paths can contain PHI (patient IDs, names) in directory components.
+    Storing the absolute path verbatim would persist raw PHI in the shared deque.
+    Converting to a watch-root-relative path removes the sensitive prefix that
+    appears in deep patient-directory structures. If relativisation fails (edge
+    case where the path is outside watch_root), a safe sentinel is returned —
+    the bare filename is NOT used because filenames themselves may contain PHI
+    (e.g. john_doe_mrn_123456.hl7).
 
     Args:
-        watch_path: Root directory to watch recursively.
+        changed_path: Absolute path to the changed file.
+        watch_root: The watched directory root.
+
+    Returns:
+        A relative path string safe for terminal display, or a fixed sentinel
+        when the path cannot be relativised.
     """
-    event_handler = _FileChangeMonitor(watch_path)
-    observer = Observer()
-    observer.schedule(event_handler, str(watch_path), recursive=True)
-    observer.start()
-    typer.echo(_WATCH_STARTED_MESSAGE.format(path=watch_path))
     try:
+        return str(changed_path.relative_to(watch_root))
+    except ValueError:
+        return _WATCH_PATH_OUTSIDE_ROOT_DISPLAY
+
+
+def _scan_changed_file(changed_path: Path, watch_state: _WatchState) -> _WatchScanOutcome | None:
+    """Run scan_file on a watchdog-reported path and return a structured outcome.
+
+    Returns None when the file cannot be read (deleted or permissions changed between
+    the watchdog event and the scan call) — caller skips appending to the deque.
+
+    Args:
+        changed_path: The file that changed, already confirmed non-symlink.
+        watch_state: Shared watch state; provides the scan configuration.
+
+    Returns:
+        _WatchScanOutcome with result text and is_clean flag, or None on I/O error.
+    """
+    try:
+        findings = scan_file(changed_path, watch_state.scan_config)
+    except (PermissionError, FileNotFoundError):
+        # File deleted or permissions revoked between watchdog event and scan call —
+        # log and signal skip rather than crashing the watchdog background thread.
+        _logger.warning("Skipping unreadable or deleted file during watch: %s", changed_path.name)
+        return None
+    return _build_watch_result(findings)
+
+
+def _append_watch_event(
+    changed_path: Path, scan_outcome: _WatchScanOutcome, watch_state: _WatchState
+) -> None:
+    """Build a WatchEvent from the scan outcome and append it to the rolling deque.
+
+    Args:
+        changed_path: The file that changed; used to compute the display path.
+        scan_outcome: Structured result from _scan_changed_file.
+        watch_state: Shared watch state; provides the deque and watch root.
+    """
+    # deque.append is atomic under CPython's GIL, so no explicit lock is needed here.
+    # The main thread reads the deque via list(watch_events) (also atomic), making
+    # this cross-thread access safe without threading.Lock for CPython.
+    watch_state.watch_events.append(
+        WatchEvent(
+            event_time=datetime.now(),
+            file_path=_build_relative_display_path(changed_path, watch_state.watch_root),
+            result_text=scan_outcome.result_text,
+            is_clean=scan_outcome.is_clean,
+        )
+    )
+
+
+def _build_watch_result(findings: list[ScanFinding]) -> _WatchScanOutcome:
+    """Return a structured scan outcome for a per-file watch event.
+
+    Phase 1: scan_file always returns an empty list, so this always returns
+    the clean outcome. Phase 2+ will surface real finding counts.
+
+    Args:
+        findings: Findings returned by scan_file for the changed file.
+
+    Returns:
+        _WatchScanOutcome with display text and a typed is_clean boolean.
+    """
+    if findings:
+        return _WatchScanOutcome(
+            result_text=WATCH_RESULT_VIOLATION_FORMAT.format(count=len(findings)),
+            is_clean=False,
+        )
+    return _WatchScanOutcome(result_text=WATCH_RESULT_CLEAN_TEXT, is_clean=True)
+
+
+def _display_watch_live_screen(
+    watch_path: Path,
+    watch_events: deque[WatchEvent],
+) -> None:
+    """Drive the Rich Live render loop, refreshing until the caller's context ends.
+
+    Single responsibility: render only. KeyboardInterrupt is not caught here —
+    it propagates naturally to watch(), which translates it to a clean exit code.
+    Rich's Live context manager handles alternate-screen teardown via __exit__
+    when any exception (including KeyboardInterrupt) unwinds the with block.
+
+    Args:
+        watch_path: The watched directory, shown in the persistent header.
+        watch_events: Shared deque updated by _FileChangeMonitor on the watchdog thread.
+    """
+    with Live(refresh_per_second=_WATCH_LIVE_REFRESH_RATE, screen=True) as live:
         while True:
+            live.update(build_watch_layout(watch_path, list(watch_events)))
             time.sleep(_WATCH_POLL_INTERVAL_SECONDS)
-    except KeyboardInterrupt:
-        typer.echo(_WATCH_STOPPED_MESSAGE)
-    finally:
-        observer.stop()
-        observer.join()
 
 
 # ---------------------------------------------------------------------------
@@ -751,9 +878,30 @@ def scan(
 def watch(
     path: Annotated[Path, typer.Argument(help=_WATCH_PATH_HELP)] = Path("."),
 ) -> None:
-    """Watch a directory and report file changes. Detection active from Phase 2."""
-    typer.echo(_WATCH_PHASE_ONE_NOTE)
-    _observe_directory(path)
+    """Watch a directory and re-scan changed files. Detection active from Phase 2."""
+    watch_path = path.resolve()
+    if not watch_path.exists():
+        raise typer.BadParameter(f"Path does not exist: {watch_path}", param_hint="'PATH'")
+    if not watch_path.is_dir():
+        raise typer.BadParameter(f"Path is not a directory: {watch_path}", param_hint="'PATH'")
+    watch_context = _WatchState(
+        watch_root=watch_path,
+        watch_events=deque(maxlen=_WATCH_LOG_MAX_EVENTS),
+        scan_config=ScanConfig(),
+    )
+    event_handler = _FileChangeMonitor(watch_context)
+    observer = Observer()
+    observer.schedule(event_handler, str(watch_path), recursive=True)
+    observer.start()
+    try:
+        _display_watch_live_screen(watch_path, watch_context.watch_events)
+    except KeyboardInterrupt:
+        # Ctrl+C is the standard exit for watch mode. Translate the BaseException
+        # into a clean exit code before the finally block tears down the observer.
+        raise typer.Exit(code=EXIT_CODE_CLEAN)
+    finally:
+        observer.stop()
+        observer.join()
 
 
 @app.command("report")
