@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import dataclasses
+import json
 import logging
 import time
 from dataclasses import dataclass
@@ -10,6 +11,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any
 
 import typer
+from rich.live import Live
 from watchdog.events import FileSystemEvent, FileSystemEventHandler
 from watchdog.observers import Observer
 
@@ -34,22 +36,40 @@ from phi_scan.constants import (
 from phi_scan.diff import get_changed_files_from_diff
 from phi_scan.exceptions import AuditLogError, ConfigurationError
 from phi_scan.logging_config import get_logger, replace_logger_handlers
-from phi_scan.models import ScanConfig, ScanResult
+from phi_scan.models import ScanConfig, ScanFinding, ScanResult
 from phi_scan.output import (
+    build_dashboard_layout,
     create_scan_progress,
     display_banner,
     display_category_breakdown,
     display_clean_result,
+    display_clean_summary_panel,
+    display_code_context_panel,
+    display_exit_code_message,
     display_file_tree,
+    display_file_type_summary,
     display_findings_table,
+    display_phase_audit,
+    display_phase_collecting,
+    display_phase_report,
+    display_phase_scanning,
+    display_risk_level_badge,
     display_scan_header,
-    display_summary_panel,
+    display_severity_inline,
+    display_status_spinner,
     display_violation_alert,
+    display_violation_summary_panel,
     format_csv,
     format_json,
     format_sarif,
 )
-from phi_scan.scanner import collect_scan_targets, execute_scan, load_ignore_patterns
+from phi_scan.scanner import (
+    build_scan_result,
+    collect_scan_targets,
+    execute_scan,
+    load_ignore_patterns,
+    scan_file,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Callable
@@ -190,9 +210,21 @@ _SETUP_STUB_MESSAGE: str = (
     "phi-scan setup downloads spaCy NLP models. "
     "Run `pip install phi-scan[nlp]` first, then re-run (available from Phase 2)."
 )
-_DASHBOARD_STUB_MESSAGE: str = (
-    "phi-scan dashboard: Rich Live real-time display is available from Phase 2."
-)
+_DASHBOARD_REFRESH_SECONDS: float = 2.0
+_DASHBOARD_REFRESH_RATE: float = 4.0
+_DASHBOARD_HISTORY_COUNT: int = 10
+_DASHBOARD_LOOKBACK_DAYS: int = 30
+_DASHBOARD_FINDINGS_JSON_KEY: str = "findings_json"
+_DASHBOARD_CATEGORY_KEY: str = "hipaa_category"
+_DASHBOARD_UNKNOWN_CATEGORY: str = "unknown"
+
+_SPINNER_CONFIG_LOAD_MESSAGE: str = "Loading configuration…"
+_SPINNER_AUDIT_WRITE_MESSAGE: str = "Writing audit log…"
+
+# Maximum characters of a file path shown in the progress bar description column.
+# Longer paths are truncated with a leading ellipsis so the bar layout stays stable.
+_PROGRESS_FILENAME_MAX_CHARS: int = 38
+_PROGRESS_FILENAME_ELLIPSIS: str = "…"
 
 # ---------------------------------------------------------------------------
 # Error and warning messages
@@ -381,6 +413,21 @@ def _resolve_scan_targets(options: _ScanTargetOptions) -> list[Path]:
     return collect_scan_targets(options.scan_root, ignore_patterns, options.config)
 
 
+def _truncate_filename_for_progress(file_path: Path) -> str:
+    """Return the file path as a string, truncated to fit the progress bar column.
+
+    Args:
+        file_path: Path to the file currently being scanned.
+
+    Returns:
+        Path string, truncated with a leading ellipsis when over the column width.
+    """
+    path_string = str(file_path)
+    if len(path_string) <= _PROGRESS_FILENAME_MAX_CHARS:
+        return path_string
+    return _PROGRESS_FILENAME_ELLIPSIS + path_string[-_PROGRESS_FILENAME_MAX_CHARS:]
+
+
 def _execute_scan_with_progress(
     scan_targets: list[Path],
     config: ScanConfig,
@@ -401,10 +448,15 @@ def _execute_scan_with_progress(
     """
     if not should_show_progress:
         return execute_scan(scan_targets, config)
+    all_findings: list[ScanFinding] = []
+    scan_start = time.monotonic()
     with create_scan_progress(total_files=len(scan_targets)) as (progress, task_id):
-        scan_result = execute_scan(scan_targets, config)
-        progress.update(task_id, completed=len(scan_targets))
-    return scan_result
+        for file_path in scan_targets:
+            label = _truncate_filename_for_progress(file_path)
+            progress.update(task_id, description=label, advance=1)
+            all_findings.extend(scan_file(file_path, config))
+    scan_duration = time.monotonic() - scan_start
+    return build_scan_result(tuple(all_findings), len(scan_targets), scan_duration)
 
 
 def _write_audit_record(scan_result: ScanResult, database_path: Path) -> None:
@@ -436,13 +488,20 @@ def _display_rich_scan_results(scan_result: ScanResult) -> None:
         scan_result: The completed scan result.
     """
     if scan_result.findings:
-        display_findings_table(scan_result.findings)
-        display_file_tree(scan_result.findings)
         display_violation_alert(scan_result)
+        display_risk_level_badge(scan_result)
+        display_severity_inline(scan_result)
+        display_category_breakdown(scan_result)
+        display_file_tree(scan_result.findings)
+        for finding in scan_result.findings:
+            display_code_context_panel(finding)
+        display_findings_table(scan_result.findings)
+        display_violation_summary_panel(scan_result)
+        display_exit_code_message(is_clean=False)
     else:
         display_clean_result()
-    display_summary_panel(scan_result)
-    display_category_breakdown(scan_result)
+        display_clean_summary_panel(scan_result)
+        display_exit_code_message(is_clean=True)
 
 
 def _emit_scan_output(scan_result: ScanResult, output_format: str, is_rich_mode: bool) -> None:
@@ -655,21 +714,31 @@ def scan(
     stdout clean for pipe and file consumption.
     """
     _configure_logging(log_level, log_file, is_quiet)
-    scan_config = _load_scan_config(config_path, severity_threshold)
+    is_rich_mode = not is_quiet and output_format == OutputFormat.TABLE.value
+    with display_status_spinner(_SPINNER_CONFIG_LOAD_MESSAGE, is_active=is_rich_mode):
+        scan_config = _load_scan_config(config_path, severity_threshold)
     target_options = _ScanTargetOptions(
         scan_root=path,
         diff_ref=diff_ref,
         single_file=single_file,
         config=scan_config,
     )
-    scan_targets = _resolve_scan_targets(target_options)
-    is_rich_mode = not is_quiet and output_format == OutputFormat.TABLE.value
     if is_rich_mode:
         display_banner()
         display_scan_header(path, scan_config)
+        display_phase_collecting()
+    scan_targets = _resolve_scan_targets(target_options)
+    if is_rich_mode:
+        display_file_type_summary(scan_targets)
+        display_phase_scanning()
     scan_result = _execute_scan_with_progress(scan_targets, scan_config, is_rich_mode)
-    _write_audit_record(scan_result, scan_config.database_path)
+    if is_rich_mode:
+        display_phase_audit()
+    with display_status_spinner(_SPINNER_AUDIT_WRITE_MESSAGE, is_active=is_rich_mode):
+        _write_audit_record(scan_result, scan_config.database_path)
     if not is_quiet:
+        if is_rich_mode:
+            display_phase_report()
         _emit_scan_output(scan_result, output_format, is_rich_mode)
     raise typer.Exit(code=EXIT_CODE_CLEAN if scan_result.is_clean else EXIT_CODE_VIOLATION)
 
@@ -752,10 +821,43 @@ def download_models() -> None:
     typer.echo(_SETUP_STUB_MESSAGE)
 
 
+def _aggregate_category_totals(recent_scans: list[dict[str, Any]]) -> dict[str, int]:
+    """Sum HIPAA category occurrences across all recent scan findings_json blobs.
+
+    Args:
+        recent_scans: Scan rows from the audit DB as returned by query_recent_scans.
+
+    Returns:
+        Mapping of HIPAA category value string to total finding count.
+    """
+    totals: dict[str, int] = {}
+    for row in recent_scans:
+        findings = json.loads(row.get(_DASHBOARD_FINDINGS_JSON_KEY, "[]"))
+        for finding in findings:
+            category = finding.get(_DASHBOARD_CATEGORY_KEY, _DASHBOARD_UNKNOWN_CATEGORY)
+            totals[category] = totals.get(category, 0) + 1
+    return totals
+
+
 @app.command("dashboard")
 def display_dashboard() -> None:
     """Rich Live real-time scan dashboard."""
-    typer.echo(_DASHBOARD_STUB_MESSAGE)
+    database_path = Path(DEFAULT_DATABASE_PATH)
+    try:
+        with Live(refresh_per_second=_DASHBOARD_REFRESH_RATE, screen=True) as live:
+            while True:
+                recent_scans = query_recent_scans(database_path, _DASHBOARD_LOOKBACK_DAYS)
+                last_scan = get_last_scan(database_path)
+                category_totals = _aggregate_category_totals(recent_scans)
+                layout = build_dashboard_layout(
+                    recent_scans[:_DASHBOARD_HISTORY_COUNT],
+                    category_totals,
+                    last_scan,
+                )
+                live.update(layout)
+                time.sleep(_DASHBOARD_REFRESH_SECONDS)
+    except KeyboardInterrupt:
+        raise typer.Exit(code=EXIT_CODE_CLEAN)
 
 
 @config_app.command("init")
