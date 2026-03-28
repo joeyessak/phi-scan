@@ -49,3 +49,11 @@ jobs:
           if [ -f review_comment.txt ]; then
             gh pr comment ${{ github.event.pull_request.number }} --body-file review_comment.txt
           fi
+
+      - name: Upload review result for auto-resolve workflow
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: review-result
+          path: review_result.txt
+          retention-days: 1
