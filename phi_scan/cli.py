@@ -129,8 +129,6 @@ _WATCH_LIVE_REFRESH_RATE: float = 4.0
 _WATCH_LOG_MAX_EVENTS: int = 10
 _WATCH_RESULT_CLEAN_TEXT: str = "✅ Clean"
 _WATCH_RESULT_VIOLATION_FORMAT: str = "⚠  {count} findings detected"
-_WATCH_RESULT_CLEAN_STYLE: str = "bold green"
-_WATCH_RESULT_VIOLATION_STYLE: str = "bold red"
 
 # ---------------------------------------------------------------------------
 # History command
@@ -299,6 +297,18 @@ def _count_files_in_directory(directory: Path) -> int:
         for candidate in directory.rglob(_RGLOB_ALL_FILES_PATTERN)
         if candidate.is_file() and not candidate.is_symlink()
     )
+
+
+@dataclass(frozen=True)
+class _WatchScanOutcome:
+    """Structured return value from _build_watch_result.
+
+    Replaces the raw tuple[str, str] so callers unpack named fields rather
+    than positional strings, and is_clean is typed rather than a style literal.
+    """
+
+    result_text: str
+    is_clean: bool
 
 
 @dataclass
@@ -673,33 +683,35 @@ def _append_watch_event(changed_path: Path, context: _WatchContext) -> None:
         context: Shared watch context holding deque, scan config, and watch root.
     """
     findings = scan_file(changed_path, context.scan_config)
-    result_text, result_style = _build_watch_result(findings)
+    scan_outcome = _build_watch_result(findings)
     context.watch_events.append(
         WatchEvent(
             event_time=datetime.now(),
             file_path=_relative_display_path(changed_path, context.watch_root),
-            result_text=result_text,
-            result_style=result_style,
+            result_text=scan_outcome.result_text,
+            is_clean=scan_outcome.is_clean,
         )
     )
 
 
-def _build_watch_result(findings: list[ScanFinding]) -> tuple[str, str]:
-    """Return display text and Rich style for a per-file watch scan result.
+def _build_watch_result(findings: list[ScanFinding]) -> _WatchScanOutcome:
+    """Return a structured scan outcome for a per-file watch event.
 
     Phase 1: scan_file always returns an empty list, so this always returns
-    the inactive result. Phase 2+ will surface real finding counts.
+    the clean outcome. Phase 2+ will surface real finding counts.
 
     Args:
         findings: Findings returned by scan_file for the changed file.
 
     Returns:
-        Tuple of (result_text, result_style) for the rolling event table.
+        _WatchScanOutcome with display text and a typed is_clean boolean.
     """
     if findings:
-        text = _WATCH_RESULT_VIOLATION_FORMAT.format(count=len(findings))
-        return text, _WATCH_RESULT_VIOLATION_STYLE
-    return _WATCH_RESULT_CLEAN_TEXT, _WATCH_RESULT_CLEAN_STYLE
+        return _WatchScanOutcome(
+            result_text=_WATCH_RESULT_VIOLATION_FORMAT.format(count=len(findings)),
+            is_clean=False,
+        )
+    return _WatchScanOutcome(result_text=_WATCH_RESULT_CLEAN_TEXT, is_clean=True)
 
 
 def _display_watch_live_screen(
@@ -708,11 +720,12 @@ def _display_watch_live_screen(
 ) -> None:
     """Drive the Rich Live display loop until the user presses Ctrl+C.
 
-    KeyboardInterrupt is caught here solely to close the Rich alternate-screen
-    buffer cleanly before returning. It is not re-raised because returning
-    normally is the agreed contract: the caller (watch()) wraps this call in a
-    try/finally that stops and joins the observer regardless of how this function
-    exits — no teardown is missed by returning instead of propagating.
+    KeyboardInterrupt (a BaseException subclass, not Exception) is caught here
+    solely to close the Rich alternate-screen buffer cleanly before returning.
+    It is not re-raised because returning normally is the agreed contract: the
+    caller (watch()) wraps this call in a try/finally that stops and joins the
+    observer regardless of how this function exits — no teardown is missed by
+    returning instead of propagating.
 
     Args:
         watch_path: The watched directory, shown in the persistent header.

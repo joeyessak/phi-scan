@@ -331,6 +331,12 @@ _WATCH_COL_RESULT: str = "Result"
 # Timestamp format applied in _build_watch_event_table — kept in output.py so the
 # display concern (how to render a datetime) stays in the same module that renders it.
 _WATCH_TIMESTAMP_FORMAT: str = "%H:%M:%S"
+# Style strings derived from WatchEvent.is_clean in _build_watch_event_table.
+# Kept here (display layer) so WatchEvent only carries the typed is_clean bool.
+_WATCH_RESULT_CLEAN_STYLE: str = "bold green"
+_WATCH_RESULT_VIOLATION_STYLE: str = "bold red"
+# Filler for the two unused columns in the empty-state placeholder row.
+_WATCH_EMPTY_CELL: str = ""
 
 
 @dataclass(frozen=True)
@@ -347,7 +353,9 @@ class WatchEvent:
     event_time: datetime
     file_path: str
     result_text: str
-    result_style: str
+    # Typed boolean rather than a raw Rich style string — keeps the data model free of
+    # display concerns. The rendering layer (_build_watch_event_table) derives the style.
+    is_clean: bool
 
 
 # ---------------------------------------------------------------------------
@@ -1371,10 +1379,11 @@ def _build_watch_event_table(events: Sequence[WatchEvent]) -> Table:
     table.add_column(_WATCH_COL_FILE)
     table.add_column(_WATCH_COL_RESULT, no_wrap=True)
     if not events:
-        table.add_row(_WATCH_NO_EVENTS_TEXT, "", "")
+        table.add_row(_WATCH_NO_EVENTS_TEXT, _WATCH_EMPTY_CELL, _WATCH_EMPTY_CELL)
         return table
     for event in events:
-        styled_result_cell = f"[{event.result_style}]{event.result_text}[/{event.result_style}]"
+        event_style = _WATCH_RESULT_CLEAN_STYLE if event.is_clean else _WATCH_RESULT_VIOLATION_STYLE
+        styled_result_cell = f"[{event_style}]{event.result_text}[/{event_style}]"
         table.add_row(
             event.event_time.strftime(_WATCH_TIMESTAMP_FORMAT),
             event.file_path,

@@ -482,16 +482,12 @@ def test_aggregate_category_totals_missing_findings_json_skips_row() -> None:
 
 
 def test_build_watch_result_returns_clean_text_for_no_findings() -> None:
-    from phi_scan.cli import (
-        _WATCH_RESULT_CLEAN_STYLE,
-        _WATCH_RESULT_CLEAN_TEXT,
-        _build_watch_result,
-    )
+    from phi_scan.cli import _WATCH_RESULT_CLEAN_TEXT, _build_watch_result
 
-    result_text, result_style = _build_watch_result([])
+    scan_outcome = _build_watch_result([])
 
-    assert result_text == _WATCH_RESULT_CLEAN_TEXT
-    assert result_style == _WATCH_RESULT_CLEAN_STYLE
+    assert scan_outcome.result_text == _WATCH_RESULT_CLEAN_TEXT
+    assert scan_outcome.is_clean is True
 
 
 def test_build_watch_result_returns_violation_text_for_findings(
@@ -499,7 +495,7 @@ def test_build_watch_result_returns_violation_text_for_findings(
 ) -> None:
     import hashlib
 
-    from phi_scan.cli import _WATCH_RESULT_VIOLATION_STYLE, _build_watch_result
+    from phi_scan.cli import _build_watch_result
     from phi_scan.constants import DetectionLayer, PhiCategory, SeverityLevel
     from phi_scan.models import ScanFinding
 
@@ -515,10 +511,10 @@ def test_build_watch_result_returns_violation_text_for_findings(
         code_context="",
         remediation_hint="",
     )
-    result_text, result_style = _build_watch_result([finding])
+    scan_outcome = _build_watch_result([finding])
 
-    assert "1" in result_text
-    assert result_style == _WATCH_RESULT_VIOLATION_STYLE
+    assert "1" in scan_outcome.result_text
+    assert scan_outcome.is_clean is False
 
 
 def test_build_watch_result_violation_count_matches_findings_length(
@@ -542,6 +538,6 @@ def test_build_watch_result_violation_count_matches_findings_length(
         code_context="",
         remediation_hint="",
     )
-    result_text, _ = _build_watch_result([finding, finding])
+    scan_outcome = _build_watch_result([finding, finding])
 
-    assert "2" in result_text
+    assert "2" in scan_outcome.result_text

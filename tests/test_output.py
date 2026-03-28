@@ -922,15 +922,13 @@ def test_build_dashboard_layout_with_data_does_not_raise() -> None:
 # build_watch_layout (1C.6a–1C.6d)
 # ---------------------------------------------------------------------------
 
-_WATCH_EMPTY_EVENTS: list[WatchEvent] = []
+_WATCH_EMPTY_EVENTS: tuple[WatchEvent, ...] = ()
 _WATCH_SAMPLE_DATETIME_ONE: datetime = datetime(2026, 3, 28, 14, 32, 5)
 _WATCH_SAMPLE_FILE_ONE: str = "src/api/patient.py"
 _WATCH_SAMPLE_RESULT_TEXT_CLEAN: str = "✅ Clean"
-_WATCH_SAMPLE_RESULT_STYLE_CLEAN: str = "bold green"
 _WATCH_SAMPLE_DATETIME_TWO: datetime = datetime(2026, 3, 28, 14, 33, 10)
 _WATCH_SAMPLE_FILE_TWO: str = "src/models/user.py"
 _WATCH_SAMPLE_RESULT_TEXT_VIOLATION: str = "⚠  2 findings detected"
-_WATCH_SAMPLE_RESULT_STYLE_VIOLATION: str = "bold red"
 
 
 @pytest.fixture()
@@ -941,13 +939,13 @@ def watch_sample_events() -> list[WatchEvent]:
             event_time=_WATCH_SAMPLE_DATETIME_ONE,
             file_path=_WATCH_SAMPLE_FILE_ONE,
             result_text=_WATCH_SAMPLE_RESULT_TEXT_CLEAN,
-            result_style=_WATCH_SAMPLE_RESULT_STYLE_CLEAN,
+            is_clean=True,
         ),
         WatchEvent(
             event_time=_WATCH_SAMPLE_DATETIME_TWO,
             file_path=_WATCH_SAMPLE_FILE_TWO,
             result_text=_WATCH_SAMPLE_RESULT_TEXT_VIOLATION,
-            result_style=_WATCH_SAMPLE_RESULT_STYLE_VIOLATION,
+            is_clean=False,
         ),
     ]
 
