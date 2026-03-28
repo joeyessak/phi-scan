@@ -95,7 +95,6 @@ def _write_result_file(metrics: RunMetrics) -> None:
         output_file.write(f"cost_usd: {metrics.run_cost_usd:.4f}\n")
         output_file.write(f"turns: {metrics.turns_used}\n")
         if metrics.run_completion_text:
-            # Truncate to avoid oversized workflow logs
             output_file.write(f"summary: {metrics.run_completion_text[:MAX_SUMMARY_LENGTH]}\n")
 
 
@@ -139,7 +138,7 @@ def _extract_metrics_from_result(message: ResultMessage) -> RunMetrics:
     try:
         result_subtype = ResultSubtype(message.subtype)
     except ValueError:
-        print(f"WARNING: unrecognized result subtype '{message.subtype}' — defaulting to UNKNOWN")
+        print("WARNING: unrecognized result subtype — defaulting to UNKNOWN")
         result_subtype = DEFAULT_RESULT_SUBTYPE
     run_cost_usd = message.total_cost_usd if message.total_cost_usd is not None else 0.0
     run_completion_text = (
@@ -153,7 +152,7 @@ def _extract_metrics_from_result(message: ResultMessage) -> RunMetrics:
     )
 
 
-async def _collect_run_metrics() -> RunMetrics:
+async def _stream_agent_metrics() -> RunMetrics:
     """Stream the self-heal agent run and collect result metrics.
 
     Returns:
@@ -196,7 +195,7 @@ async def execute_self_heal_cycle() -> int:
     """
     print(f"Starting self-heal run — budget cap: ${MAX_BUDGET_USD:.2f} | max turns: {MAX_TURNS}")
 
-    metrics = await _collect_run_metrics()
+    metrics = await _stream_agent_metrics()
 
     _write_result_file(metrics)
     _print_run_outcome(metrics)

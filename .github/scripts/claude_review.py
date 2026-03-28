@@ -177,7 +177,7 @@ def _extract_verdict(review_text: str) -> ReviewVerdict:
             try:
                 return ReviewVerdict(verdict_text)
             except ValueError:
-                print(f"WARNING: unrecognized verdict '{verdict_text}' — defaulting to WARNING")
+                print("WARNING: unrecognized verdict value — defaulting to WARNING")
                 return DEFAULT_VERDICT
     return DEFAULT_VERDICT
 
@@ -195,7 +195,7 @@ def _write_verdict_file(review_text: str) -> None:
         result_file.write(verdict)
 
 
-def run_review() -> None:
+def execute_review_cycle() -> None:
     """Orchestrate the full review flow."""
     pr_title = os.environ.get("PR_TITLE", "Untitled PR")
     diff = load_diff()
@@ -219,4 +219,4 @@ if __name__ == "__main__":
         print("ERROR: ANTHROPIC_API_KEY not set.")
         sys.exit(1)
 
-    run_review()
+    execute_review_cycle()
