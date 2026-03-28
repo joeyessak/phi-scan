@@ -217,6 +217,7 @@ _DASHBOARD_LOOKBACK_DAYS: int = 30
 _DASHBOARD_FINDINGS_JSON_KEY: str = "findings_json"
 _DASHBOARD_CATEGORY_KEY: str = "hipaa_category"
 _DASHBOARD_UNKNOWN_CATEGORY: str = "unknown"
+# Sentinel used when a scan row has no findings_json blob — parse as empty list.
 _DASHBOARD_EMPTY_FINDINGS_JSON: str = "[]"
 
 _SPINNER_CONFIG_LOAD_MESSAGE: str = "Loading configuration…"
