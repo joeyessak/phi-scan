@@ -183,8 +183,7 @@ _HOOK_IS_SYMLINK_MESSAGE: str = "Hook at {path} is a symlink — not reading or 
 _HOOK_SYMLINKED_COMPONENT_ERROR: str = (
     "Hook path component {component!r} is a symlink — refusing to write."
 )
-_GIT_DIR_RELATIVE_PATH: str = ".git"
-_GIT_DIR_PATH: Path = Path(_GIT_DIR_RELATIVE_PATH)
+_GIT_DIR_PATH: Path = Path(".git")
 _GIT_DIR_NOT_FOUND_MESSAGE: str = "Not a git repository — .git directory not found."
 # Marker written into every hook we install; used to identify our hooks on uninstall.
 _HOOK_MARKER: str = "phi-scan scan"
@@ -669,7 +668,9 @@ def _reject_non_git_directory(git_dir: Path) -> None:
     non-standard path. This guard catches that before any read or write occurs.
 
     Args:
-        git_dir: Expected .git directory path (typically hook_path.parent.parent).
+        git_dir: Path to check — callers pass the module-level _GIT_DIR_PATH
+            (a CWD-relative Path(".git")), so the guard always checks for .git
+            in the current working directory, not relative to the hook file.
 
     Raises:
         typer.Exit: If git_dir does not exist as a directory.
