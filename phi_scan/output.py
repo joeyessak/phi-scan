@@ -1374,11 +1374,11 @@ def _build_watch_event_table(events: Sequence[WatchEvent]) -> Table:
         table.add_row(_WATCH_NO_EVENTS_TEXT, "", "")
         return table
     for event in events:
-        result_cell_markup = f"[{event.result_style}]{event.result_text}[/{event.result_style}]"
+        styled_result_cell = f"[{event.result_style}]{event.result_text}[/{event.result_style}]"
         table.add_row(
             event.event_time.strftime(_WATCH_TIMESTAMP_FORMAT),
             event.file_path,
-            result_cell_markup,
+            styled_result_cell,
         )
     return table
 

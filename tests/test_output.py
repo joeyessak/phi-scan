@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 from datetime import datetime
 from pathlib import Path
 from types import MappingProxyType
 
 import pytest
+from rich.console import Console
 from rich.table import Table
 
 from phi_scan.constants import DetectionLayer, PhiCategory, RiskLevel, SeverityLevel
@@ -973,8 +975,10 @@ def test_build_watch_event_table_empty_shows_waiting_text() -> None:
 
     table = _build_watch_event_table([])
 
+    rendered = io.StringIO()
+    Console(file=rendered, no_color=True).print(table)
     assert table.row_count == 1
-    assert _WATCH_NO_EVENTS_TEXT in str(table.columns[0]._cells[0])
+    assert _WATCH_NO_EVENTS_TEXT in rendered.getvalue()
 
 
 def test_build_watch_event_table_has_three_columns() -> None:
