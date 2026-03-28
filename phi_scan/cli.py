@@ -40,8 +40,8 @@ from phi_scan.exceptions import AuditLogError, ConfigurationError
 from phi_scan.logging_config import get_logger, replace_logger_handlers
 from phi_scan.models import ScanConfig, ScanFinding, ScanResult
 from phi_scan.output import (
-    _WATCH_RESULT_CLEAN_TEXT,
-    _WATCH_RESULT_VIOLATION_FORMAT,
+    WATCH_RESULT_CLEAN_TEXT,
+    WATCH_RESULT_VIOLATION_FORMAT,
     WatchEvent,
     build_dashboard_layout,
     build_watch_layout,
@@ -319,6 +319,9 @@ class _WatchState:
     PHI-safe relative display path) without exceeding the three-argument limit.
     Not frozen: watch_events is an intentionally mutable shared rolling buffer
     appended to by the watchdog background thread.
+    scan_config is mutable by type but must not be modified after construction —
+    it is read-only shared state; mutation on the watchdog thread would be an
+    unsynchronized write with no lock protection.
     """
 
     watch_root: Path
@@ -657,7 +660,7 @@ def _reject_hook_path_with_symlinked_component(hook_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _relative_display_path(changed_path: Path, watch_root: Path) -> str:
+def _build_relative_display_path(changed_path: Path, watch_root: Path) -> str:
     """Return changed_path relative to watch_root for PHI-safe display.
 
     File paths can contain PHI (patient IDs, names) in directory components.
@@ -718,7 +721,7 @@ def _append_watch_event(
     context.watch_events.append(
         WatchEvent(
             event_time=datetime.now(),
-            file_path=_relative_display_path(changed_path, context.watch_root),
+            file_path=_build_relative_display_path(changed_path, context.watch_root),
             result_text=scan_outcome.result_text,
             is_clean=scan_outcome.is_clean,
         )
@@ -739,10 +742,10 @@ def _build_watch_result(findings: list[ScanFinding]) -> _WatchScanOutcome:
     """
     if findings:
         return _WatchScanOutcome(
-            result_text=_WATCH_RESULT_VIOLATION_FORMAT.format(count=len(findings)),
+            result_text=WATCH_RESULT_VIOLATION_FORMAT.format(count=len(findings)),
             is_clean=False,
         )
-    return _WatchScanOutcome(result_text=_WATCH_RESULT_CLEAN_TEXT, is_clean=True)
+    return _WatchScanOutcome(result_text=WATCH_RESULT_CLEAN_TEXT, is_clean=True)
 
 
 def _display_watch_live_screen(

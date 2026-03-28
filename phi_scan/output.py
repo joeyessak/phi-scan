@@ -335,10 +335,14 @@ _WATCH_TIMESTAMP_FORMAT: str = "%H:%M:%S"
 # Kept here (display layer) so WatchEvent only carries the typed is_clean bool.
 _WATCH_RESULT_CLEAN_STYLE: str = "bold green"
 _WATCH_RESULT_VIOLATION_STYLE: str = "bold red"
-# Result text constants kept here so cli.py's _build_watch_result and output.py
-# share a single source of truth for watch event display strings.
-_WATCH_RESULT_CLEAN_TEXT: str = "✅ Clean"
-_WATCH_RESULT_VIOLATION_FORMAT: str = "⚠  {count} findings detected"
+# Result text constants are public (no underscore) because cli.py imports them to
+# build _WatchScanOutcome. Keeping them here rather than in constants.py preserves
+# the display-layer boundary — they format terminal strings, not domain values.
+WATCH_RESULT_CLEAN_TEXT: str = "✅ Clean"
+WATCH_RESULT_VIOLATION_FORMAT: str = "⚠  {count} findings detected"
+# Rich inline markup template: "[{style}]text[/{style}]". Extracted so the
+# literal tag syntax does not appear as a magic string in rendering logic.
+_RICH_STYLED_TEXT_FORMAT: str = "[{style}]{text}[/{style}]"
 # Filler for the two unused columns in the empty-state placeholder row.
 _WATCH_EMPTY_CELL: str = ""
 
@@ -1389,11 +1393,13 @@ def _build_watch_event_table(events: Sequence[WatchEvent]) -> Table:
         result_cell_style = (
             _WATCH_RESULT_CLEAN_STYLE if event.is_clean else _WATCH_RESULT_VIOLATION_STYLE
         )
-        styled_result_cell = f"[{result_cell_style}]{event.result_text}[/{result_cell_style}]"
+        result_markup = _RICH_STYLED_TEXT_FORMAT.format(
+            style=result_cell_style, text=event.result_text
+        )
         table.add_row(
             event.event_time.strftime(_WATCH_TIMESTAMP_FORMAT),
             event.file_path,
-            styled_result_cell,
+            result_markup,
         )
     return table
 

@@ -526,11 +526,11 @@ def test_aggregate_category_totals_missing_findings_json_skips_row() -> None:
 
 def test_build_watch_result_returns_clean_text_for_no_findings() -> None:
     from phi_scan.cli import _build_watch_result
-    from phi_scan.output import _WATCH_RESULT_CLEAN_TEXT
+    from phi_scan.output import WATCH_RESULT_CLEAN_TEXT
 
     scan_outcome = _build_watch_result([])
 
-    assert scan_outcome.result_text == _WATCH_RESULT_CLEAN_TEXT
+    assert scan_outcome.result_text == WATCH_RESULT_CLEAN_TEXT
     assert scan_outcome.is_clean is True
 
 
