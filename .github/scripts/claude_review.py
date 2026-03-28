@@ -187,7 +187,7 @@ def _write_review_comment_file(review_text: str) -> None:
         output_file.write(REVIEW_COMMENT_HEADER + review_text)
 
 
-def _write_verdict_result(review_text: str) -> None:
+def _write_verdict_file(review_text: str) -> None:
     """Write the machine-readable verdict to the result file for the auto-resolve workflow."""
     verdict = _extract_verdict(review_text)
     with open(REVIEW_RESULT_FILE, "w", encoding="utf-8") as result_file:
@@ -201,7 +201,7 @@ def write_review_comment(review_text: str) -> None:
         review_text: Full review text returned by Claude.
     """
     _write_review_comment_file(review_text)
-    _write_verdict_result(review_text)
+    _write_verdict_file(review_text)
 
 
 def run_review() -> None:

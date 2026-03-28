@@ -10,6 +10,7 @@ import asyncio
 import os
 import sys
 from dataclasses import dataclass
+from enum import StrEnum
 
 from claude_agent_sdk import AssistantMessage, ClaudeAgentOptions, ResultMessage, query
 
@@ -19,11 +20,6 @@ MAX_SUMMARY_LENGTH: int = 500
 RESULT_OUTPUT_FILE: str = "self_heal_result.txt"
 ANTHROPIC_API_KEY_ENV_VAR: str = "ANTHROPIC_API_KEY"
 
-RESULT_SUBTYPE_SUCCESS: str = "success"
-RESULT_SUBTYPE_UNKNOWN: str = "unknown"
-RESULT_SUBTYPE_MAX_BUDGET: str = "error_max_budget_usd"
-RESULT_SUBTYPE_MAX_TURNS: str = "error_max_turns"
-
 PERMISSION_MODE_BYPASS: str = "bypassPermissions"
 DEFAULT_MODEL: str = "claude-sonnet-4-6"
 DEFAULT_EFFORT: str = "high"
@@ -31,7 +27,16 @@ DEFAULT_EFFORT: str = "high"
 TOOL_USE_BLOCK_TYPE: str = "tool_use"
 TOOL_LOG_PREFIX: str = "  [tool] "
 
-ALLOWED_SDK_TOOLS: list[str] = ["Bash", "Read", "Write", "Edit", "Glob", "Grep", "Agent"]
+ALLOWED_SDK_TOOLS: tuple[str, ...] = ("Bash", "Read", "Write", "Edit", "Glob", "Grep", "Agent")
+
+
+class ResultSubtype(StrEnum):
+    SUCCESS = "success"
+    UNKNOWN = "unknown"
+    MAX_BUDGET = "error_max_budget_usd"
+    MAX_TURNS = "error_max_turns"
+
+DEFAULT_RESULT_SUBTYPE: ResultSubtype = ResultSubtype.UNKNOWN
 
 EXIT_CODE_SUCCESS: int = 0
 EXIT_CODE_FAILURE: int = 1
@@ -64,7 +69,7 @@ Commit rules:
 class RunMetrics:
     """Collected metrics from a completed self-heal agent run."""
 
-    result_subtype: str
+    result_subtype: ResultSubtype
     run_cost_usd: float
     turns_used: int
     run_completion_text: str
@@ -88,21 +93,21 @@ def _write_result_file(metrics: RunMetrics) -> None:
             output_file.write(f"summary: {metrics.run_completion_text[:MAX_SUMMARY_LENGTH]}\n")
 
 
-def _map_subtype_to_exit_code(result_subtype: str) -> int:
+def _map_subtype_to_exit_code(result_subtype: ResultSubtype) -> int:
     """Return 0 on success, 1 on any failure or limit hit."""
-    if result_subtype == RESULT_SUBTYPE_SUCCESS:
+    if result_subtype == ResultSubtype.SUCCESS:
         return EXIT_CODE_SUCCESS
     return EXIT_CODE_FAILURE
 
 
 def _print_run_outcome(metrics: RunMetrics) -> None:
     """Print a human-readable outcome message for the workflow log."""
-    if metrics.result_subtype == RESULT_SUBTYPE_SUCCESS:
+    if metrics.result_subtype == ResultSubtype.SUCCESS:
         print("Self-heal completed successfully.")
-    elif metrics.result_subtype == RESULT_SUBTYPE_MAX_BUDGET:
+    elif metrics.result_subtype == ResultSubtype.MAX_BUDGET:
         print(f"Self-heal hit the ${MAX_BUDGET_USD:.2f} budget cap.")
         print("Increase MAX_BUDGET_USD in self_heal_runner.py if needed.")
-    elif metrics.result_subtype == RESULT_SUBTYPE_MAX_TURNS:
+    elif metrics.result_subtype == ResultSubtype.MAX_TURNS:
         print(f"Self-heal hit the {MAX_TURNS}-turn limit.")
         print("Increase MAX_TURNS in self_heal_runner.py if needed.")
     else:
@@ -115,7 +120,7 @@ async def _collect_run_metrics() -> RunMetrics:
     Returns:
         RunMetrics dataclass with subtype, cost, turns, and completion text.
     """
-    result_subtype: str = RESULT_SUBTYPE_UNKNOWN
+    result_subtype: ResultSubtype = DEFAULT_RESULT_SUBTYPE
     run_cost_usd: float = 0.0
     turns_used: int = 0
     run_completion_text: str = ""
@@ -126,7 +131,7 @@ async def _collect_run_metrics() -> RunMetrics:
             permission_mode=PERMISSION_MODE_BYPASS,
             max_budget_usd=MAX_BUDGET_USD,
             max_turns=MAX_TURNS,
-            allowed_tools=ALLOWED_SDK_TOOLS,
+            allowed_tools=list(ALLOWED_SDK_TOOLS),
             setting_sources=["project"],
             effort=DEFAULT_EFFORT,
             model=DEFAULT_MODEL,
@@ -136,13 +141,13 @@ async def _collect_run_metrics() -> RunMetrics:
             _print_tool_call_name(message)
 
         if isinstance(message, ResultMessage):
-            result_subtype = message.subtype
+            result_subtype = ResultSubtype(message.subtype)
             turns_used = message.num_turns
 
             if message.total_cost_usd is not None:
                 run_cost_usd = message.total_cost_usd
 
-            if result_subtype == RESULT_SUBTYPE_SUCCESS and message.result:
+            if result_subtype == ResultSubtype.SUCCESS and message.result:
                 run_completion_text = message.result
 
             print(f"Result:     {result_subtype}")
