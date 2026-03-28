@@ -328,6 +328,9 @@ _WATCH_NO_EVENTS_TEXT: str = "Waiting for file changes…"
 _WATCH_COL_TIME: str = "Time"
 _WATCH_COL_FILE: str = "Changed File"
 _WATCH_COL_RESULT: str = "Result"
+# Timestamp format applied in _build_watch_event_table — kept in output.py so the
+# display concern (how to render a datetime) stays in the same module that renders it.
+_WATCH_TIMESTAMP_FORMAT: str = "%H:%M:%S"
 
 
 @dataclass(frozen=True)
@@ -337,9 +340,11 @@ class WatchEvent:
     Created by cli.py when watchdog fires and scan_file completes; consumed
     by output.py to render the rolling log table. Frozen to prevent mutation
     across the shared deque boundary between the watchdog thread and main thread.
+    event_time is stored as datetime so formatting stays in output.py and events
+    remain sortable/comparable without reparsing a formatted string.
     """
 
-    event_time: str
+    event_time: datetime
     file_path: str
     result_text: str
     result_style: str
@@ -1369,8 +1374,12 @@ def _build_watch_event_table(events: Sequence[WatchEvent]) -> Table:
         table.add_row(_WATCH_NO_EVENTS_TEXT, "", "")
         return table
     for event in events:
-        result_markup = f"[{event.result_style}]{event.result_text}[/{event.result_style}]"
-        table.add_row(event.event_time, event.file_path, result_markup)
+        result_cell_markup = f"[{event.result_style}]{event.result_text}[/{event.result_style}]"
+        table.add_row(
+            event.event_time.strftime(_WATCH_TIMESTAMP_FORMAT),
+            event.file_path,
+            result_cell_markup,
+        )
     return table
 
 

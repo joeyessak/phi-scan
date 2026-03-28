@@ -127,7 +127,6 @@ _WATCH_PATH_HELP: str = "Directory to watch for file system changes."
 _WATCH_POLL_INTERVAL_SECONDS: float = 1.0
 _WATCH_LIVE_REFRESH_RATE: float = 4.0
 _WATCH_LOG_MAX_EVENTS: int = 10
-_WATCH_TIMESTAMP_FORMAT: str = "%H:%M:%S"
 _WATCH_RESULT_CLEAN_TEXT: str = "✅ Clean"
 _WATCH_RESULT_VIOLATION_FORMAT: str = "⚠  {count} findings detected"
 _WATCH_RESULT_CLEAN_STYLE: str = "bold green"
@@ -302,6 +301,19 @@ def _count_files_in_directory(directory: Path) -> int:
     )
 
 
+@dataclass
+class _WatchContext:
+    """Groups the three shared objects passed between watch() and _FileChangeMonitor.
+
+    Introduced so _append_watch_event can access watch_root (needed to compute a
+    PHI-safe relative display path) without exceeding the three-argument limit.
+    """
+
+    watch_root: Path
+    watch_events: deque[WatchEvent]
+    scan_config: ScanConfig
+
+
 class _FileChangeMonitor(FileSystemEventHandler):
     """Watchdog event handler — appends a watch event to the rolling log on each file change.
 
@@ -309,16 +321,9 @@ class _FileChangeMonitor(FileSystemEventHandler):
     note is displayed in the watch header; per-event result shows the actual outcome.
     """
 
-    def __init__(
-        self,
-        watch_root: Path,
-        watch_events: deque[WatchEvent],
-        scan_config: ScanConfig,
-    ) -> None:
+    def __init__(self, context: _WatchContext) -> None:
         super().__init__()
-        self._watch_root = watch_root
-        self._watch_events = watch_events
-        self._scan_config = scan_config
+        self._context = context
 
     def on_any_event(self, event: FileSystemEvent) -> None:
         """Append a timestamped event record on any non-directory file change.
@@ -334,7 +339,7 @@ class _FileChangeMonitor(FileSystemEventHandler):
         # expose files containing PHI that were never intended to be scanned.
         if changed_path.is_symlink():
             return
-        _append_watch_event(changed_path, self._watch_events, self._scan_config)
+        _append_watch_event(changed_path, self._context)
 
 
 # ---------------------------------------------------------------------------
@@ -638,24 +643,41 @@ def _reject_hook_path_with_symlinked_component(hook_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _append_watch_event(
-    changed_path: Path,
-    watch_events: deque[WatchEvent],
-    scan_config: ScanConfig,
-) -> None:
+def _relative_display_path(changed_path: Path, watch_root: Path) -> str:
+    """Return changed_path relative to watch_root for PHI-safe display.
+
+    File paths can contain PHI (patient IDs, names) in directory components.
+    Storing the absolute path verbatim would persist raw PHI in the shared deque.
+    Converting to a watch-root-relative path removes the sensitive prefix that
+    appears in deep patient-directory structures. If relativisation fails (edge
+    case where the path is outside watch_root), the bare filename is used.
+
+    Args:
+        changed_path: Absolute path to the changed file.
+        watch_root: The watched directory root.
+
+    Returns:
+        A relative path string safe for terminal display.
+    """
+    try:
+        return str(changed_path.relative_to(watch_root))
+    except ValueError:
+        return changed_path.name
+
+
+def _append_watch_event(changed_path: Path, context: _WatchContext) -> None:
     """Scan changed_path, build a WatchEvent record, and append it to the deque.
 
     Args:
         changed_path: The file that changed, already confirmed non-symlink.
-        watch_events: Rolling deque shared between the watchdog thread and main thread.
-        scan_config: Scanner configuration used for the per-file scan.
+        context: Shared watch context holding deque, scan config, and watch root.
     """
-    findings = scan_file(changed_path, scan_config)
+    findings = scan_file(changed_path, context.scan_config)
     result_text, result_style = _build_watch_result(findings)
-    watch_events.append(
+    context.watch_events.append(
         WatchEvent(
-            event_time=datetime.now().strftime(_WATCH_TIMESTAMP_FORMAT),
-            file_path=str(changed_path),
+            event_time=datetime.now(),
+            file_path=_relative_display_path(changed_path, context.watch_root),
             result_text=result_text,
             result_style=result_style,
         )
@@ -684,10 +706,13 @@ def _display_watch_live_screen(
     watch_path: Path,
     watch_events: deque[WatchEvent],
 ) -> None:
-    """Drive the Rich Live display loop until Ctrl+C.
+    """Drive the Rich Live display loop until the user presses Ctrl+C.
 
-    Ctrl+C (KeyboardInterrupt) is the expected exit mechanism for watch mode —
-    caught here to stop the Rich Live display cleanly before process exit.
+    KeyboardInterrupt is caught here solely to close the Rich alternate-screen
+    buffer cleanly before returning. It is not re-raised because returning
+    normally is the agreed contract: the caller (watch()) wraps this call in a
+    try/finally that stops and joins the observer regardless of how this function
+    exits — no teardown is missed by returning instead of propagating.
 
     Args:
         watch_path: The watched directory, shown in the persistent header.
@@ -699,8 +724,6 @@ def _display_watch_live_screen(
                 live.update(build_watch_layout(watch_path, list(watch_events)))
                 time.sleep(_WATCH_POLL_INTERVAL_SECONDS)
     except KeyboardInterrupt:
-        # Ctrl+C is the standard exit for watch mode — caught here to suppress the
-        # default traceback and allow Rich to close the screen buffer cleanly.
         return
 
 
@@ -813,14 +836,17 @@ def watch(
         raise typer.BadParameter(f"Path does not exist: {watch_path}", param_hint="'PATH'")
     if not watch_path.is_dir():
         raise typer.BadParameter(f"Path is not a directory: {watch_path}", param_hint="'PATH'")
-    scan_config = ScanConfig()
-    watch_events: deque[WatchEvent] = deque(maxlen=_WATCH_LOG_MAX_EVENTS)
-    event_handler = _FileChangeMonitor(watch_path, watch_events, scan_config)
+    watch_context = _WatchContext(
+        watch_root=watch_path,
+        watch_events=deque(maxlen=_WATCH_LOG_MAX_EVENTS),
+        scan_config=ScanConfig(),
+    )
+    event_handler = _FileChangeMonitor(watch_context)
     observer = Observer()
     observer.schedule(event_handler, str(watch_path), recursive=True)
     observer.start()
     try:
-        _display_watch_live_screen(watch_path, watch_events)
+        _display_watch_live_screen(watch_path, watch_context.watch_events)
     finally:
         observer.stop()
         observer.join()

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from datetime import datetime
 from pathlib import Path
 from types import MappingProxyType
 
@@ -920,11 +921,11 @@ def test_build_dashboard_layout_with_data_does_not_raise() -> None:
 # ---------------------------------------------------------------------------
 
 _WATCH_EMPTY_EVENTS: list[WatchEvent] = []
-_WATCH_SAMPLE_TIMESTAMP_ONE: str = "14:32:05"
+_WATCH_SAMPLE_DATETIME_ONE: datetime = datetime(2026, 3, 28, 14, 32, 5)
 _WATCH_SAMPLE_FILE_ONE: str = "src/api/patient.py"
 _WATCH_SAMPLE_RESULT_TEXT_CLEAN: str = "✅ Clean"
 _WATCH_SAMPLE_RESULT_STYLE_CLEAN: str = "bold green"
-_WATCH_SAMPLE_TIMESTAMP_TWO: str = "14:33:10"
+_WATCH_SAMPLE_DATETIME_TWO: datetime = datetime(2026, 3, 28, 14, 33, 10)
 _WATCH_SAMPLE_FILE_TWO: str = "src/models/user.py"
 _WATCH_SAMPLE_RESULT_TEXT_VIOLATION: str = "⚠  2 findings detected"
 _WATCH_SAMPLE_RESULT_STYLE_VIOLATION: str = "bold red"
@@ -935,13 +936,13 @@ def watch_sample_events() -> list[WatchEvent]:
     """Fresh list of two sample WatchEvent records per test."""
     return [
         WatchEvent(
-            event_time=_WATCH_SAMPLE_TIMESTAMP_ONE,
+            event_time=_WATCH_SAMPLE_DATETIME_ONE,
             file_path=_WATCH_SAMPLE_FILE_ONE,
             result_text=_WATCH_SAMPLE_RESULT_TEXT_CLEAN,
             result_style=_WATCH_SAMPLE_RESULT_STYLE_CLEAN,
         ),
         WatchEvent(
-            event_time=_WATCH_SAMPLE_TIMESTAMP_TWO,
+            event_time=_WATCH_SAMPLE_DATETIME_TWO,
             file_path=_WATCH_SAMPLE_FILE_TWO,
             result_text=_WATCH_SAMPLE_RESULT_TEXT_VIOLATION,
             result_style=_WATCH_SAMPLE_RESULT_STYLE_VIOLATION,
