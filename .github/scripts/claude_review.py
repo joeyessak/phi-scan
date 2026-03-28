@@ -8,6 +8,7 @@ and writes the review to review_comment.txt for posting as a PR comment.
 import os
 import sys
 import time
+from enum import StrEnum
 
 import anthropic
 
@@ -147,28 +148,40 @@ def request_claude_review(pr_title: str, diff: str) -> str:
 
 REVIEW_RESULT_FILE = "review_result.txt"
 REVIEW_COMMENT_HEADER = "## Claude Code Review\n\n"
-DEFAULT_VERDICT = "WARNING"
 VERDICT_LINE_PREFIX = "verdict:"
 
 
-def _extract_verdict(review_text: str) -> str:
+class ReviewVerdict(StrEnum):
+    CLEAN = "CLEAN"
+    CRITICAL = "CRITICAL"
+    WARNING = "WARNING"
+
+
+DEFAULT_VERDICT: ReviewVerdict = ReviewVerdict.WARNING
+
+
+def _extract_verdict(review_text: str) -> ReviewVerdict:
     """Extract the machine-readable verdict from the structured REVIEW_RESULT block.
 
     Args:
         review_text: Full review text from Claude, expected to contain a verdict line.
 
     Returns:
-        Verdict string (CLEAN, CRITICAL, or WARNING). Defaults to WARNING if not found
+        ReviewVerdict enum value. Defaults to WARNING if not found or unrecognized
         so unreadable results trigger a fix attempt rather than silently passing.
     """
     for line in review_text.splitlines():
         stripped_line = line.strip()
         if stripped_line.startswith(VERDICT_LINE_PREFIX):
-            return stripped_line.split(":", maxsplit=1)[1].strip()
+            raw_verdict = stripped_line.split(":", maxsplit=1)[1].strip()
+            try:
+                return ReviewVerdict(raw_verdict)
+            except ValueError:
+                return DEFAULT_VERDICT
     return DEFAULT_VERDICT
 
 
-def _write_human_review(review_text: str) -> None:
+def _write_review_comment_file(review_text: str) -> None:
     """Write the human-readable review comment to the output file for posting."""
     with open(REVIEW_OUTPUT_FILE, "w", encoding="utf-8") as output_file:
         output_file.write(REVIEW_COMMENT_HEADER + review_text)
@@ -187,7 +200,7 @@ def write_review_comment(review_text: str) -> None:
     Args:
         review_text: Full review text returned by Claude.
     """
-    _write_human_review(review_text)
+    _write_review_comment_file(review_text)
     _write_verdict_result(review_text)
 
 

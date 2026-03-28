@@ -9,6 +9,7 @@ so the workflow gets proper cost visibility and structured exit codes.
 import asyncio
 import os
 import sys
+from dataclasses import dataclass
 
 from claude_agent_sdk import AssistantMessage, ClaudeAgentOptions, ResultMessage, query
 
@@ -26,6 +27,11 @@ RESULT_SUBTYPE_MAX_TURNS: str = "error_max_turns"
 PERMISSION_MODE_BYPASS: str = "bypassPermissions"
 DEFAULT_MODEL: str = "claude-sonnet-4-6"
 DEFAULT_EFFORT: str = "high"
+
+TOOL_USE_BLOCK_TYPE: str = "tool_use"
+TOOL_LOG_PREFIX: str = "  [tool] "
+
+ALLOWED_SDK_TOOLS: list[str] = ["Bash", "Read", "Write", "Edit", "Glob", "Grep", "Agent"]
 
 EXIT_CODE_SUCCESS: int = 0
 EXIT_CODE_FAILURE: int = 1
@@ -54,27 +60,32 @@ Commit rules:
 """
 
 
+@dataclass
+class RunMetrics:
+    """Collected metrics from a completed self-heal agent run."""
+
+    result_subtype: str
+    run_cost_usd: float
+    turns_used: int
+    run_completion_text: str
+
+
 def _print_tool_call_name(message: AssistantMessage) -> None:
     """Print each tool call name for workflow log visibility."""
     for block in message.content:
-        if hasattr(block, "type") and block.type == "tool_use":
-            print(f"  [tool] {block.name}")
+        if hasattr(block, "type") and block.type == TOOL_USE_BLOCK_TYPE:
+            print(f"{TOOL_LOG_PREFIX}{block.name}")
 
 
-def _write_result_file(
-    result_subtype: str,
-    total_cost_usd: float,
-    num_turns: int,
-    result_summary_text: str,
-) -> None:
+def _write_result_file(metrics: RunMetrics) -> None:
     """Write a machine-readable result file for downstream workflow steps."""
     with open(RESULT_OUTPUT_FILE, "w", encoding="utf-8") as output_file:
-        output_file.write(f"subtype: {result_subtype}\n")
-        output_file.write(f"cost_usd: {total_cost_usd:.4f}\n")
-        output_file.write(f"turns: {num_turns}\n")
-        if result_summary_text:
+        output_file.write(f"subtype: {metrics.result_subtype}\n")
+        output_file.write(f"cost_usd: {metrics.run_cost_usd:.4f}\n")
+        output_file.write(f"turns: {metrics.turns_used}\n")
+        if metrics.run_completion_text:
             # Truncate to avoid oversized workflow logs
-            output_file.write(f"summary: {result_summary_text[:MAX_SUMMARY_LENGTH]}\n")
+            output_file.write(f"summary: {metrics.run_completion_text[:MAX_SUMMARY_LENGTH]}\n")
 
 
 def _map_subtype_to_exit_code(result_subtype: str) -> int:
@@ -84,29 +95,30 @@ def _map_subtype_to_exit_code(result_subtype: str) -> int:
     return EXIT_CODE_FAILURE
 
 
-def _print_run_outcome(result_subtype: str) -> None:
+def _print_run_outcome(metrics: RunMetrics) -> None:
     """Print a human-readable outcome message for the workflow log."""
-    if result_subtype == RESULT_SUBTYPE_SUCCESS:
+    if metrics.result_subtype == RESULT_SUBTYPE_SUCCESS:
         print("Self-heal completed successfully.")
-    elif result_subtype == RESULT_SUBTYPE_MAX_BUDGET:
+    elif metrics.result_subtype == RESULT_SUBTYPE_MAX_BUDGET:
         print(f"Self-heal hit the ${MAX_BUDGET_USD:.2f} budget cap.")
         print("Increase MAX_BUDGET_USD in self_heal_runner.py if needed.")
-    elif result_subtype == RESULT_SUBTYPE_MAX_TURNS:
-        print(f"Self-heal hit the {MAX_TURNS}-turn limit — increase MAX_TURNS if needed.")
+    elif metrics.result_subtype == RESULT_SUBTYPE_MAX_TURNS:
+        print(f"Self-heal hit the {MAX_TURNS}-turn limit.")
+        print("Increase MAX_TURNS in self_heal_runner.py if needed.")
     else:
-        print(f"Self-heal stopped: {result_subtype}")
+        print(f"Self-heal stopped: {metrics.result_subtype}")
 
 
-async def _collect_run_metrics() -> tuple[str, float, int, str]:
-    """Run the self-heal skill and collect result metrics from the message stream.
+async def _collect_run_metrics() -> RunMetrics:
+    """Stream the self-heal agent run and collect result metrics.
 
     Returns:
-        Tuple of (result_subtype, total_cost_usd, num_turns, final_result_text).
+        RunMetrics dataclass with subtype, cost, turns, and completion text.
     """
     result_subtype: str = RESULT_SUBTYPE_UNKNOWN
-    total_cost_usd: float = 0.0
-    num_turns: int = 0
-    final_result_text: str = ""
+    run_cost_usd: float = 0.0
+    turns_used: int = 0
+    run_completion_text: str = ""
 
     async for message in query(
         prompt=SELF_HEAL_PROMPT,
@@ -114,7 +126,7 @@ async def _collect_run_metrics() -> tuple[str, float, int, str]:
             permission_mode=PERMISSION_MODE_BYPASS,
             max_budget_usd=MAX_BUDGET_USD,
             max_turns=MAX_TURNS,
-            allowed_tools=["Bash", "Read", "Write", "Edit", "Glob", "Grep", "Agent"],
+            allowed_tools=ALLOWED_SDK_TOOLS,
             setting_sources=["project"],
             effort=DEFAULT_EFFORT,
             model=DEFAULT_MODEL,
@@ -125,19 +137,24 @@ async def _collect_run_metrics() -> tuple[str, float, int, str]:
 
         if isinstance(message, ResultMessage):
             result_subtype = message.subtype
-            num_turns = message.num_turns
+            turns_used = message.num_turns
 
             if message.total_cost_usd is not None:
-                total_cost_usd = message.total_cost_usd
+                run_cost_usd = message.total_cost_usd
 
             if result_subtype == RESULT_SUBTYPE_SUCCESS and message.result:
-                final_result_text = message.result
+                run_completion_text = message.result
 
             print(f"Result:     {result_subtype}")
-            print(f"Turns used: {num_turns}")
-            print(f"Cost:       ${total_cost_usd:.4f}")
+            print(f"Turns used: {turns_used}")
+            print(f"Cost:       ${run_cost_usd:.4f}")
 
-    return result_subtype, total_cost_usd, num_turns, final_result_text
+    return RunMetrics(
+        result_subtype=result_subtype,
+        run_cost_usd=run_cost_usd,
+        turns_used=turns_used,
+        run_completion_text=run_completion_text,
+    )
 
 
 async def run_self_heal() -> int:
@@ -148,12 +165,12 @@ async def run_self_heal() -> int:
     """
     print(f"Starting self-heal run — budget cap: ${MAX_BUDGET_USD:.2f} | max turns: {MAX_TURNS}")
 
-    result_subtype, total_cost_usd, num_turns, final_result_text = await _collect_run_metrics()
+    metrics = await _collect_run_metrics()
 
-    _write_result_file(result_subtype, total_cost_usd, num_turns, final_result_text)
-    _print_run_outcome(result_subtype)
+    _write_result_file(metrics)
+    _print_run_outcome(metrics)
 
-    return _map_subtype_to_exit_code(result_subtype)
+    return _map_subtype_to_exit_code(metrics.result_subtype)
 
 
 if __name__ == "__main__":
