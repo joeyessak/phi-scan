@@ -402,7 +402,11 @@ def test_install_hook_exits_with_error_when_not_in_git_repo(
     result = _runner.invoke(app, ["install-hook"])
 
     assert result.exit_code == _EXIT_CODE_ERROR
-    assert _GIT_DIR_NOT_FOUND_MESSAGE in result.output
+    # Click 8.2+ always splits stderr from stdout; result.stderr is populated
+    # with the default CliRunner. Asserting here (not result.output) ensures
+    # the message is genuinely emitted with err=True — a regression where
+    # err=True is removed would cause this assertion to fail.
+    assert _GIT_DIR_NOT_FOUND_MESSAGE in result.stderr
 
 
 def test_uninstall_hook_exits_with_error_when_not_in_git_repo(
@@ -415,7 +419,11 @@ def test_uninstall_hook_exits_with_error_when_not_in_git_repo(
     result = _runner.invoke(app, ["uninstall-hook"])
 
     assert result.exit_code == _EXIT_CODE_ERROR
-    assert _GIT_DIR_NOT_FOUND_MESSAGE in result.output
+    # Click 8.2+ always splits stderr from stdout; result.stderr is populated
+    # with the default CliRunner. Asserting here (not result.output) ensures
+    # the message is genuinely emitted with err=True — a regression where
+    # err=True is removed would cause this assertion to fail.
+    assert _GIT_DIR_NOT_FOUND_MESSAGE in result.stderr
 
 
 # ---------------------------------------------------------------------------
