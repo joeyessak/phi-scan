@@ -1,1 +1,35 @@
-[]
+[
+  {
+    "timestamp_utc": "2026-03-28T03:32:00Z",
+    "mode": "Phase B",
+    "is_clean": false,
+    "skipped": false,
+    "skip_reason": null,
+    "issues_found": 14,
+    "issues_fixed": 3,
+    "issues_deferred": 0,
+    "cost_usd_estimated": 0.62,
+    "turns_used": 42,
+    "test_coverage_pct": 93.0,
+    "files_changed": [
+      "phi_scan/audit.py",
+      "tests/test_audit.py"
+    ],
+    "fix_cycles": 1,
+    "pr_number": null,
+    "subagent_findings": {
+      "performance": 2,
+      "dry": 2,
+      "python_fp": 2,
+      "documentation": 2,
+      "test_quality": 2,
+      "code_quality": 2,
+      "hipaa_compliance": 2
+    },
+    "validation": {
+      "ruff": "pass",
+      "mypy": "pass",
+      "pytest": "pass"
+    }
+  }
+]
