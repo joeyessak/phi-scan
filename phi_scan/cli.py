@@ -217,6 +217,7 @@ _DASHBOARD_LOOKBACK_DAYS: int = 30
 _DASHBOARD_FINDINGS_JSON_KEY: str = "findings_json"
 _DASHBOARD_CATEGORY_KEY: str = "hipaa_category"
 _DASHBOARD_UNKNOWN_CATEGORY: str = "unknown"
+_DASHBOARD_EMPTY_FINDINGS_JSON: str = "[]"
 
 _SPINNER_CONFIG_LOAD_MESSAGE: str = "Loading configuration…"
 _SPINNER_AUDIT_WRITE_MESSAGE: str = "Writing audit log…"
@@ -422,7 +423,9 @@ def _truncate_filename_for_progress(file_path: Path) -> str:
     Returns:
         Path string, truncated with a leading ellipsis when over the column width.
     """
-    path_string = str(file_path)
+    # as_posix() normalises to forward slashes on all platforms — consistent
+    # display in progress bars regardless of OS path separator.
+    path_string = file_path.as_posix()
     if len(path_string) <= _PROGRESS_FILENAME_MAX_CHARS:
         return path_string
     return _PROGRESS_FILENAME_ELLIPSIS + path_string[-_PROGRESS_FILENAME_MAX_CHARS:]
@@ -452,8 +455,8 @@ def _execute_scan_with_progress(
     scan_start = time.monotonic()
     with create_scan_progress(total_files=len(scan_targets)) as (progress, task_id):
         for file_path in scan_targets:
-            label = _truncate_filename_for_progress(file_path)
-            progress.update(task_id, description=label, advance=1)
+            progress_label = _truncate_filename_for_progress(file_path)
+            progress.update(task_id, description=progress_label, advance=1)
             all_findings.extend(scan_file(file_path, config))
     scan_duration = time.monotonic() - scan_start
     return build_scan_result(tuple(all_findings), len(scan_targets), scan_duration)
@@ -824,6 +827,12 @@ def download_models() -> None:
 def _aggregate_category_totals(recent_scans: list[dict[str, Any]]) -> dict[str, int]:
     """Sum HIPAA category occurrences across all recent scan findings_json blobs.
 
+    PHI safety guarantee: findings_json blobs written by audit.py contain only
+    value_hash (SHA-256), file_path_hash (SHA-256), hipaa_category, severity,
+    confidence, and line_number. Raw PHI values and code_context are explicitly
+    excluded at the write path (see audit.py::_serialize_finding_for_storage).
+    This function reads category metadata only — no raw PHI is ever present.
+
     Args:
         recent_scans: Scan rows from the audit DB as returned by query_recent_scans.
 
@@ -832,7 +841,7 @@ def _aggregate_category_totals(recent_scans: list[dict[str, Any]]) -> dict[str, 
     """
     totals: dict[str, int] = {}
     for row in recent_scans:
-        findings = json.loads(row.get(_DASHBOARD_FINDINGS_JSON_KEY, "[]"))
+        findings = json.loads(row.get(_DASHBOARD_FINDINGS_JSON_KEY, _DASHBOARD_EMPTY_FINDINGS_JSON))
         for finding in findings:
             category = finding.get(_DASHBOARD_CATEGORY_KEY, _DASHBOARD_UNKNOWN_CATEGORY)
             totals[category] = totals.get(category, 0) + 1

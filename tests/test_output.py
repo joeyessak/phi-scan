@@ -675,10 +675,10 @@ def test_display_severity_inline_does_not_raise() -> None:
 
 
 def test_build_severity_inline_omits_zero_count_levels() -> None:
-    from phi_scan.output import _build_severity_inline
+    from phi_scan.output import _build_severity_inline_text
 
     result = _make_dirty_result(_make_finding(severity=SeverityLevel.HIGH))
-    inline = _build_severity_inline(result.severity_counts)
+    inline = _build_severity_inline_text(result.severity_counts)
 
     assert "HIGH" in inline
     assert "MEDIUM" not in inline

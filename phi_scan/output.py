@@ -174,6 +174,15 @@ _FILE_TREE_TITLE: str = "Affected Files"
 _VIOLATION_ALERT_TITLE: str = "PHI/PII Violation Detected"
 _VIOLATION_RISK_LEVEL_LABEL: str = "Risk Level: "
 
+# Severity levels ordered from highest to lowest — used when selecting the
+# most severe icon to represent a group of findings.
+_SEVERITY_DESCENDING_ORDER: list[SeverityLevel] = [
+    SeverityLevel.HIGH,
+    SeverityLevel.MEDIUM,
+    SeverityLevel.LOW,
+    SeverityLevel.INFO,
+]
+
 # ---------------------------------------------------------------------------
 # Findings table column headers
 # ---------------------------------------------------------------------------
@@ -552,7 +561,7 @@ def _build_sarif_run(scan_result: ScanResult) -> dict[str, object]:
     }
 
 
-def _build_severity_inline(severity_counts: MappingProxyType[SeverityLevel, int]) -> str:
+def _build_severity_inline_text(severity_counts: MappingProxyType[SeverityLevel, int]) -> str:
     """Build a single-line severity breakdown with colored emoji icons.
 
     Only includes levels with at least one finding, so a scan with only HIGH
@@ -564,7 +573,7 @@ def _build_severity_inline(severity_counts: MappingProxyType[SeverityLevel, int]
     Returns:
         Inline Rich markup string: '🔴 HIGH: 4    🟡 MEDIUM: 5    🟢 LOW: 3'
     """
-    entries = []
+    severity_entries = []
     for level in SeverityLevel:
         count = severity_counts.get(level, _ZERO_FINDINGS)
         if count == _ZERO_FINDINGS:
@@ -572,10 +581,10 @@ def _build_severity_inline(severity_counts: MappingProxyType[SeverityLevel, int]
         icon = _SEVERITY_ICON.get(level.value, "")
         style = _SEVERITY_STYLE[level]
         count_markup = f"[{style}]{count}[/{style}]"
-        entries.append(
+        severity_entries.append(
             _SEVERITY_INLINE_FORMAT.format(icon=icon, level=level.value.upper(), count=count_markup)
         )
-    return _SEVERITY_INLINE_SEPARATOR.join(entries)
+    return _SEVERITY_INLINE_SEPARATOR.join(severity_entries)
 
 
 def _build_severity_breakdown(severity_counts: MappingProxyType[SeverityLevel, int]) -> str:
@@ -860,17 +869,22 @@ def display_file_type_summary(scan_targets: list[Path]) -> None:
         return
     counts = _count_files_by_extension(scan_targets)
     sorted_extensions = sorted(counts.items(), key=lambda pair: pair[1], reverse=True)
-    named = sorted_extensions[:_FILE_TYPE_SUMMARY_MAX_EXTENSIONS]
-    overflow_entries = sorted_extensions[_FILE_TYPE_SUMMARY_MAX_EXTENSIONS:]
-    overflow_count = sum(count for _, count in overflow_entries)
-    entries = [_FILE_TYPE_SUMMARY_ENTRY_FORMAT.format(ext=ext, count=count) for ext, count in named]
+    top_extensions = sorted_extensions[:_FILE_TYPE_SUMMARY_MAX_EXTENSIONS]
+    overflow_extensions = sorted_extensions[_FILE_TYPE_SUMMARY_MAX_EXTENSIONS:]
+    overflow_count = sum(count for _, count in overflow_extensions)
+    extension_entries = [
+        _FILE_TYPE_SUMMARY_ENTRY_FORMAT.format(ext=ext, count=count)
+        for ext, count in top_extensions
+    ]
     if overflow_count:
-        entries.append(
+        extension_entries.append(
             _FILE_TYPE_SUMMARY_ENTRY_FORMAT.format(
                 ext=_FILE_TYPE_SUMMARY_OTHER_LABEL, count=overflow_count
             )
         )
-    _console.print(_FILE_TYPE_SUMMARY_SEPARATOR.join(entries), style=_FILE_TYPE_SUMMARY_STYLE)
+    _console.print(
+        _FILE_TYPE_SUMMARY_SEPARATOR.join(extension_entries), style=_FILE_TYPE_SUMMARY_STYLE
+    )
 
 
 def _build_scan_header_markup(path: Path, config: ScanConfig, timestamp: str) -> str:
@@ -963,14 +977,8 @@ def _highest_severity_icon(file_findings: list[ScanFinding]) -> str:
     Returns:
         Emoji string corresponding to the highest severity level found.
     """
-    severity_order = [
-        SeverityLevel.HIGH,
-        SeverityLevel.MEDIUM,
-        SeverityLevel.LOW,
-        SeverityLevel.INFO,
-    ]
     file_severities = {f.severity for f in file_findings}
-    for level in severity_order:
+    for level in _SEVERITY_DESCENDING_ORDER:
         if level in file_severities:
             return _SEVERITY_ICON.get(level.value, "")
     return ""
@@ -1170,7 +1178,7 @@ def display_severity_inline(scan_result: ScanResult) -> None:
     Args:
         scan_result: The completed scan result.
     """
-    _console.print(_build_severity_inline(scan_result.severity_counts))
+    _console.print(_build_severity_inline_text(scan_result.severity_counts))
 
 
 def _build_violation_summary_panel_markup(scan_result: ScanResult) -> str:
@@ -1187,7 +1195,7 @@ def _build_violation_summary_panel_markup(scan_result: ScanResult) -> str:
     risk_level_name = scan_result.risk_level.value
     badge_style = _RISK_LEVEL_BADGE_STYLE.get(risk_level_name, _STYLE_BOLD)
     duration_str = _DURATION_FORMAT.format(scan_result.scan_duration)
-    severity_inline = _build_severity_inline(scan_result.severity_counts)
+    severity_inline = _build_severity_inline_text(scan_result.severity_counts)
     files_line = _VIOLATION_SUMMARY_FILES_FORMAT.format(
         with_findings=scan_result.files_with_findings,
         total=scan_result.files_scanned,
