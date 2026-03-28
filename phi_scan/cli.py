@@ -654,7 +654,7 @@ def _append_watch_event(
     result_text, result_style = _build_watch_result(findings)
     watch_events.append(
         WatchEvent(
-            time=datetime.now().strftime(_WATCH_TIMESTAMP_FORMAT),
+            event_time=datetime.now().strftime(_WATCH_TIMESTAMP_FORMAT),
             file_path=str(changed_path),
             result_text=result_text,
             result_style=result_style,
@@ -680,7 +680,7 @@ def _build_watch_result(findings: list[ScanFinding]) -> tuple[str, str]:
     return _WATCH_RESULT_CLEAN_TEXT, _WATCH_RESULT_CLEAN_STYLE
 
 
-def _run_watch_live_loop(
+def _display_watch_live_screen(
     watch_path: Path,
     watch_events: deque[WatchEvent],
 ) -> None:
@@ -820,7 +820,7 @@ def watch(
     observer.schedule(event_handler, str(watch_path), recursive=True)
     observer.start()
     try:
-        _run_watch_live_loop(watch_path, watch_events)
+        _display_watch_live_screen(watch_path, watch_events)
     finally:
         observer.stop()
         observer.join()

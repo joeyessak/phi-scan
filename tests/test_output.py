@@ -919,7 +919,7 @@ def test_build_dashboard_layout_with_data_does_not_raise() -> None:
 # build_watch_layout (1C.6a–1C.6d)
 # ---------------------------------------------------------------------------
 
-_WATCH_EMPTY_EVENTS: list[dict[str, str]] = []
+_WATCH_EMPTY_EVENTS: list[WatchEvent] = []
 _WATCH_SAMPLE_TIMESTAMP_ONE: str = "14:32:05"
 _WATCH_SAMPLE_FILE_ONE: str = "src/api/patient.py"
 _WATCH_SAMPLE_RESULT_TEXT_CLEAN: str = "✅ Clean"
@@ -935,13 +935,13 @@ def watch_sample_events() -> list[WatchEvent]:
     """Fresh list of two sample WatchEvent records per test."""
     return [
         WatchEvent(
-            time=_WATCH_SAMPLE_TIMESTAMP_ONE,
+            event_time=_WATCH_SAMPLE_TIMESTAMP_ONE,
             file_path=_WATCH_SAMPLE_FILE_ONE,
             result_text=_WATCH_SAMPLE_RESULT_TEXT_CLEAN,
             result_style=_WATCH_SAMPLE_RESULT_STYLE_CLEAN,
         ),
         WatchEvent(
-            time=_WATCH_SAMPLE_TIMESTAMP_TWO,
+            event_time=_WATCH_SAMPLE_TIMESTAMP_TWO,
             file_path=_WATCH_SAMPLE_FILE_TWO,
             result_text=_WATCH_SAMPLE_RESULT_TEXT_VIOLATION,
             result_style=_WATCH_SAMPLE_RESULT_STYLE_VIOLATION,

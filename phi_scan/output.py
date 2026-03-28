@@ -339,7 +339,7 @@ class WatchEvent:
     across the shared deque boundary between the watchdog thread and main thread.
     """
 
-    time: str
+    event_time: str
     file_path: str
     result_text: str
     result_style: str
@@ -1370,7 +1370,7 @@ def _build_watch_event_table(events: Sequence[WatchEvent]) -> Table:
         return table
     for event in events:
         result_markup = f"[{event.result_style}]{event.result_text}[/{event.result_style}]"
-        table.add_row(event.time, event.file_path, result_markup)
+        table.add_row(event.event_time, event.file_path, result_markup)
     return table
 
 
