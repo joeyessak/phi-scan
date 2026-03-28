@@ -8,15 +8,15 @@
     "issues_found": 14,
     "issues_fixed": 3,
     "issues_deferred": 0,
-    "cost_usd_estimated": 0.62,
-    "turns_used": 42,
+    "cost_usd_estimated": 0.52,
+    "turns_used": 45,
     "test_coverage_pct": 93.0,
     "files_changed": [
       "phi_scan/audit.py",
       "tests/test_audit.py"
     ],
     "fix_cycles": 1,
-    "pr_number": null,
+    "pr_number": 37,
     "subagent_findings": {
       "performance": 2,
       "dry": 2,
