@@ -129,6 +129,9 @@ _WATCH_PATH_HELP: str = "Directory to watch for file system changes."
 _WATCH_POLL_INTERVAL_SECONDS: float = 1.0
 _WATCH_LIVE_REFRESH_RATE: float = 4.0
 _WATCH_LOG_MAX_EVENTS: int = 10
+# Sentinel shown when a changed path cannot be relativised to watch_root (edge case).
+# The bare filename is NOT used because filenames may contain PHI (patient IDs, MRNs).
+_WATCH_PATH_OUTSIDE_ROOT_DISPLAY: str = "[outside watch root]"
 
 # ---------------------------------------------------------------------------
 # History command
@@ -336,9 +339,9 @@ class _FileChangeMonitor(FileSystemEventHandler):
     note is displayed in the watch header; per-event result shows the actual outcome.
     """
 
-    def __init__(self, context: _WatchState) -> None:
+    def __init__(self, watch_state: _WatchState) -> None:
         super().__init__()
-        self._context = context
+        self._watch_state = watch_state
 
     def on_any_event(self, event: FileSystemEvent) -> None:
         """Append a timestamped event record on any non-directory file change.
@@ -354,9 +357,9 @@ class _FileChangeMonitor(FileSystemEventHandler):
         # expose files containing PHI that were never intended to be scanned.
         if changed_path.is_symlink():
             return
-        scan_outcome = _scan_changed_file(changed_path, self._context)
+        scan_outcome = _scan_changed_file(changed_path, self._watch_state)
         if scan_outcome is not None:
-            _append_watch_event(changed_path, scan_outcome, self._context)
+            _append_watch_event(changed_path, scan_outcome, self._watch_state)
 
 
 # ---------------------------------------------------------------------------
@@ -667,22 +670,25 @@ def _build_relative_display_path(changed_path: Path, watch_root: Path) -> str:
     Storing the absolute path verbatim would persist raw PHI in the shared deque.
     Converting to a watch-root-relative path removes the sensitive prefix that
     appears in deep patient-directory structures. If relativisation fails (edge
-    case where the path is outside watch_root), the bare filename is used.
+    case where the path is outside watch_root), a safe sentinel is returned —
+    the bare filename is NOT used because filenames themselves may contain PHI
+    (e.g. john_doe_mrn_123456.hl7).
 
     Args:
         changed_path: Absolute path to the changed file.
         watch_root: The watched directory root.
 
     Returns:
-        A relative path string safe for terminal display.
+        A relative path string safe for terminal display, or a fixed sentinel
+        when the path cannot be relativised.
     """
     try:
         return str(changed_path.relative_to(watch_root))
     except ValueError:
-        return changed_path.name
+        return _WATCH_PATH_OUTSIDE_ROOT_DISPLAY
 
 
-def _scan_changed_file(changed_path: Path, context: _WatchState) -> _WatchScanOutcome | None:
+def _scan_changed_file(changed_path: Path, watch_state: _WatchState) -> _WatchScanOutcome | None:
     """Run scan_file on a watchdog-reported path and return a structured outcome.
 
     Returns None when the file cannot be read (deleted or permissions changed between
@@ -690,13 +696,13 @@ def _scan_changed_file(changed_path: Path, context: _WatchState) -> _WatchScanOu
 
     Args:
         changed_path: The file that changed, already confirmed non-symlink.
-        context: Shared watch state; provides the scan configuration.
+        watch_state: Shared watch state; provides the scan configuration.
 
     Returns:
         _WatchScanOutcome with result text and is_clean flag, or None on I/O error.
     """
     try:
-        findings = scan_file(changed_path, context.scan_config)
+        findings = scan_file(changed_path, watch_state.scan_config)
     except (PermissionError, FileNotFoundError):
         # File deleted or permissions revoked between watchdog event and scan call —
         # log and signal skip rather than crashing the watchdog background thread.
@@ -706,22 +712,22 @@ def _scan_changed_file(changed_path: Path, context: _WatchState) -> _WatchScanOu
 
 
 def _append_watch_event(
-    changed_path: Path, scan_outcome: _WatchScanOutcome, context: _WatchState
+    changed_path: Path, scan_outcome: _WatchScanOutcome, watch_state: _WatchState
 ) -> None:
     """Build a WatchEvent from the scan outcome and append it to the rolling deque.
 
     Args:
         changed_path: The file that changed; used to compute the display path.
         scan_outcome: Structured result from _scan_changed_file.
-        context: Shared watch state; provides the deque and watch root.
+        watch_state: Shared watch state; provides the deque and watch root.
     """
     # deque.append is atomic under CPython's GIL, so no explicit lock is needed here.
     # The main thread reads the deque via list(watch_events) (also atomic), making
     # this cross-thread access safe without threading.Lock for CPython.
-    context.watch_events.append(
+    watch_state.watch_events.append(
         WatchEvent(
             event_time=datetime.now(),
-            file_path=_build_relative_display_path(changed_path, context.watch_root),
+            file_path=_build_relative_display_path(changed_path, watch_state.watch_root),
             result_text=scan_outcome.result_text,
             is_clean=scan_outcome.is_clean,
         )
