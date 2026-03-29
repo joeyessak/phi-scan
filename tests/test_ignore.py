@@ -44,8 +44,6 @@ _MINIMAL_FILE_CONTENT: str = "# placeholder\n"
 # Comment and blank lines used for the load_ignore_patterns test
 _COMMENT_LINE: str = "# this is a comment\n"
 _BLANK_LINE: str = "\n"
-_REAL_PATTERN_ONE: str = "*.pyc"
-_REAL_PATTERN_TWO: str = "node_modules/"
 
 # ScanConfig construction values — named to avoid magic numbers
 _DEFAULT_MAX_FILE_SIZE_MB: int = 10
@@ -117,6 +115,9 @@ def test_double_star_pattern_matches_at_any_depth() -> None:
 
 
 def test_negation_pattern_reincludes_excluded_file() -> None:
+    # pathspec evaluates negation patterns in declaration order, matching gitignore
+    # semantics as of pathspec>=0.9. If the installed version regresses this
+    # behaviour, this test will catch it.
     patterns = [_EXTENSION_PATTERN_LOG, _NEGATION_LOG_PATTERN]
     spec = pathspec.PathSpec.from_lines(PathspecMatchStyle.GITIGNORE, patterns)
 
@@ -153,13 +154,13 @@ def test_leading_slash_anchors_to_root_does_not_exclude_nested_path() -> None:
 def test_load_ignore_patterns_strips_comments_and_blanks(tmp_path: Path) -> None:
     ignore_file = tmp_path / ".phi-scanignore"
     ignore_file.write_text(
-        _COMMENT_LINE + _BLANK_LINE + _REAL_PATTERN_ONE + "\n" + _REAL_PATTERN_TWO + "\n",
+        _COMMENT_LINE + _BLANK_LINE + _EXTENSION_PATTERN_PYC + "\n" + _NODE_MODULES_PATTERN + "\n",
         encoding=DEFAULT_TEXT_ENCODING,
     )
 
     loaded_patterns = load_ignore_patterns(ignore_file)
 
-    assert loaded_patterns == [_REAL_PATTERN_ONE, _REAL_PATTERN_TWO]
+    assert loaded_patterns == [_EXTENSION_PATTERN_PYC, _NODE_MODULES_PATTERN]
 
 
 # ---------------------------------------------------------------------------

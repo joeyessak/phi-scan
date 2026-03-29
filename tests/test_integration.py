@@ -11,10 +11,12 @@ import json
 from pathlib import Path
 
 import pytest
+import yaml
 from typer.testing import CliRunner
 
 from phi_scan.audit import get_last_scan
 from phi_scan.cli import app
+from phi_scan.config import create_default_config
 from phi_scan.constants import EXIT_CODE_CLEAN
 
 # ---------------------------------------------------------------------------
@@ -23,27 +25,12 @@ from phi_scan.constants import EXIT_CODE_CLEAN
 
 _TEST_FILE_ENCODING: str = "utf-8"
 
-# Mirrors _SUPPORTED_CONFIG_VERSION in phi_scan/config.py — any schema version bump
-# must also update this constant so the test template stays in sync.
-_CONFIGURATION_SCHEMA_VERSION: int = 1
-
-# Configuration YAML template — uses _CONFIGURATION_SCHEMA_VERSION (not a literal),
-# explicitly sets exclude_paths so the exclude test does not rely on default
-# configuration that could change between releases.
-_CONFIGURATION_YAML_TEMPLATE: str = (
-    "version: {version}\n"
-    "scan:\n"
-    "  exclude_paths:\n"
-    "    - node_modules/\n"
-    "audit:\n"
-    "  database_path: {database_path}\n"
-)
-
 # Directory and file names used to build the two-file exclude fixture.
 _SOURCE_DIR_NAME: str = "src"
 _SCAN_TARGET_DIR_NAME: str = "scan_root"
 _SOURCE_FILE_NAME: str = "app.py"
 _EXCLUDED_DIR_NAME: str = "node_modules"
+_EXCLUDED_DIR_PATTERN: str = f"{_EXCLUDED_DIR_NAME}/"
 _EXCLUDED_FILE_NAME: str = "secret.py"
 _SOURCE_FILE_CONTENT: str = "# placeholder source file\n"
 _EXCLUDED_FILE_CONTENT: str = "# excluded source file\n"
@@ -75,8 +62,16 @@ def runner() -> CliRunner:
 # ---------------------------------------------------------------------------
 
 
-def _write_test_configuration(tmp_path: Path, database_path: Path) -> Path:
-    """Write a versioned .phi-scanner.yml that redirects audit writes to database_path.
+def _write_test_configuration(
+    tmp_path: Path,
+    database_path: Path,
+    exclude_patterns: list[str] | None = None,
+) -> Path:
+    """Write a schema-valid .phi-scanner.yml that redirects audit writes to database_path.
+
+    Calls create_default_config to produce a validated base configuration, then
+    patches audit.database_path to an isolated test location. If exclude_patterns
+    is provided, sets scan.exclude_paths to that list.
 
     The configuration file is written to tmp_path so it sits outside the scan
     root and is never picked up as a scan target.
@@ -84,16 +79,20 @@ def _write_test_configuration(tmp_path: Path, database_path: Path) -> Path:
     Args:
         tmp_path: pytest tmp_path fixture directory.
         database_path: Path where the audit database should be written.
+        exclude_patterns: Optional gitignore-style patterns to set on scan.exclude_paths.
 
     Returns:
         Path to the written configuration file.
     """
     configuration_path = tmp_path / ".phi-scanner.yml"
+    create_default_config(configuration_path)
+    configuration_data = yaml.safe_load(configuration_path.read_text(encoding=_TEST_FILE_ENCODING))
+    # DEFAULT_DATABASE_PATH is typed as str in constants.py; write str here.
+    configuration_data["audit"]["database_path"] = str(database_path)
+    if exclude_patterns is not None:
+        configuration_data["scan"]["exclude_paths"] = exclude_patterns
     configuration_path.write_text(
-        _CONFIGURATION_YAML_TEMPLATE.format(
-            version=_CONFIGURATION_SCHEMA_VERSION,
-            database_path=str(database_path),
-        ),
+        yaml.dump(configuration_data, default_flow_style=False, sort_keys=False),
         encoding=_TEST_FILE_ENCODING,
     )
     return configuration_path
@@ -140,11 +139,13 @@ def test_scan_empty_directory_writes_audit_record(tmp_path: Path, runner: CliRun
     configuration_path = _write_test_configuration(tmp_path, database_path)
     scan_root = _create_scan_root_directory(tmp_path)
 
-    runner.invoke(
+    # cli_invocation is captured to surface exit code on failure; audit write is the assertion.
+    cli_invocation = runner.invoke(
         app,
         ["scan", str(scan_root), "--output", "json", "--config", str(configuration_path)],
     )
 
+    assert cli_invocation.exit_code == EXIT_CODE_CLEAN
     last_scan = get_last_scan(database_path)
     assert last_scan is not None
 
@@ -153,7 +154,9 @@ def test_scan_directory_with_exclude_does_not_scan_excluded_file(
     tmp_path: Path, runner: CliRunner
 ) -> None:
     database_path = tmp_path / "audit.db"
-    configuration_path = _write_test_configuration(tmp_path, database_path)
+    configuration_path = _write_test_configuration(
+        tmp_path, database_path, exclude_patterns=[_EXCLUDED_DIR_PATTERN]
+    )
     scan_root = _create_scan_root_directory(tmp_path)
     source_dir = scan_root / _SOURCE_DIR_NAME
     source_dir.mkdir()
