@@ -127,15 +127,6 @@ _NLP_SKIP_MESSAGE_PREFIX: str = "NLP required — "
 # Confidence → severity band boundary values
 # ---------------------------------------------------------------------------
 
-# A score just at the HIGH floor — boundary condition.
-_CONFIDENCE_AT_HIGH_FLOOR: float = CONFIDENCE_HIGH_FLOOR
-
-# A score in the MEDIUM band: at the floor but below HIGH.
-_CONFIDENCE_AT_MEDIUM_FLOOR: float = CONFIDENCE_MEDIUM_FLOOR
-
-# A score in the LOW band: at the floor but below MEDIUM.
-_CONFIDENCE_AT_LOW_FLOOR: float = CONFIDENCE_LOW_FLOOR
-
 # Step used to place boundary test scores just below a floor constant.
 # Small enough to stay within the same band, large enough to remain representable
 # as a float without rounding issues.
@@ -167,6 +158,10 @@ _BENCHMARK_FILE_COUNT: int = 1000
 _BENCHMARK_TIME_BUDGET_SECONDS: float = 120.0
 _BENCHMARK_SUBDIR_COUNT: int = 10
 _BENCHMARK_FILES_PER_DIR: int = 100
+_BENCHMARK_SUBDIR_NAME_PREFIX: str = "pkg_"
+_BENCHMARK_SUBDIR_INDEX_FORMAT: str = "02d"
+_BENCHMARK_FILE_NAME_PREFIX: str = "module_"
+_BENCHMARK_FILE_INDEX_FORMAT: str = "03d"
 _BENCHMARK_CLEAN_FILE_CONTENT: str = "x = 1\n"
 
 # ---------------------------------------------------------------------------
@@ -255,9 +250,11 @@ def test_scan_finds_phi_in_deeply_nested_file(tmp_path: Path) -> None:
 
     config = ScanConfig(confidence_threshold=_LOW_CONFIDENCE_THRESHOLD)
     scan_targets = collect_scan_targets(tmp_path, [], config)
-    depth_three_ssn_scan = execute_scan(scan_targets, config)
+    depth_three_ssn_report = execute_scan(scan_targets, config)
 
-    ssn_findings = [f for f in depth_three_ssn_scan.findings if f.hipaa_category == PhiCategory.SSN]
+    ssn_findings = [
+        f for f in depth_three_ssn_report.findings if f.hipaa_category == PhiCategory.SSN
+    ]
     assert len(ssn_findings) >= 1
 
 
@@ -277,9 +274,9 @@ def test_scan_finds_phi_in_multiple_nested_depths(tmp_path: Path) -> None:
 
     config = ScanConfig(confidence_threshold=_LOW_CONFIDENCE_THRESHOLD)
     scan_targets = collect_scan_targets(tmp_path, [], config)
-    multi_depth_findings_scan = execute_scan(scan_targets, config)
+    multi_depth_findings_report = execute_scan(scan_targets, config)
 
-    file_paths_with_findings = {f.file_path for f in multi_depth_findings_scan.findings}
+    file_paths_with_findings = {f.file_path for f in multi_depth_findings_report.findings}
     assert len(file_paths_with_findings) >= 2
 
 
@@ -427,7 +424,7 @@ def test_clean_fixture_produces_no_findings_for_category(
 
 def test_confidence_at_high_floor_produces_high_severity() -> None:
     """A confidence at CONFIDENCE_HIGH_FLOOR maps to SeverityLevel.HIGH."""
-    mapped_severity = severity_from_confidence(_CONFIDENCE_AT_HIGH_FLOOR)
+    mapped_severity = severity_from_confidence(CONFIDENCE_HIGH_FLOOR)
 
     assert mapped_severity == SeverityLevel.HIGH
 
@@ -441,7 +438,7 @@ def test_confidence_at_maximum_produces_high_severity() -> None:
 
 def test_confidence_at_medium_floor_produces_medium_severity() -> None:
     """A confidence at CONFIDENCE_MEDIUM_FLOOR maps to SeverityLevel.MEDIUM."""
-    mapped_severity = severity_from_confidence(_CONFIDENCE_AT_MEDIUM_FLOOR)
+    mapped_severity = severity_from_confidence(CONFIDENCE_MEDIUM_FLOOR)
 
     assert mapped_severity == SeverityLevel.MEDIUM
 
@@ -457,7 +454,7 @@ def test_confidence_just_below_high_floor_produces_medium_severity() -> None:
 
 def test_confidence_at_low_floor_produces_low_severity() -> None:
     """A confidence at CONFIDENCE_LOW_FLOOR maps to SeverityLevel.LOW."""
-    mapped_severity = severity_from_confidence(_CONFIDENCE_AT_LOW_FLOOR)
+    mapped_severity = severity_from_confidence(CONFIDENCE_LOW_FLOOR)
 
     assert mapped_severity == SeverityLevel.LOW
 
@@ -505,14 +502,16 @@ def test_scan_finding_severity_matches_confidence_band(tmp_path: Path) -> None:
 def _write_benchmark_files_to_directory(subdir: Path) -> None:
     """Write BENCHMARK_FILES_PER_DIR clean Python files into subdir."""
     for file_index in range(_BENCHMARK_FILES_PER_DIR):
-        file_path = subdir / f"module_{file_index:03d}.py"
+        file_name = f"{_BENCHMARK_FILE_NAME_PREFIX}{file_index:{_BENCHMARK_FILE_INDEX_FORMAT}}.py"
+        file_path = subdir / file_name
         file_path.write_text(_BENCHMARK_CLEAN_FILE_CONTENT, encoding="utf-8")
 
 
 def _build_benchmark_repository(root: Path) -> None:
     """Populate root with BENCHMARK_FILE_COUNT clean Python files across flat subdirectories."""
     for subdir_index in range(_BENCHMARK_SUBDIR_COUNT):
-        subdir = root / f"pkg_{subdir_index:02d}"
+        subdir_index_str = format(subdir_index, _BENCHMARK_SUBDIR_INDEX_FORMAT)
+        subdir = root / (_BENCHMARK_SUBDIR_NAME_PREFIX + subdir_index_str)
         subdir.mkdir()
         _write_benchmark_files_to_directory(subdir)
 
