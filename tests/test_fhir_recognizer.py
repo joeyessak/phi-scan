@@ -3,9 +3,8 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 from pathlib import Path
-
-import pytest
 
 from phi_scan.constants import (
     CONFIDENCE_HIGH_FLOOR,
@@ -19,7 +18,7 @@ from phi_scan.constants import (
 from phi_scan.exceptions import MissingOptionalDependencyError
 from phi_scan.fhir_recognizer import (  # type: ignore[attr-defined]
     _FHIR_FIELD_BASE_CONFIDENCE,
-    _NULL_VALUE_SENTINEL,
+    _FHIR_JSON_NULL_SENTINEL,
     _build_fhir_finding,
     _detect_phi_in_fhir_content,
     _extract_fhir_matches_from_line,
@@ -62,7 +61,7 @@ _SCORE_BELOW_LOW_FLOOR: float = CONFIDENCE_LOW_FLOOR - 0.01
 
 
 def test_is_null_or_empty_fhir_value_returns_true_for_null_sentinel():
-    result = _is_null_or_empty_fhir_value(_NULL_VALUE_SENTINEL)
+    result = _is_null_or_empty_fhir_value(_FHIR_JSON_NULL_SENTINEL)
 
     assert result is True
 
@@ -81,10 +80,20 @@ def test_is_null_or_empty_fhir_value_returns_false_for_non_empty_value():
     assert result is False
 
 
-def test_is_null_or_empty_fhir_value_accepts_single_character():
+def test_is_null_or_empty_fhir_value_returns_true_for_single_character():
+    # Single chars are structural artefacts (separators, placeholders) — excluded by
+    # _FHIR_MIN_VALUE_LENGTH = 2, which requires at least two characters for a meaningful value.
     single_char = "A"
 
     result = _is_null_or_empty_fhir_value(single_char)
+
+    assert result is True
+
+
+def test_is_null_or_empty_fhir_value_accepts_two_character_value():
+    two_char_value = "AB"
+
+    result = _is_null_or_empty_fhir_value(two_char_value)
 
     assert result is False
 
@@ -329,8 +338,9 @@ def test_detect_phi_in_structured_content_routes_to_hl7_for_msh_content(monkeypa
     assert result is hl7_findings
 
 
-def test_detect_phi_in_structured_content_warns_and_returns_empty_when_hl7_library_missing(
+def test_detect_phi_in_structured_content_logs_warning_and_returns_empty_when_hl7_library_missing(
     monkeypatch,
+    caplog,
 ):
     hl7_content = "MSH|^~\\&|TestApp|TestFacility"
 
@@ -345,10 +355,11 @@ def test_detect_phi_in_structured_content_warns_and_returns_empty_when_hl7_libra
         ),
     )
 
-    with pytest.warns(UserWarning, match="phi-scan\\[hl7\\]"):
+    with caplog.at_level(logging.WARNING, logger="phi_scan.fhir_recognizer"):
         findings = detect_phi_in_structured_content(hl7_content, _FAKE_FILE_PATH)
 
     assert findings == []
+    assert "phi-scan[hl7]" in caplog.text
 
 
 # ---------------------------------------------------------------------------

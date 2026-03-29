@@ -339,7 +339,7 @@ def test_detect_phi_in_hl7_content_raises_missing_dependency_error_when_hl7_abse
     monkeypatch,
 ):
     monkeypatch.setattr(
-        "phi_scan.hl7_scanner._require_hl7_library",
+        "phi_scan.hl7_scanner._load_hl7_library",
         lambda: (_ for _ in ()).throw(MissingOptionalDependencyError("hl7 not installed")),
     )
 
@@ -351,7 +351,7 @@ def test_detect_phi_in_hl7_content_returns_findings_for_pid_segment(monkeypatch)
     pid_segment = _build_pid_segment(mrn=_FAKE_MRN_VALUE)
     message = _MockHl7Message([pid_segment])
     mock_lib = _build_mock_hl7_lib(message)
-    monkeypatch.setattr("phi_scan.hl7_scanner._require_hl7_library", lambda: mock_lib)
+    monkeypatch.setattr("phi_scan.hl7_scanner._load_hl7_library", lambda: mock_lib)
 
     findings = detect_phi_in_hl7_content(_FAKE_HL7_MESSAGE, _FAKE_FILE_PATH)
 
@@ -363,7 +363,7 @@ def test_detect_phi_in_hl7_content_skips_unknown_segment_types(monkeypatch):
     unknown_segment = _MockHl7Segment({0: "ZZZ", 1: "some-value"})
     message = _MockHl7Message([unknown_segment])
     mock_lib = _build_mock_hl7_lib(message)
-    monkeypatch.setattr("phi_scan.hl7_scanner._require_hl7_library", lambda: mock_lib)
+    monkeypatch.setattr("phi_scan.hl7_scanner._load_hl7_library", lambda: mock_lib)
 
     findings = detect_phi_in_hl7_content(_FAKE_HL7_MESSAGE, _FAKE_FILE_PATH)
 
@@ -375,7 +375,7 @@ def test_detect_phi_in_hl7_content_processes_multiple_known_segments(monkeypatch
     nk1_segment = _MockHl7Segment({0: "NK1", 2: "NextOfKinTestName"})
     message = _MockHl7Message([pid_segment, nk1_segment])
     mock_lib = _build_mock_hl7_lib(message)
-    monkeypatch.setattr("phi_scan.hl7_scanner._require_hl7_library", lambda: mock_lib)
+    monkeypatch.setattr("phi_scan.hl7_scanner._load_hl7_library", lambda: mock_lib)
 
     findings = detect_phi_in_hl7_content(_FAKE_HL7_MESSAGE, _FAKE_FILE_PATH)
 

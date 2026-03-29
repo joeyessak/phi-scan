@@ -10,8 +10,8 @@ element/attribute values against a fixed set of known PHI field names
 (``_FHIR_PHI_FIELD_CATEGORIES``). No ``fhir.resources`` dependency is required.
 
 HL7 v2 scanning: delegated to ``phi_scan.hl7_scanner`` which wraps the
-optional ``hl7`` library. If the library is absent a ``UserWarning`` is emitted
-and an empty list is returned (graceful degradation).
+optional ``hl7`` library. If the library is absent a structured WARNING is
+logged and an empty list is returned (graceful degradation).
 
 Design constraints:
 - Raw PHI values are never stored — only their SHA-256 hex digests (HIPAA).
@@ -24,7 +24,6 @@ from __future__ import annotations
 
 import logging
 import re
-import warnings
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -53,12 +52,14 @@ _FHIR_FIELD_BASE_CONFIDENCE: float = CONFIDENCE_HIGH_FLOOR
 _HL7_UNAVAILABLE_WARNING: str = (
     "HL7 v2 scanning disabled — run 'pip install phi-scan[hl7]' to enable segment scanning"
 )
-# FHIR JSON and XML can contain explicit null sentinels; skip them to avoid
-# hashing a meaningless value and producing a misleading finding.
-_NULL_VALUE_SENTINEL: str = "null"
+# JSON-specific null sentinel. FHIR JSON may encode absent values as the
+# string literal "null"; XML encodes absence by omitting the element entirely,
+# so no XML equivalent sentinel is needed here.
+_FHIR_JSON_NULL_SENTINEL: str = "null"
 # Minimum number of characters a FHIR field value must have to be flagged.
-# Values shorter than this are structural artefacts, not PHI.
-_FHIR_MIN_VALUE_LENGTH: int = 1
+# Values with fewer than 2 characters (empty strings and single-character tokens)
+# are structural artefacts — field separators, placeholder markers — not PHI.
+_FHIR_MIN_VALUE_LENGTH: int = 2
 
 # ---------------------------------------------------------------------------
 # FHIR R4 PHI field-name registry
@@ -160,7 +161,7 @@ def _is_null_or_empty_fhir_value(raw_value: str) -> bool:
     Returns:
         True if the value should be skipped; False if it should be flagged.
     """
-    return raw_value == _NULL_VALUE_SENTINEL or len(raw_value) < _FHIR_MIN_VALUE_LENGTH
+    return raw_value == _FHIR_JSON_NULL_SENTINEL or len(raw_value) < _FHIR_MIN_VALUE_LENGTH
 
 
 def _build_fhir_finding(file_path: Path, line_match: _FhirLineMatch) -> ScanFinding:
@@ -263,7 +264,7 @@ def detect_phi_in_structured_content(
     Layer 3 of the detection engine. Routes to the HL7 v2 scanner when the
     content begins with an MSH segment, and to the FHIR R4 field-name scanner
     otherwise. HL7 scanning requires the optional ``hl7`` library; if absent a
-    ``UserWarning`` is emitted and an empty list is returned.
+    structured WARNING is logged and an empty list is returned.
 
     Args:
         file_content: Full text content of the file to scan.
@@ -279,6 +280,6 @@ def detect_phi_in_structured_content(
         try:
             return hl7_scanner.detect_phi_in_hl7_content(file_content, file_path)
         except MissingOptionalDependencyError:
-            warnings.warn(_HL7_UNAVAILABLE_WARNING, UserWarning, stacklevel=2)
+            _logger.warning(_HL7_UNAVAILABLE_WARNING)
             return []
     return _detect_phi_in_fhir_content(file_content, file_path)

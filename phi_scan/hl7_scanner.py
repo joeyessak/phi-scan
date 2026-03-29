@@ -8,7 +8,7 @@ Inspects PHI-bearing HL7 v2 segments: PID (patient identification), NK1
 (next of kin), and IN1 (insurance). Field indices follow the HL7 v2.x field
 numbering convention (1-based, segment-name field is index 0).
 
-Requires the optional ``hl7`` library. If absent, ``_require_hl7_library``
+Requires the optional ``hl7`` library. If absent, ``_load_hl7_library``
 raises ``MissingOptionalDependencyError`` and the caller (fhir_recognizer)
 handles the graceful degradation.
 
@@ -23,6 +23,7 @@ Design constraints:
 from __future__ import annotations
 
 import logging
+import types
 from pathlib import Path
 from typing import Any
 
@@ -101,11 +102,12 @@ _HL7_SEGMENT_FIELD_CATEGORIES: dict[str, dict[int, PhiCategory]] = {
 # ---------------------------------------------------------------------------
 
 
-def _require_hl7_library() -> Any:
+def _load_hl7_library() -> types.ModuleType:
     """Import the optional ``hl7`` library or raise MissingOptionalDependencyError.
 
-    Centralises the single import-failure raise point so callers never need to
-    catch ``ImportError`` directly.
+    Returns ``types.ModuleType`` rather than ``Any`` for precision; attribute
+    access on a ``ModuleType`` still resolves to ``Any`` so callers can call
+    ``hl7_lib.parse(...)`` without additional type: ignore comments.
 
     Returns:
         The ``hl7`` module ready for use.
@@ -116,7 +118,7 @@ def _require_hl7_library() -> Any:
     try:
         import hl7 as hl7_lib  # type: ignore[import-not-found]
 
-        return hl7_lib
+        return hl7_lib  # type: ignore[no-any-return]  # hl7 has no stubs; import gives Any
     except ImportError as import_error:
         raise MissingOptionalDependencyError(_HL7_INSTALL_HINT) from import_error
 
@@ -238,7 +240,7 @@ def detect_phi_in_hl7_content(
     Raises:
         MissingOptionalDependencyError: If the ``hl7`` library is not installed.
     """
-    hl7_lib = _require_hl7_library()
+    hl7_lib = _load_hl7_library()
     message = hl7_lib.parse(file_content)
     findings: list[ScanFinding] = []
     for segment_index, segment in enumerate(message):
