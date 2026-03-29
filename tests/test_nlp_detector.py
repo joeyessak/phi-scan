@@ -34,7 +34,8 @@ from phi_scan.nlp_detector import (  # type: ignore[attr-defined]
 # Constants
 # ---------------------------------------------------------------------------
 
-_FAKE_FILE_PATH: Path = Path("/tmp/test_file.py")
+# Relative path with no filesystem presence — used only as a label in ScanFinding.
+_FAKE_FILE_PATH: Path = Path("fake/test_file.py")
 
 # Presidio entity type strings — must match _PRESIDIO_ENTITY_* constants
 _ENTITY_TYPE_PERSON: str = "PERSON"
@@ -459,7 +460,7 @@ class TestDetectPhiWithNlp:
         mock_engine = MagicMock()
         mock_engine.analyze.return_value = []
         monkeypatch.setattr("phi_scan.nlp_detector._NLP_AVAILABLE", True)
-        monkeypatch.setattr("phi_scan.nlp_detector._singleton_analyzer_engine", mock_engine)
+        monkeypatch.setattr("phi_scan.nlp_detector._create_analyzer_engine", lambda: mock_engine)
 
         findings = detect_phi_with_nlp("x = 1\n", _FAKE_FILE_PATH)
 
@@ -472,7 +473,7 @@ class TestDetectPhiWithNlp:
         mock_engine = MagicMock()
         mock_engine.analyze.return_value = [fake_result]
         monkeypatch.setattr("phi_scan.nlp_detector._NLP_AVAILABLE", True)
-        monkeypatch.setattr("phi_scan.nlp_detector._singleton_analyzer_engine", mock_engine)
+        monkeypatch.setattr("phi_scan.nlp_detector._create_analyzer_engine", lambda: mock_engine)
 
         findings = detect_phi_with_nlp(_SINGLE_LINE_CONTENT, _FAKE_FILE_PATH)
 
@@ -487,7 +488,7 @@ class TestDetectPhiWithNlp:
         mock_engine = MagicMock()
         mock_engine.analyze.return_value = [fake_result]
         monkeypatch.setattr("phi_scan.nlp_detector._NLP_AVAILABLE", True)
-        monkeypatch.setattr("phi_scan.nlp_detector._singleton_analyzer_engine", mock_engine)
+        monkeypatch.setattr("phi_scan.nlp_detector._create_analyzer_engine", lambda: mock_engine)
 
         findings = detect_phi_with_nlp(_SINGLE_LINE_CONTENT, _FAKE_FILE_PATH)
 
@@ -499,7 +500,7 @@ class TestDetectPhiWithNlp:
         mock_engine = MagicMock()
         mock_engine.analyze.return_value = []
         monkeypatch.setattr("phi_scan.nlp_detector._NLP_AVAILABLE", True)
-        monkeypatch.setattr("phi_scan.nlp_detector._singleton_analyzer_engine", mock_engine)
+        monkeypatch.setattr("phi_scan.nlp_detector._create_analyzer_engine", lambda: mock_engine)
 
         detect_phi_with_nlp(_SINGLE_LINE_CONTENT, _FAKE_FILE_PATH)
 
@@ -512,7 +513,7 @@ class TestDetectPhiWithNlp:
         mock_engine = MagicMock()
         mock_engine.analyze.return_value = []
         monkeypatch.setattr("phi_scan.nlp_detector._NLP_AVAILABLE", True)
-        monkeypatch.setattr("phi_scan.nlp_detector._singleton_analyzer_engine", mock_engine)
+        monkeypatch.setattr("phi_scan.nlp_detector._create_analyzer_engine", lambda: mock_engine)
 
         detect_phi_with_nlp(_SINGLE_LINE_CONTENT, _FAKE_FILE_PATH)
 
@@ -530,9 +531,9 @@ class TestDetectPhiWithNlp:
         )
         mock_engine = MagicMock()
         mock_engine.analyze.return_value = [fake_result]
-        custom_path = Path("/workspace/records/patient.py")
+        custom_path = Path("workspace/records/patient.py")
         monkeypatch.setattr("phi_scan.nlp_detector._NLP_AVAILABLE", True)
-        monkeypatch.setattr("phi_scan.nlp_detector._singleton_analyzer_engine", mock_engine)
+        monkeypatch.setattr("phi_scan.nlp_detector._create_analyzer_engine", lambda: mock_engine)
 
         findings = detect_phi_with_nlp(_SINGLE_LINE_CONTENT, custom_path)
 
@@ -545,7 +546,7 @@ class TestDetectPhiWithNlp:
         mock_engine = MagicMock()
         mock_engine.analyze.return_value = [fake_result]
         monkeypatch.setattr("phi_scan.nlp_detector._NLP_AVAILABLE", True)
-        monkeypatch.setattr("phi_scan.nlp_detector._singleton_analyzer_engine", mock_engine)
+        monkeypatch.setattr("phi_scan.nlp_detector._create_analyzer_engine", lambda: mock_engine)
 
         findings = detect_phi_with_nlp(_SINGLE_LINE_CONTENT, _FAKE_FILE_PATH)
 
@@ -570,7 +571,7 @@ class TestDetectPhiWithNlp:
         mock_engine = MagicMock()
         mock_engine.analyze.return_value = fake_results
         monkeypatch.setattr("phi_scan.nlp_detector._NLP_AVAILABLE", True)
-        monkeypatch.setattr("phi_scan.nlp_detector._singleton_analyzer_engine", mock_engine)
+        monkeypatch.setattr("phi_scan.nlp_detector._create_analyzer_engine", lambda: mock_engine)
 
         findings = detect_phi_with_nlp(content, _FAKE_FILE_PATH)
 
@@ -588,7 +589,7 @@ class TestDetectPhiWithNlp:
         mock_engine = MagicMock()
         mock_engine.analyze.return_value = [fake_result]
         monkeypatch.setattr("phi_scan.nlp_detector._NLP_AVAILABLE", True)
-        monkeypatch.setattr("phi_scan.nlp_detector._singleton_analyzer_engine", mock_engine)
+        monkeypatch.setattr("phi_scan.nlp_detector._create_analyzer_engine", lambda: mock_engine)
 
         findings = detect_phi_with_nlp(content, _FAKE_FILE_PATH)
 

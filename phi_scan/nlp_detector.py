@@ -19,6 +19,7 @@ Design constraints:
 from __future__ import annotations
 
 import bisect
+import functools
 import hashlib
 import logging
 from dataclasses import dataclass
@@ -68,6 +69,10 @@ _NLP_LANGUAGE_CODE: str = "en"
 _NLP_ENGINE_NAME: str = "spacy"
 _SPACY_MODEL_NAME: str = "en_core_web_lg"
 _LINE_NUMBER_START: int = 1
+# Returned as code_context when an offset maps past the last line of a file.
+# This cannot happen in practice (Presidio only returns offsets within the text
+# it analysed) but the guard keeps the index-out-of-range path well-defined.
+_EMPTY_LINE_TEXT: str = ""
 
 # Presidio entity type names — must match AnalyzerEngine output identifiers exactly.
 # These strings are defined by the Presidio library; never change them.
@@ -77,13 +82,13 @@ _PRESIDIO_ENTITY_GPE: str = "GPE"
 _PRESIDIO_ENTITY_DATE_TIME: str = "DATE_TIME"
 _PRESIDIO_ENTITY_ORG: str = "ORG"
 
-_PRESIDIO_ENTITIES_TO_DETECT: list[str] = [
+_PRESIDIO_ENTITIES_TO_DETECT: tuple[str, ...] = (
     _PRESIDIO_ENTITY_PERSON,
     _PRESIDIO_ENTITY_LOCATION,
     _PRESIDIO_ENTITY_GPE,
     _PRESIDIO_ENTITY_DATE_TIME,
     _PRESIDIO_ENTITY_ORG,
-]
+)
 
 # Maps Presidio entity types to HIPAA PHI categories.
 # ORG is included because organisation names in patient-facing contexts (care
@@ -97,12 +102,8 @@ _PRESIDIO_ENTITY_TO_PHI_CATEGORY: dict[str, PhiCategory] = {
 }
 
 # ---------------------------------------------------------------------------
-# Lazy singleton and warning deduplication
+# Warning deduplication
 # ---------------------------------------------------------------------------
-
-# Holds the AnalyzerEngine after first creation; None until first call.
-# Typed as Any because AnalyzerEngine is an optional import.
-_singleton_analyzer_engine: Any = None
 
 # Prevents the NLP-unavailable hint from flooding logs during large-repo scans.
 _nlp_unavailable_warning_issued: bool = False
@@ -126,8 +127,13 @@ class _NlpScanContext:
     line_start_offsets: list[int]
 
 
+@functools.lru_cache(maxsize=1)
 def _create_analyzer_engine() -> Any:
-    """Create a Presidio AnalyzerEngine configured with spaCy en_core_web_lg.
+    """Create and cache a Presidio AnalyzerEngine configured with spaCy en_core_web_lg.
+
+    ``lru_cache(maxsize=1)`` acts as the lazy singleton — the spaCy model
+    (~750 MB) is loaded exactly once per process lifetime and reused for every
+    scanned file. Monkeypatch this function in tests to inject a mock engine.
 
     Returns:
         Configured AnalyzerEngine ready to analyse English source code.
@@ -142,21 +148,6 @@ def _create_analyzer_engine() -> Any:
         nlp_engine=nlp_engine,
         supported_languages=[_NLP_LANGUAGE_CODE],
     )
-
-
-def _get_analyzer_engine() -> Any:
-    """Return the cached AnalyzerEngine singleton, creating it on first call.
-
-    The singleton pattern avoids reloading the spaCy model (en_core_web_lg,
-    ~750 MB) for every scanned file.
-
-    Returns:
-        Shared AnalyzerEngine instance.
-    """
-    global _singleton_analyzer_engine
-    if _singleton_analyzer_engine is None:
-        _singleton_analyzer_engine = _create_analyzer_engine()
-    return _singleton_analyzer_engine
 
 
 def _warn_nlp_unavailable_once() -> None:
@@ -280,11 +271,12 @@ def _build_nlp_finding(
     )
     line_index = line_number - _LINE_NUMBER_START
     line_text = (
-        scan_context.file_lines[line_index] if line_index < len(scan_context.file_lines) else ""
+        scan_context.file_lines[line_index]
+        if line_index < len(scan_context.file_lines)
+        else _EMPTY_LINE_TEXT
     )
     phi_category = _PRESIDIO_ENTITY_TO_PHI_CATEGORY[analyzer_result.entity_type]
     confidence = _clamp_to_nlp_range(analyzer_result.score)
-    matched_text = scan_context.file_content[analyzer_result.start : analyzer_result.end]
     return ScanFinding(
         file_path=scan_context.file_path,
         line_number=line_number,
@@ -292,7 +284,12 @@ def _build_nlp_finding(
         hipaa_category=phi_category,
         confidence=confidence,
         detection_layer=DetectionLayer.NLP,
-        value_hash=_compute_value_hash(matched_text),
+        # The matched slice is passed directly to the hash function — no named
+        # local variable is created, so the raw PHI value is never bound to a
+        # name that could be accidentally referenced elsewhere in this scope.
+        value_hash=_compute_value_hash(
+            scan_context.file_content[analyzer_result.start : analyzer_result.end]
+        ),
         severity=_severity_from_confidence(confidence),
         code_context=line_text.rstrip(),
         remediation_hint=HIPAA_REMEDIATION_GUIDANCE.get(phi_category, ""),
@@ -326,7 +323,7 @@ def detect_phi_with_nlp(file_content: str, file_path: Path) -> list[ScanFinding]
     if not _NLP_AVAILABLE:
         _warn_nlp_unavailable_once()
         return []
-    analyzer = _get_analyzer_engine()
+    analyzer = _create_analyzer_engine()
     analyzer_results: list[Any] = analyzer.analyze(
         text=file_content,
         language=_NLP_LANGUAGE_CODE,
