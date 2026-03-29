@@ -67,6 +67,16 @@ _PLAN_REQUIRED_SUD_PATTERNS: frozenset[str] = frozenset(
 _SUD_ASSIGNMENT_SUFFIX: str = "_record"
 _SUD_ASSIGNMENT_TEMPLATE: str = '{field_name} = "{field_name}{suffix}"\n'
 
+# Assertion message templates — no inline string literals in logic code.
+_MISSING_SUD_PATTERNS_MESSAGE: str = (
+    "Required SUD patterns missing from constant: {missing_patterns}"
+)
+_NO_SUD_FINDING_MESSAGE: str = "No finding produced for SUD field name {field_name!r}"
+_NO_SUD_CATEGORY_FINDING_MESSAGE: str = (
+    "No SUBSTANCE_USE_DISORDER finding for SUD field name {field_name!r}"
+)
+_MISSING_DOC_FILE_MESSAGE: str = "Missing required documentation file: {doc_path}"
+
 # ---------------------------------------------------------------------------
 # Doc content keyword constants (2H.2)
 # ---------------------------------------------------------------------------
@@ -139,14 +149,16 @@ def test_explain_hipaa_text_mentions_expert_determination_limitation() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_all_plan_required_sud_patterns_present_in_constant() -> None:
-    """All PLAN.md 2H.1c required SUD patterns are in SUD_FIELD_NAME_PATTERNS."""
+def test_sud_field_name_patterns_contains_all_plan_required_entries() -> None:
+    """SUD_FIELD_NAME_PATTERNS contains every entry required by PLAN.md 2H.1c."""
     missing = _PLAN_REQUIRED_SUD_PATTERNS - SUD_FIELD_NAME_PATTERNS
 
-    assert missing == frozenset(), f"Required SUD patterns missing from constant: {sorted(missing)}"
+    assert missing == frozenset(), _MISSING_SUD_PATTERNS_MESSAGE.format(
+        missing_patterns=sorted(missing)
+    )
 
 
-def test_substance_use_disorder_is_distinct_from_unique_id() -> None:
+def test_substance_use_disorder_category_differs_from_unique_id() -> None:
     """PhiCategory.SUBSTANCE_USE_DISORDER is a different enum member from UNIQUE_ID.
 
     PLAN.md 2H.1c explicitly prohibits reusing UNIQUE_ID for SUD records — the
@@ -163,9 +175,10 @@ def test_sud_field_name_produces_finding(field_name: str) -> None:
         field_name=field_name,
         suffix=_SUD_ASSIGNMENT_SUFFIX,
     )
+
     findings = detect_phi_in_text_content(source_line, Path("module.py"))
 
-    assert len(findings) >= 1, f"No finding produced for SUD field name {field_name!r}"
+    assert len(findings) >= 1, _NO_SUD_FINDING_MESSAGE.format(field_name=field_name)
 
 
 @pytest.mark.parametrize("field_name", sorted(SUD_FIELD_NAME_PATTERNS))
@@ -175,12 +188,15 @@ def test_sud_finding_maps_to_substance_use_disorder_category(field_name: str) ->
         field_name=field_name,
         suffix=_SUD_ASSIGNMENT_SUFFIX,
     )
+
     findings = detect_phi_in_text_content(source_line, Path("module.py"))
 
-    sud_findings = [f for f in findings if f.hipaa_category == PhiCategory.SUBSTANCE_USE_DISORDER]
-    assert len(sud_findings) >= 1, (
-        f"No SUBSTANCE_USE_DISORDER finding for SUD field name {field_name!r}"
-    )
+    sud_findings = [
+        finding
+        for finding in findings
+        if finding.hipaa_category == PhiCategory.SUBSTANCE_USE_DISORDER
+    ]
+    assert len(sud_findings) >= 1, _NO_SUD_CATEGORY_FINDING_MESSAGE.format(field_name=field_name)
 
 
 # ---------------------------------------------------------------------------
@@ -190,28 +206,28 @@ def test_sud_finding_maps_to_substance_use_disorder_category(field_name: str) ->
 
 def test_de_identification_doc_exists() -> None:
     """docs/de-identification.md exists at the project root."""
-    assert _DE_ID_DOC_PATH.is_file(), f"Missing required documentation file: {_DE_ID_DOC_PATH}"
+    assert _DE_ID_DOC_PATH.is_file(), _MISSING_DOC_FILE_MESSAGE.format(doc_path=_DE_ID_DOC_PATH)
 
 
 def test_de_identification_doc_mentions_safe_harbor() -> None:
     """docs/de-identification.md references HIPAA Safe Harbor."""
-    doc_text = _DE_ID_DOC_PATH.read_text(encoding="utf-8")
+    de_identification_doc_content = _DE_ID_DOC_PATH.read_text(encoding="utf-8")
 
-    assert _DOC_SAFE_HARBOR_KEYWORD in doc_text
+    assert _DOC_SAFE_HARBOR_KEYWORD in de_identification_doc_content
 
 
 def test_de_identification_doc_mentions_expert_determination() -> None:
     """docs/de-identification.md documents the Expert Determination limitation."""
-    doc_text = _DE_ID_DOC_PATH.read_text(encoding="utf-8")
+    de_identification_doc_content = _DE_ID_DOC_PATH.read_text(encoding="utf-8")
 
-    assert _DOC_EXPERT_DET_KEYWORD in doc_text
+    assert _DOC_EXPERT_DET_KEYWORD in de_identification_doc_content
 
 
 def test_de_identification_doc_mentions_hitech() -> None:
     """docs/de-identification.md documents the HITECH Act scope."""
-    doc_text = _DE_ID_DOC_PATH.read_text(encoding="utf-8")
+    de_identification_doc_content = _DE_ID_DOC_PATH.read_text(encoding="utf-8")
 
-    assert _DOC_HITECH_KEYWORD in doc_text
+    assert _DOC_HITECH_KEYWORD in de_identification_doc_content
 
 
 # ---------------------------------------------------------------------------
@@ -221,41 +237,41 @@ def test_de_identification_doc_mentions_hitech() -> None:
 
 def test_known_limitations_doc_exists() -> None:
     """docs/known-limitations.md exists at the project root."""
-    assert _KNOWN_LIMITS_DOC_PATH.is_file(), (
-        f"Missing required documentation file: {_KNOWN_LIMITS_DOC_PATH}"
+    assert _KNOWN_LIMITS_DOC_PATH.is_file(), _MISSING_DOC_FILE_MESSAGE.format(
+        doc_path=_KNOWN_LIMITS_DOC_PATH
     )
 
 
 def test_known_limitations_doc_mentions_pdf() -> None:
     """docs/known-limitations.md documents the PDF scanning gap (2H.2a)."""
-    doc_text = _KNOWN_LIMITS_DOC_PATH.read_text(encoding="utf-8")
+    known_limitations_doc_content = _KNOWN_LIMITS_DOC_PATH.read_text(encoding="utf-8")
 
-    assert _DOC_PDF_KEYWORD in doc_text
+    assert _DOC_PDF_KEYWORD in known_limitations_doc_content
 
 
 def test_known_limitations_doc_mentions_dicom() -> None:
     """docs/known-limitations.md documents the DICOM scanning gap (2H.2b)."""
-    doc_text = _KNOWN_LIMITS_DOC_PATH.read_text(encoding="utf-8")
+    known_limitations_doc_content = _KNOWN_LIMITS_DOC_PATH.read_text(encoding="utf-8")
 
-    assert _DOC_DICOM_KEYWORD in doc_text
+    assert _DOC_DICOM_KEYWORD in known_limitations_doc_content
 
 
 def test_known_limitations_doc_mentions_office_documents() -> None:
     """docs/known-limitations.md documents the Office document scanning gap (2H.2c)."""
-    doc_text = _KNOWN_LIMITS_DOC_PATH.read_text(encoding="utf-8")
+    known_limitations_doc_content = _KNOWN_LIMITS_DOC_PATH.read_text(encoding="utf-8")
 
-    assert _DOC_OFFICE_KEYWORD in doc_text
+    assert _DOC_OFFICE_KEYWORD in known_limitations_doc_content
 
 
 def test_known_limitations_doc_mentions_compiled_code() -> None:
     """docs/known-limitations.md documents the compiled code scope boundary (2H.2d)."""
-    doc_text = _KNOWN_LIMITS_DOC_PATH.read_text(encoding="utf-8")
+    known_limitations_doc_content = _KNOWN_LIMITS_DOC_PATH.read_text(encoding="utf-8")
 
-    assert _DOC_COMPILED_KEYWORD in doc_text
+    assert _DOC_COMPILED_KEYWORD in known_limitations_doc_content
 
 
 def test_known_limitations_doc_mentions_expert_determination() -> None:
     """docs/known-limitations.md documents the Expert Determination limitation."""
-    doc_text = _KNOWN_LIMITS_DOC_PATH.read_text(encoding="utf-8")
+    known_limitations_doc_content = _KNOWN_LIMITS_DOC_PATH.read_text(encoding="utf-8")
 
-    assert _DOC_EXPERT_DET_KEYWORD in doc_text
+    assert _DOC_EXPERT_DET_KEYWORD in known_limitations_doc_content
