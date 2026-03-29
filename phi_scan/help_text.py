@@ -132,7 +132,7 @@ are removed or transformed:
   Age > 90       HIPAA §164.514(b)(2)(i) — must be generalised to "90 or older"
   Genetic IDs    dbSNP rs-IDs, VCF variants (GINA + GDPR Art. 9)
   SUD records    42 CFR Part 2 — stricter than HIPAA; explicit consent required
-  Quasi-IDs      ZIP + DOB + sex combination → 87%% re-identification risk
+  Quasi-IDs      ZIP + DOB + sex combination → 87% re-identification risk
 """
 
 # ---------------------------------------------------------------------------

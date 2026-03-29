@@ -208,9 +208,9 @@ def get_cached_result(
         List of ScanFinding objects, or None on cache miss.
     """
     resolved_cache_path = _resolve_cache_path(cache_path)
-    _ensure_cache_schema(resolved_cache_path)
+    _initialise_cache_schema(resolved_cache_path)
 
-    file_path_hash = _hash_string(str(file_path))
+    file_path_hash = _compute_string_hash(str(file_path))
     try:
         with sqlite3.connect(resolved_cache_path) as connection:
             cursor = connection.execute(_SELECT_FILE_CACHE_SQL, (file_path_hash,))
@@ -253,9 +253,9 @@ def store_cached_result(
         cache_path: Override the default cache database location.
     """
     resolved_cache_path = _resolve_cache_path(cache_path)
-    _ensure_cache_schema(resolved_cache_path)
+    _initialise_cache_schema(resolved_cache_path)
 
-    file_path_hash = _hash_string(str(file_path))
+    file_path_hash = _compute_string_hash(str(file_path))
     findings_json = _serialise_findings(findings)
     scanned_at = datetime.now(tz=UTC).isoformat()
 
@@ -286,7 +286,7 @@ def invalidate_cache(cache_path: Path | None = None) -> None:
         cache_path: Override the default cache database location.
     """
     resolved_cache_path = _resolve_cache_path(cache_path)
-    _ensure_cache_schema(resolved_cache_path)
+    _initialise_cache_schema(resolved_cache_path)
     try:
         with sqlite3.connect(resolved_cache_path) as connection:
             connection.execute(_DELETE_ALL_CACHE_SQL)
@@ -305,7 +305,7 @@ def get_cache_stats(cache_path: Path | None = None) -> CacheStats:
         CacheStats with total_entries, cache_size_bytes, and database_path.
     """
     resolved_cache_path = _resolve_cache_path(cache_path)
-    _ensure_cache_schema(resolved_cache_path)
+    _initialise_cache_schema(resolved_cache_path)
 
     total_entries = 0
     try:
@@ -317,7 +317,9 @@ def get_cache_stats(cache_path: Path | None = None) -> CacheStats:
     except sqlite3.Error as exc:
         _logger.warning("Cache stats query failed: %s", exc)
 
-    cache_size_bytes = resolved_cache_path.stat().st_size if resolved_cache_path.exists() else 0
+    # Use is_file() rather than exists() so a dangling symlink or directory at
+    # the cache path doesn't cause a misleading non-zero size to be returned.
+    cache_size_bytes = resolved_cache_path.stat().st_size if resolved_cache_path.is_file() else 0
     return CacheStats(
         total_entries=total_entries,
         cache_size_bytes=cache_size_bytes,
@@ -341,10 +343,13 @@ def _resolve_cache_path(cache_path: Path | None) -> Path:
 
 # Tracks which database paths have been initialised in this process. Avoids
 # re-running four DDL/upsert statements on every public function call.
+# Thread safety: CPython's GIL ensures that set membership tests and adds are
+# atomic for built-in types, so no explicit lock is needed here. The worst case
+# under concurrent first access is redundant (idempotent) DDL execution.
 _initialised_cache_paths: set[Path] = set()
 
 
-def _ensure_cache_schema(cache_path: Path) -> None:
+def _initialise_cache_schema(cache_path: Path) -> None:
     """Create the cache directory, tables, and schema_meta if not yet done.
 
     Runs exactly once per (cache_path, process lifetime) pair — subsequent
@@ -371,7 +376,7 @@ def _ensure_cache_schema(cache_path: Path) -> None:
     _initialised_cache_paths.add(cache_path)
 
 
-def _hash_string(text: str) -> str:
+def _compute_string_hash(text: str) -> str:
     """Return the SHA-256 hex digest of a UTF-8 encoded string."""
     return hashlib.new(_HASH_ALGORITHM, text.encode(DEFAULT_TEXT_ENCODING)).hexdigest()
 
@@ -418,7 +423,13 @@ def _finding_to_dict(finding: ScanFinding) -> dict[str, Any]:
 
 
 def _dict_to_finding(record: dict[str, Any]) -> ScanFinding:
-    """Reconstruct a ScanFinding from a cached JSON record."""
+    """Reconstruct a ScanFinding from a cached JSON record.
+
+    No explicit value_hash format check is needed here — ScanFinding.__post_init__
+    calls _reject_invalid_value_hash, which enforces the SHA-256 hex pattern.
+    A corrupted cache entry will raise ValueError, which _deserialise_findings
+    catches and converts to a cache miss.
+    """
     return ScanFinding(
         file_path=Path(record[_FINDING_KEY_FILE_PATH]),
         line_number=record[_FINDING_KEY_LINE_NUMBER],
