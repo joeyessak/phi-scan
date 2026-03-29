@@ -48,7 +48,7 @@ from phi_scan.constants import (
 from phi_scan.hashing import compute_value_hash, severity_from_confidence
 from phi_scan.models import ScanFinding
 
-__all__ = ["detect_phi_with_regex"]
+__all__ = ["PhiPattern", "detect_phi_with_regex", "get_phi_pattern_registry"]
 
 # ---------------------------------------------------------------------------
 # Module-level constants
@@ -1299,3 +1299,17 @@ def detect_phi_with_regex(file_content: str, file_path: Path) -> list[ScanFindin
                 _scan_line_for_pattern(line_text, line_number, file_path, phi_pattern)
             )
     return all_findings
+
+
+def get_phi_pattern_registry() -> tuple[PhiPattern, ...]:
+    """Return the compiled PHI pattern registry used by the regex detection layer.
+
+    Provides read-only access to the registry for callers that need to iterate
+    patterns directly — for example, the auto-fix engine (``phi_scan.fixer``)
+    which must re-apply patterns to source lines to locate raw match spans and
+    generate synthetic replacement values.
+
+    Returns:
+        Immutable tuple of all PhiPattern objects in detection order.
+    """
+    return _PATTERN_REGISTRY
