@@ -79,6 +79,7 @@ from phi_scan.output import (
     format_csv,
     format_json,
     format_sarif,
+    get_console,
 )
 from phi_scan.scanner import (
     build_scan_result,
@@ -1079,17 +1080,10 @@ def initialize_config() -> None:
 # Explain command group
 # ---------------------------------------------------------------------------
 
-# Rich console imported lazily here to avoid circular imports — output.py
-# creates the shared console; we reuse it via the same import path as the
-# rest of the CLI.
-from rich.console import Console as _RichConsole  # noqa: E402
-
-_explain_console: _RichConsole = _RichConsole()
-
 
 def _render_explain_topic(topic_text: str) -> None:
     """Render a help_text constant to the terminal with Rich markup."""
-    _explain_console.print(topic_text)
+    get_console().print(topic_text)
 
 
 @explain_app.command("confidence")

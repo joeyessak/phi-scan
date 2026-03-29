@@ -128,6 +128,19 @@ class TestCacheHitOnUnchangedFile:
         assert cached_findings is not None
         assert len(cached_findings) == len(stored_findings)
 
+    def test_reconstructed_finding_preserves_file_path(self, tmp_path: Path) -> None:
+        cache_db = tmp_path / "cache.db"
+        source_file = tmp_path / "app.py"
+        source_file.write_text(_CLEAN_CONTENT, encoding=DEFAULT_TEXT_ENCODING)
+        content_hash = compute_file_hash(source_file)
+        stored_finding = _make_finding(source_file)
+
+        store_cached_result(source_file, content_hash, [stored_finding], cache_path=cache_db)
+        cached_findings = get_cached_result(source_file, content_hash, cache_path=cache_db)
+
+        assert cached_findings is not None
+        assert cached_findings[0].file_path == stored_finding.file_path
+
     def test_returns_empty_list_for_clean_cached_file(self, tmp_path: Path) -> None:
         cache_db = tmp_path / "cache.db"
         source_file = tmp_path / "clean.py"

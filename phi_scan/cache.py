@@ -331,14 +331,29 @@ def get_cache_stats(cache_path: Path | None = None) -> CacheStats:
 
 
 def _resolve_cache_path(cache_path: Path | None) -> Path:
-    """Return the resolved cache database path, expanding ~ and parent dirs."""
-    resolved = (cache_path or Path(_DEFAULT_CACHE_PATH)).expanduser()
-    resolved.parent.mkdir(parents=True, exist_ok=True)
-    return resolved
+    """Return the resolved cache database path, expanding ~ only.
+
+    Pure function — no filesystem side effects. Directory creation is handled
+    by _ensure_cache_schema so that setup is co-located with the DB open call.
+    """
+    return (cache_path or Path(_DEFAULT_CACHE_PATH)).expanduser()
+
+
+# Tracks which database paths have been initialised in this process. Avoids
+# re-running four DDL/upsert statements on every public function call.
+_initialised_cache_paths: set[Path] = set()
 
 
 def _ensure_cache_schema(cache_path: Path) -> None:
-    """Create the cache tables and seed schema_meta if they do not exist."""
+    """Create the cache directory, tables, and schema_meta if not yet done.
+
+    Runs exactly once per (cache_path, process lifetime) pair — subsequent
+    calls for the same path return immediately via the module-level guard.
+    """
+    if cache_path in _initialised_cache_paths:
+        return
+    # Directory must exist before sqlite3.connect opens or creates the file.
+    cache_path.parent.mkdir(parents=True, exist_ok=True)
     try:
         with sqlite3.connect(cache_path) as connection:
             connection.execute(_CREATE_SCHEMA_META_SQL)
@@ -353,6 +368,7 @@ def _ensure_cache_schema(cache_path: Path) -> None:
             )
     except sqlite3.Error as exc:
         raise PhiScanError(f"Cache schema initialisation failed: {exc}") from exc
+    _initialised_cache_paths.add(cache_path)
 
 
 def _hash_string(text: str) -> str:
@@ -382,12 +398,13 @@ def _deserialise_findings(findings_json: str) -> list[ScanFinding] | None:
 def _finding_to_dict(finding: ScanFinding) -> dict[str, Any]:
     """Serialise a ScanFinding to a JSON-safe dict.
 
-    file_path is stored as its hash (SHA-256 of the path string) rather than
-    the raw path — raw paths may contain patient identifiers in directory names
-    (e.g. /repos/patient-john-doe/src/handler.py).
+    file_path is stored as the original path string so that _dict_to_finding
+    can reconstruct a usable ScanFinding. The DB primary key (file_path_hash
+    column) is a separate SHA-256 hash used only for lookup — it is never stored
+    in the JSON payload.
     """
     return {
-        _FINDING_KEY_FILE_PATH: _hash_string(str(finding.file_path)),
+        _FINDING_KEY_FILE_PATH: str(finding.file_path),
         _FINDING_KEY_LINE_NUMBER: finding.line_number,
         _FINDING_KEY_ENTITY_TYPE: finding.entity_type,
         _FINDING_KEY_HIPAA_CATEGORY: finding.hipaa_category.value,
@@ -403,9 +420,6 @@ def _finding_to_dict(finding: ScanFinding) -> dict[str, Any]:
 def _dict_to_finding(record: dict[str, Any]) -> ScanFinding:
     """Reconstruct a ScanFinding from a cached JSON record."""
     return ScanFinding(
-        # file_path was stored as a path hash — reconstruct as a Path from the hash
-        # so the object is structurally valid. Callers that need the original path
-        # must resolve it via other means (the file_path_hash in audit.py).
         file_path=Path(record[_FINDING_KEY_FILE_PATH]),
         line_number=record[_FINDING_KEY_LINE_NUMBER],
         entity_type=record[_FINDING_KEY_ENTITY_TYPE],
