@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from phi_scan.config import create_default_config
+from phi_scan.constants import DEFAULT_TEXT_ENCODING
 
 # ---------------------------------------------------------------------------
 # Fixture constants — no magic values in fixture bodies
@@ -34,19 +35,19 @@ def tmp_project(tmp_path: Path) -> Path:
     """
     src_dir = tmp_path / "src"
     src_dir.mkdir()
-    (src_dir / "example.py").write_text(_SAMPLE_FILE_CONTENT)
+    (src_dir / "example.py").write_text(_SAMPLE_FILE_CONTENT, encoding=DEFAULT_TEXT_ENCODING)
 
     utils_dir = src_dir / "utils"
     utils_dir.mkdir()
-    (utils_dir / "helpers.py").write_text(_SAMPLE_FILE_CONTENT)
+    (utils_dir / "helpers.py").write_text(_SAMPLE_FILE_CONTENT, encoding=DEFAULT_TEXT_ENCODING)
 
     tests_dir = tmp_path / "tests"
     tests_dir.mkdir()
-    (tests_dir / "test_example.py").write_text(_SAMPLE_FILE_CONTENT)
+    (tests_dir / "test_example.py").write_text(_SAMPLE_FILE_CONTENT, encoding=DEFAULT_TEXT_ENCODING)
 
     config_dir = tmp_path / "config"
     config_dir.mkdir()
-    (config_dir / "settings.yml").write_text(_SAMPLE_FILE_CONTENT)
+    (config_dir / "settings.yml").write_text(_SAMPLE_FILE_CONTENT, encoding=DEFAULT_TEXT_ENCODING)
 
     return tmp_path
 
