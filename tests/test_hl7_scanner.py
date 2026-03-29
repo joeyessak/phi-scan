@@ -12,6 +12,7 @@ from phi_scan.constants import (
     CONFIDENCE_HIGH_FLOOR,
     CONFIDENCE_LOW_FLOOR,
     CONFIDENCE_MEDIUM_FLOOR,
+    CONFIDENCE_STRUCTURED_MAX,
     CONFIDENCE_STRUCTURED_MIN,
     DetectionLayer,
     PhiCategory,
@@ -226,6 +227,20 @@ def test_severity_from_confidence_returns_info_below_low_floor():
     assert result == SeverityLevel.INFO
 
 
+def test_severity_from_confidence_raises_for_negative_confidence():
+    negative_confidence = -0.01
+
+    with pytest.raises(ValueError):
+        severity_from_confidence(negative_confidence)
+
+
+def test_severity_from_confidence_raises_for_confidence_above_maximum():
+    above_maximum_confidence = 1.01
+
+    with pytest.raises(ValueError):
+        severity_from_confidence(above_maximum_confidence)
+
+
 # ---------------------------------------------------------------------------
 # _build_hl7_finding
 # ---------------------------------------------------------------------------
@@ -388,4 +403,4 @@ def test_detect_phi_in_hl7_content_processes_multiple_known_segments(monkeypatch
 
 
 def test_hl7_field_base_confidence_is_within_layer_three_range():
-    assert _HL7_FIELD_BASE_CONFIDENCE >= CONFIDENCE_STRUCTURED_MIN
+    assert CONFIDENCE_STRUCTURED_MIN <= _HL7_FIELD_BASE_CONFIDENCE <= CONFIDENCE_STRUCTURED_MAX

@@ -29,6 +29,8 @@ from pathlib import Path
 
 from phi_scan.constants import (
     CONFIDENCE_HIGH_FLOOR,
+    CONFIDENCE_STRUCTURED_MAX,
+    CONFIDENCE_STRUCTURED_MIN,
     HIPAA_REMEDIATION_GUIDANCE,
     DetectionLayer,
     PhiCategory,
@@ -50,6 +52,10 @@ _LINE_NUMBER_START: int = 1
 # CONFIDENCE_HIGH_FLOOR (0.90) falls within the Layer 3 range
 # [CONFIDENCE_STRUCTURED_MIN=0.80, CONFIDENCE_STRUCTURED_MAX=0.95].
 _FHIR_FIELD_BASE_CONFIDENCE: float = CONFIDENCE_HIGH_FLOOR
+assert CONFIDENCE_STRUCTURED_MIN <= _FHIR_FIELD_BASE_CONFIDENCE <= CONFIDENCE_STRUCTURED_MAX, (
+    f"_FHIR_FIELD_BASE_CONFIDENCE {_FHIR_FIELD_BASE_CONFIDENCE} is outside the "
+    f"Layer 3 band [{CONFIDENCE_STRUCTURED_MIN}, {CONFIDENCE_STRUCTURED_MAX}]"
+)
 _HL7_UNAVAILABLE_WARNING: str = "HL7 v2 scanning disabled — install phi-scan[hl7] to enable"
 # Placeholder written into code_context in place of the raw matched PHI value.
 # This satisfies the HIPAA audit requirement that raw PHI values must never be

@@ -29,6 +29,8 @@ from typing import Any
 
 from phi_scan.constants import (
     CONFIDENCE_HIGH_FLOOR,
+    CONFIDENCE_STRUCTURED_MAX,
+    CONFIDENCE_STRUCTURED_MIN,
     HIPAA_REMEDIATION_GUIDANCE,
     DetectionLayer,
     PhiCategory,
@@ -55,6 +57,10 @@ _LINE_NUMBER_START: int = 1
 # so that HL7 and FHIR findings receive identical HIGH severity for equivalent
 # structural matches.
 _HL7_FIELD_BASE_CONFIDENCE: float = CONFIDENCE_HIGH_FLOOR
+assert CONFIDENCE_STRUCTURED_MIN <= _HL7_FIELD_BASE_CONFIDENCE <= CONFIDENCE_STRUCTURED_MAX, (
+    f"_HL7_FIELD_BASE_CONFIDENCE {_HL7_FIELD_BASE_CONFIDENCE} is outside the "
+    f"Layer 3 band [{CONFIDENCE_STRUCTURED_MIN}, {CONFIDENCE_STRUCTURED_MAX}]"
+)
 _HL7_INSTALL_HINT: str = (
     "HL7 v2 scanning requires the 'hl7' library — "
     "run 'pip install phi-scan[hl7]' to enable segment-level detection"

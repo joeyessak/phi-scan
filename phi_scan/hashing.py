@@ -19,6 +19,8 @@ from phi_scan.constants import (
     CONFIDENCE_HIGH_FLOOR,
     CONFIDENCE_LOW_FLOOR,
     CONFIDENCE_MEDIUM_FLOOR,
+    CONFIDENCE_SCORE_MAXIMUM,
+    CONFIDENCE_SCORE_MINIMUM,
     SeverityLevel,
 )
 
@@ -40,6 +42,22 @@ def compute_value_hash(text: str) -> str:
     return hashlib.sha256(text.encode()).hexdigest()
 
 
+def reject_out_of_range_confidence(confidence: float) -> None:
+    """Raise ValueError when confidence is outside the valid [0.0, 1.0] range.
+
+    Args:
+        confidence: The confidence score to validate.
+
+    Raises:
+        ValueError: If confidence is not in [CONFIDENCE_SCORE_MINIMUM, CONFIDENCE_SCORE_MAXIMUM].
+    """
+    if confidence < CONFIDENCE_SCORE_MINIMUM or confidence > CONFIDENCE_SCORE_MAXIMUM:
+        raise ValueError(
+            f"confidence {confidence!r} is outside the valid range "
+            f"[{CONFIDENCE_SCORE_MINIMUM}, {CONFIDENCE_SCORE_MAXIMUM}]"
+        )
+
+
 def severity_from_confidence(confidence: float) -> SeverityLevel:
     """Derive SeverityLevel from a confidence score.
 
@@ -48,7 +66,11 @@ def severity_from_confidence(confidence: float) -> SeverityLevel:
 
     Returns:
         SeverityLevel for the given confidence band.
+
+    Raises:
+        ValueError: If confidence is outside [0.0, 1.0].
     """
+    reject_out_of_range_confidence(confidence)
     if confidence >= CONFIDENCE_HIGH_FLOOR:
         return SeverityLevel.HIGH
     if confidence >= CONFIDENCE_MEDIUM_FLOOR:

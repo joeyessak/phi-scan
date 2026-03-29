@@ -10,6 +10,7 @@ from phi_scan.constants import (
     CONFIDENCE_HIGH_FLOOR,
     CONFIDENCE_LOW_FLOOR,
     CONFIDENCE_MEDIUM_FLOOR,
+    CONFIDENCE_STRUCTURED_MAX,
     CONFIDENCE_STRUCTURED_MIN,
     DetectionLayer,
     PhiCategory,
@@ -383,4 +384,4 @@ def test_detect_phi_in_structured_content_logs_warning_and_returns_empty_when_hl
 
 
 def test_fhir_field_base_confidence_is_within_layer_three_range():
-    assert CONFIDENCE_STRUCTURED_MIN <= _FHIR_FIELD_BASE_CONFIDENCE
+    assert CONFIDENCE_STRUCTURED_MIN <= _FHIR_FIELD_BASE_CONFIDENCE <= CONFIDENCE_STRUCTURED_MAX
