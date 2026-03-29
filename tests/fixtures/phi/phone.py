@@ -1,13 +1,15 @@
 # Synthetic PHI fixture: Phone and Fax Numbers
-# NANP strictly reserves 555-0100 through 555-0199 for fictional use (not for assignment).
-# All numbers below use that range or the broader 555 prefix widely used in film/TV.
+# NANP reserves the 555-0100 through 555-0199 subscriber block for fictional use.
+# Correct format: (NXX) 555-01XX — area code is any valid NXX, exchange is 555,
+# subscriber is 0100–0199. Exchange digits cannot start with 0 or 1 per NANP,
+# so 555 (starting with 5) is a valid exchange; area codes below are documentary.
 # Expected findings: minimum 4 (PHONE entity type)
 
-patient_phone = "(555) 010-1234"
-fax_number = "555-010-5678"
-international = "+1-555-019-9000"
+patient_phone = "(212) 555-0150"
+fax_number = "312-555-0175"
+international = "+1-415-555-0101"
 
 contact_info = {
-    "mobile": "555.019.0101",
-    "work_fax": "(555) 019-0102",
+    "mobile": "617.555.0123",
+    "work_fax": "(213) 555-0199",
 }

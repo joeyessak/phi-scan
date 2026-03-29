@@ -45,13 +45,17 @@ def _load_manifest() -> dict[str, Any]:
 
 def _extract_phi_fixture_entries(manifest: dict[str, Any]) -> list[dict[str, Any]]:
     return [
-        f for f in manifest[_MANIFEST_FIXTURES_KEY] if f[_MANIFEST_CATEGORY_KEY] == _CATEGORY_PHI
+        fixture_entry
+        for fixture_entry in manifest[_MANIFEST_FIXTURES_KEY]
+        if fixture_entry[_MANIFEST_CATEGORY_KEY] == _CATEGORY_PHI
     ]
 
 
 def _extract_clean_fixture_entries(manifest: dict[str, Any]) -> list[dict[str, Any]]:
     return [
-        f for f in manifest[_MANIFEST_FIXTURES_KEY] if f[_MANIFEST_CATEGORY_KEY] == _CATEGORY_CLEAN
+        fixture_entry
+        for fixture_entry in manifest[_MANIFEST_FIXTURES_KEY]
+        if fixture_entry[_MANIFEST_CATEGORY_KEY] == _CATEGORY_CLEAN
     ]
 
 
@@ -135,12 +139,12 @@ class TestFixtureFilesExist:
     def test_no_undeclared_phi_fixtures(self) -> None:
         manifest = _load_manifest()
         declared_paths = {
-            f[_MANIFEST_PATH_KEY]
-            for f in manifest[_MANIFEST_FIXTURES_KEY]
-            if f[_MANIFEST_CATEGORY_KEY] == _CATEGORY_PHI
+            fixture_entry[_MANIFEST_PATH_KEY]
+            for fixture_entry in manifest[_MANIFEST_FIXTURES_KEY]
+            if fixture_entry[_MANIFEST_CATEGORY_KEY] == _CATEGORY_PHI
         }
         actual_files = {
-            f"phi/{p.name}" for p in _PHI_FIXTURE_DIR.glob("*.py") if not p.is_symlink()
+            f"{_CATEGORY_PHI}/{p.name}" for p in _PHI_FIXTURE_DIR.glob("*.py") if not p.is_symlink()
         }
         undeclared = actual_files - declared_paths
         assert not undeclared, (
@@ -150,12 +154,14 @@ class TestFixtureFilesExist:
     def test_no_undeclared_clean_fixtures(self) -> None:
         manifest = _load_manifest()
         declared_paths = {
-            f[_MANIFEST_PATH_KEY]
-            for f in manifest[_MANIFEST_FIXTURES_KEY]
-            if f[_MANIFEST_CATEGORY_KEY] == _CATEGORY_CLEAN
+            fixture_entry[_MANIFEST_PATH_KEY]
+            for fixture_entry in manifest[_MANIFEST_FIXTURES_KEY]
+            if fixture_entry[_MANIFEST_CATEGORY_KEY] == _CATEGORY_CLEAN
         }
         actual_files = {
-            f"clean/{p.name}" for p in _CLEAN_FIXTURE_DIR.glob("*.py") if not p.is_symlink()
+            f"{_CATEGORY_CLEAN}/{p.name}"
+            for p in _CLEAN_FIXTURE_DIR.glob("*.py")
+            if not p.is_symlink()
         }
         undeclared = actual_files - declared_paths
         assert not undeclared, (
@@ -167,7 +173,7 @@ class TestFixtureFileContent:
     @pytest.mark.parametrize(
         "fixture_path",
         [
-            pytest.param(f"phi/{p.name}", id=p.name)
+            pytest.param(f"{_CATEGORY_PHI}/{p.name}", id=p.name)
             for p in sorted(_PHI_FIXTURE_DIR.glob("*.py"))
             if not p.is_symlink()
         ],
@@ -179,7 +185,7 @@ class TestFixtureFileContent:
     @pytest.mark.parametrize(
         "fixture_path",
         [
-            pytest.param(f"clean/{p.name}", id=p.name)
+            pytest.param(f"{_CATEGORY_CLEAN}/{p.name}", id=p.name)
             for p in sorted(_CLEAN_FIXTURE_DIR.glob("*.py"))
             if not p.is_symlink()
         ],
