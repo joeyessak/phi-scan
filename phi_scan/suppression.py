@@ -26,6 +26,8 @@ import re
 from phi_scan.models import ScanFinding
 
 __all__ = [
+    "FILE_SUPPRESS_SENTINEL_LINE",
+    "SUPPRESS_ALL_SENTINEL",
     "is_finding_suppressed",
     "load_suppressions",
 ]
@@ -41,7 +43,7 @@ _IGNORE_FILE_MAX_LINE_INDEX: int = 4
 
 # Sentinel set stored at a line number when ALL entity types on that line are
 # suppressed (phi-scan:ignore with no type list, or phi-scan:ignore-next-line).
-_SUPPRESS_ALL_SENTINEL: str = "*"
+SUPPRESS_ALL_SENTINEL: str = "*"
 
 # ---------------------------------------------------------------------------
 # Comment prefix patterns
@@ -98,7 +100,7 @@ _TYPE_LIST_SEPARATOR: re.Pattern[str] = re.compile(r"[,\s]+")
 
 # Sentinel line number stored in the suppression map when the entire file is
 # suppressed. Callers check for this key to short-circuit per-finding lookups.
-_SUPPRESS_FILE_SENTINEL_LINE: int = -1
+FILE_SUPPRESS_SENTINEL_LINE: int = -1
 
 
 # ---------------------------------------------------------------------------
@@ -110,7 +112,7 @@ def load_suppressions(file_lines: list[str]) -> dict[int, set[str]]:
     """Parse inline suppression directives from the lines of a source file.
 
     Line numbers in the returned map are 1-indexed to match ScanFinding.line_number.
-    The sentinel key -1 (``_SUPPRESS_FILE_SENTINEL_LINE``) is present when a
+    The sentinel key -1 (``FILE_SUPPRESS_SENTINEL_LINE``) is present when a
     ``phi-scan:ignore-file`` directive was found in the first five lines, indicating
     that the entire file is suppressed.
 
@@ -129,13 +131,13 @@ def load_suppressions(file_lines: list[str]) -> dict[int, set[str]]:
         line_number = line_index + 1  # convert to 1-indexed
 
         if _is_ignore_file_directive(raw_line, line_index):
-            suppression_map[_SUPPRESS_FILE_SENTINEL_LINE] = {_SUPPRESS_ALL_SENTINEL}
+            suppression_map[FILE_SUPPRESS_SENTINEL_LINE] = {SUPPRESS_ALL_SENTINEL}
             # No need to parse further — entire file is suppressed.
             return suppression_map
 
         if _PATTERN_IGNORE_NEXT_LINE.search(raw_line):
             next_line_number = line_number + 1
-            suppression_map.setdefault(next_line_number, set()).add(_SUPPRESS_ALL_SENTINEL)
+            suppression_map.setdefault(next_line_number, set()).add(SUPPRESS_ALL_SENTINEL)
             continue
 
         typed_match = _PATTERN_IGNORE_LINE_TYPED.search(raw_line)
@@ -145,7 +147,7 @@ def load_suppressions(file_lines: list[str]) -> dict[int, set[str]]:
             continue
 
         if _PATTERN_IGNORE_LINE.search(raw_line):
-            suppression_map.setdefault(line_number, set()).add(_SUPPRESS_ALL_SENTINEL)
+            suppression_map.setdefault(line_number, set()).add(SUPPRESS_ALL_SENTINEL)
 
     return suppression_map
 
@@ -162,7 +164,7 @@ def is_finding_suppressed(finding: ScanFinding, suppression_map: dict[int, set[s
     Returns:
         True if the finding should be treated as suppressed; False otherwise.
     """
-    if _SUPPRESS_FILE_SENTINEL_LINE in suppression_map:
+    if FILE_SUPPRESS_SENTINEL_LINE in suppression_map:
         return True
 
     suppressed_types = suppression_map.get(finding.line_number)
@@ -170,8 +172,7 @@ def is_finding_suppressed(finding: ScanFinding, suppression_map: dict[int, set[s
         return False
 
     return (
-        _SUPPRESS_ALL_SENTINEL in suppressed_types
-        or finding.entity_type.upper() in suppressed_types
+        SUPPRESS_ALL_SENTINEL in suppressed_types or finding.entity_type.upper() in suppressed_types
     )
 
 

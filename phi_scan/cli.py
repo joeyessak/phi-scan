@@ -1217,7 +1217,12 @@ def fix_command(
         for target_file in target_files:
             _run_interactive_fix(target_file)
         return
-    fix_mode = FixMode.DRY_RUN if dry_run else (FixMode.APPLY if apply else FixMode.PATCH)
+    if dry_run:
+        fix_mode = FixMode.DRY_RUN
+    elif apply:
+        fix_mode = FixMode.APPLY
+    else:
+        fix_mode = FixMode.PATCH
     for target_file in target_files:
         try:
             fix_result = fix_file(target_file, fix_mode)

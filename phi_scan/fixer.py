@@ -33,7 +33,11 @@ from phi_scan.constants import (
 from phi_scan.exceptions import FileReadError, MissingOptionalDependencyError
 from phi_scan.hashing import compute_value_hash
 from phi_scan.regex_detector import PhiPattern, get_phi_pattern_registry
-from phi_scan.suppression import load_suppressions
+from phi_scan.suppression import (
+    FILE_SUPPRESS_SENTINEL_LINE,
+    SUPPRESS_ALL_SENTINEL,
+    load_suppressions,
+)
 
 __all__ = [
     "FixMode",
@@ -131,18 +135,19 @@ _PATCH_SUFFIX: str = ".patch"
 # --- Line number base (1-indexed, matching ScanFinding.line_number) ---
 _LINE_NUMBER_START: int = 1
 
-# --- Suppression map sentinels ---
-# These mirror the private constants in suppression.py, which are not exported.
-# Duplicated here rather than importing to avoid coupling to private identifiers.
-_SUPPRESS_ALL_SENTINEL: str = "*"
-_FILE_SUPPRESS_SENTINEL_LINE: int = -1
-
 # --- Error and hint messages ---
 _FAKER_INSTALL_HINT: str = (
     "faker is required for `phi-scan fix`. "
     "Install it with: pip install phi-scan[dev]  or  pip install faker"
 )
+
+# Sentinel for an empty unified diff string (no changes found).
 _EMPTY_UNIFIED_DIFF: str = ""
+
+# Join separator used to reconstruct file content from a list of lines.
+# Lines already carry their own trailing newline characters
+# (splitlines(keepends=True)), so the separator must be empty.
+_LINE_JOIN_SEPARATOR: str = ""
 
 
 # ---------------------------------------------------------------------------
@@ -168,15 +173,16 @@ class FixMode(StrEnum):
 class FixReplacement:
     """A single PHI replacement in a source file.
 
-    Captures both the original matched text and the synthetic replacement
-    so callers can display diffs and obtain informed consent before applying.
+    Stores only the span (line, start, end) and the synthetic replacement —
+    never the raw matched text.  The original value can be recovered at any
+    time via ``original_lines[line_number - 1][start_column:end_column]``
+    but is intentionally excluded from this record to prevent raw PHI from
+    being carried in-memory longer than necessary.
 
     Args:
         line_number: 1-indexed line number of the match.
         start_column: 0-indexed start position of the match within the line.
         end_column: 0-indexed exclusive end position of the match.
-        original_text: Raw matched PHI value (used only during replacement;
-            never written to audit logs or persistent storage).
         synthetic_text: Deterministic synthetic replacement value.
         hipaa_category: PHI category that triggered the replacement.
     """
@@ -184,7 +190,6 @@ class FixReplacement:
     line_number: int
     start_column: int
     end_column: int
-    original_text: str
     synthetic_text: str
     hipaa_category: PhiCategory
 
@@ -266,7 +271,7 @@ def fix_file(
     unified_diff = _generate_unified_diff(file_path, file_lines, new_lines)
     patch_path: Path | None = None
     if mode == FixMode.APPLY and replacements:
-        file_path.write_text(_EMPTY_UNIFIED_DIFF.join(new_lines), encoding=DEFAULT_TEXT_ENCODING)
+        file_path.write_text(_LINE_JOIN_SEPARATOR.join(new_lines), encoding=DEFAULT_TEXT_ENCODING)
     elif mode == FixMode.PATCH and unified_diff:
         resolved_patch_dir = patch_dir if patch_dir is not None else file_path.parent
         patch_path = _write_patch_file(unified_diff, file_path, resolved_patch_dir)
@@ -299,7 +304,7 @@ def apply_approved_replacements(file_path: Path, replacements: list[FixReplaceme
     new_lines = _apply_replacements_to_lines(file_lines, replacements)
     unified_diff = _generate_unified_diff(file_path, file_lines, new_lines)
     if replacements:
-        file_path.write_text(_EMPTY_UNIFIED_DIFF.join(new_lines), encoding=DEFAULT_TEXT_ENCODING)
+        file_path.write_text(_LINE_JOIN_SEPARATOR.join(new_lines), encoding=DEFAULT_TEXT_ENCODING)
     return FixResult(
         file_path=file_path,
         replacements_applied=tuple(replacements),
@@ -394,7 +399,7 @@ def _collect_file_replacements(
     file_lines: list[str],
     suppression_map: dict[int, set[str]],
 ) -> list[FixReplacement]:
-    """Collect all PHI replacements across all lines and all patterns.
+    """Collect all PHI replacements by iterating the pattern registry.
 
     Args:
         file_lines: Lines of the source file (with endings).
@@ -406,14 +411,36 @@ def _collect_file_replacements(
     registry = get_phi_pattern_registry()
     raw_replacements: list[FixReplacement] = []
     for phi_pattern in registry:
-        for line_index, line_text in enumerate(file_lines):
-            line_number = line_index + _LINE_NUMBER_START
-            if _is_line_suppressed(line_number, phi_pattern.entity_type, suppression_map):
-                continue
-            raw_replacements.extend(
-                _collect_pattern_line_matches(phi_pattern, line_text, line_number)
-            )
+        raw_replacements.extend(
+            _collect_pattern_replacements(phi_pattern, file_lines, suppression_map)
+        )
     return _deduplicate_replacements(raw_replacements)
+
+
+def _collect_pattern_replacements(
+    phi_pattern: PhiPattern,
+    file_lines: list[str],
+    suppression_map: dict[int, set[str]],
+) -> list[FixReplacement]:
+    """Collect replacements for one pattern across all non-suppressed lines.
+
+    Args:
+        phi_pattern: The pattern to apply on each line.
+        file_lines: Lines of the source file (with endings).
+        suppression_map: Suppression directives parsed from the file.
+
+    Returns:
+        List of FixReplacement objects for all matches of this pattern.
+    """
+    pattern_replacements: list[FixReplacement] = []
+    for line_index, line_text in enumerate(file_lines):
+        line_number = line_index + _LINE_NUMBER_START
+        if _is_line_suppressed(line_number, phi_pattern.entity_type, suppression_map):
+            continue
+        pattern_replacements.extend(
+            _collect_pattern_line_matches(phi_pattern, line_text, line_number)
+        )
+    return pattern_replacements
 
 
 def _collect_pattern_line_matches(
@@ -445,7 +472,6 @@ def _collect_pattern_line_matches(
                 line_number=line_number,
                 start_column=match.start(),
                 end_column=match.end(),
-                original_text=match.group(),
                 synthetic_text=synthetic,
                 hipaa_category=phi_pattern.phi_category,
             )
@@ -460,8 +486,9 @@ def _is_line_suppressed(
 ) -> bool:
     """Return True if this line / entity type is covered by a suppression directive.
 
-    Mirrors the logic in suppression.is_finding_suppressed without requiring a
-    full ScanFinding object.
+    Uses the exported SUPPRESS_ALL_SENTINEL and FILE_SUPPRESS_SENTINEL_LINE
+    constants from suppression.py so the semantics stay in sync with the
+    scanner's suppression logic, without requiring a full ScanFinding object.
 
     Args:
         line_number: 1-indexed line number.
@@ -471,12 +498,12 @@ def _is_line_suppressed(
     Returns:
         True if the line (or the whole file) is suppressed for this entity type.
     """
-    if _FILE_SUPPRESS_SENTINEL_LINE in suppression_map:
+    if FILE_SUPPRESS_SENTINEL_LINE in suppression_map:
         return True
     line_suppressions = suppression_map.get(line_number)
     if line_suppressions is None:
         return False
-    return _SUPPRESS_ALL_SENTINEL in line_suppressions or entity_type.upper() in line_suppressions
+    return SUPPRESS_ALL_SENTINEL in line_suppressions or entity_type.upper() in line_suppressions
 
 
 def _deduplicate_replacements(replacements: list[FixReplacement]) -> list[FixReplacement]:

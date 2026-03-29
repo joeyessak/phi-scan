@@ -89,13 +89,12 @@ def test_fixer_module_exports_fix_replacement_dataclass() -> None:
         line_number=1,
         start_column=0,
         end_column=5,
-        original_text="hello",
         synthetic_text="world",
         hipaa_category=PhiCategory.NAME,
     )
 
     assert replacement.line_number == 1
-    assert replacement.original_text == "hello"
+    assert replacement.start_column == 0
     assert replacement.synthetic_text == "world"
 
 
@@ -333,9 +332,11 @@ def test_collect_file_replacements_same_phi_value_gets_same_synthetic(
     target_file.write_text(two_lines, encoding=DEFAULT_TEXT_ENCODING)
 
     replacements = collect_file_replacements(target_file)
-    ssn_replacements = [r for r in replacements if r.original_text == _SSN_VALUE]
+    # Both lines match the same SSN format; filter by HIPAA category.
+    ssn_replacements = [r for r in replacements if r.hipaa_category == PhiCategory.SSN]
 
     assert len(ssn_replacements) == 2
+    # Same PHI value → same hash → same seed → same synthetic replacement.
     assert ssn_replacements[0].synthetic_text == ssn_replacements[1].synthetic_text
 
 
@@ -385,7 +386,7 @@ def test_fix_file_unsuppressed_line_is_replaced_when_next_line_suppressed(
 
     replacements = collect_file_replacements(target_file)
     # First SSN (line 1) is NOT suppressed; third SSN (line 3) is suppressed.
-    ssn_replacements = [r for r in replacements if r.original_text == _SSN_VALUE]
+    ssn_replacements = [r for r in replacements if r.hipaa_category == PhiCategory.SSN]
 
     assert len(ssn_replacements) == 1
     assert ssn_replacements[0].line_number == 1
@@ -403,12 +404,13 @@ def test_apply_approved_replacements_applies_only_approved_items(
     target_file = tmp_path / "patient.py"
     target_file.write_text(content, encoding=DEFAULT_TEXT_ENCODING)
     all_replacements = collect_file_replacements(target_file)
-    ssn_only = [r for r in all_replacements if r.original_text == _SSN_VALUE]
+    # SSN is on line 1; email is on line 2.  Approve only the line-1 replacements.
+    line_one_only = [r for r in all_replacements if r.line_number == 1]
 
-    result = apply_approved_replacements(target_file, ssn_only)
+    result = apply_approved_replacements(target_file, line_one_only)
     modified_content = target_file.read_text(encoding=DEFAULT_TEXT_ENCODING)
 
-    assert len(result.replacements_applied) == len(ssn_only)
+    assert len(result.replacements_applied) == len(line_one_only)
     assert _SSN_VALUE not in modified_content
     # The email on line 2 was NOT approved — it must remain.
     assert _EMAIL_VALUE in modified_content
@@ -467,7 +469,6 @@ def test_fix_replacement_is_immutable() -> None:
         line_number=1,
         start_column=0,
         end_column=5,
-        original_text="hello",
         synthetic_text="world",
         hipaa_category=PhiCategory.NAME,
     )
