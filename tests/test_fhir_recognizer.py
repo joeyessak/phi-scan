@@ -19,6 +19,7 @@ from phi_scan.exceptions import MissingOptionalDependencyError
 from phi_scan.fhir_recognizer import (  # type: ignore[attr-defined]
     _FHIR_FIELD_BASE_CONFIDENCE,
     _FHIR_JSON_NULL_SENTINEL,
+    _REDACTED_VALUE_PLACEHOLDER,
     _build_fhir_finding,
     _detect_phi_in_fhir_content,
     _extract_fhir_matches_from_line,
@@ -258,6 +259,20 @@ def test_build_fhir_finding_strips_trailing_whitespace_from_code_context():
     finding = _build_fhir_finding(_FAKE_FILE_PATH, line_match)
 
     assert not finding.code_context.endswith(" ")
+
+
+def test_build_fhir_finding_redacts_raw_value_in_code_context():
+    line_match = _FhirLineMatch(
+        field_name="family",
+        raw_value=_FAKE_FAMILY_NAME,
+        line_number=_LINE_NUMBER_ONE,
+        line_text=_JSON_FAMILY_LINE,
+    )
+
+    finding = _build_fhir_finding(_FAKE_FILE_PATH, line_match)
+
+    assert _FAKE_FAMILY_NAME not in finding.code_context
+    assert _REDACTED_VALUE_PLACEHOLDER in finding.code_context
 
 
 # ---------------------------------------------------------------------------

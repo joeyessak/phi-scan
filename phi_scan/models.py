@@ -484,4 +484,7 @@ class Hl7ScanContext:
 
     file_path: Path
     segment_index: int
-    segment_text: str
+    # Three-character HL7 segment name (e.g. "PID", "NK1", "IN1"). Stored instead
+    # of the raw segment text so that code_context never contains raw PHI values —
+    # the segment text holds live patient data that must not be persisted verbatim.
+    segment_type: str

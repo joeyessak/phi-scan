@@ -47,11 +47,14 @@ _logger: logging.Logger = logging.getLogger(__name__)
 
 _LINE_NUMBER_START: int = 1
 # FHIR structural matches are schema-confirmed, placing them at HIGH confidence.
-# CONFIDENCE_HIGH_FLOOR (0.90) falls within the Layer 3 range [FHIR_MIN=0.80, FHIR_MAX=0.95].
+# CONFIDENCE_HIGH_FLOOR (0.90) falls within the Layer 3 range
+# [CONFIDENCE_STRUCTURED_MIN=0.80, CONFIDENCE_STRUCTURED_MAX=0.95].
 _FHIR_FIELD_BASE_CONFIDENCE: float = CONFIDENCE_HIGH_FLOOR
-_HL7_UNAVAILABLE_WARNING: str = (
-    "HL7 v2 scanning disabled — run 'pip install phi-scan[hl7]' to enable segment scanning"
-)
+_HL7_UNAVAILABLE_WARNING: str = "HL7 v2 scanning disabled — install phi-scan[hl7] to enable"
+# Placeholder written into code_context in place of the raw matched PHI value.
+# This satisfies the HIPAA audit requirement that raw PHI values must never be
+# stored in scan output — only their SHA-256 hashes.
+_REDACTED_VALUE_PLACEHOLDER: str = "[REDACTED]"
 # JSON-specific null sentinel. FHIR JSON may encode absent values as the
 # string literal "null"; XML encodes absence by omitting the element entirely,
 # so no XML equivalent sentinel is needed here.
@@ -188,7 +191,9 @@ def _build_fhir_finding(file_path: Path, line_match: _FhirLineMatch) -> ScanFind
         detection_layer=DetectionLayer.FHIR,
         value_hash=compute_value_hash(line_match.raw_value),
         severity=severity_from_confidence(confidence),
-        code_context=line_match.line_text.rstrip(),
+        code_context=line_match.line_text.replace(
+            line_match.raw_value, _REDACTED_VALUE_PLACEHOLDER, 1
+        ).rstrip(),
         remediation_hint=HIPAA_REMEDIATION_GUIDANCE.get(phi_category, ""),
     )
 

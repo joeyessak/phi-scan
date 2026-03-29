@@ -28,7 +28,7 @@ from pathlib import Path
 from typing import Any
 
 from phi_scan.constants import (
-    CONFIDENCE_STRUCTURED_MIN,
+    CONFIDENCE_HIGH_FLOOR,
     HIPAA_REMEDIATION_GUIDANCE,
     DetectionLayer,
     PhiCategory,
@@ -50,9 +50,11 @@ _logger: logging.Logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 _LINE_NUMBER_START: int = 1
-# HL7 structural matches are schema-confirmed; confidence matches the Layer 3
-# minimum so HL7 and FHIR findings occupy the same confidence band.
-_HL7_FIELD_BASE_CONFIDENCE: float = CONFIDENCE_STRUCTURED_MIN
+# HL7 structural matches are schema-confirmed to the same degree as FHIR R4
+# field-name matches. Both Layer 3 sub-scanners use CONFIDENCE_HIGH_FLOOR (0.90)
+# so that HL7 and FHIR findings receive identical HIGH severity for equivalent
+# structural matches.
+_HL7_FIELD_BASE_CONFIDENCE: float = CONFIDENCE_HIGH_FLOOR
 _HL7_INSTALL_HINT: str = (
     "HL7 v2 scanning requires the 'hl7' library — "
     "run 'pip install phi-scan[hl7]' to enable segment-level detection"
@@ -167,7 +169,7 @@ def _build_hl7_finding(
         detection_layer=DetectionLayer.HL7,
         value_hash=compute_value_hash(field_value),
         severity=severity_from_confidence(confidence),
-        code_context=context.segment_text,
+        code_context=context.segment_type,
         remediation_hint=HIPAA_REMEDIATION_GUIDANCE.get(phi_category, ""),
     )
 
@@ -251,7 +253,7 @@ def detect_phi_in_hl7_content(
         context = Hl7ScanContext(
             file_path=file_path,
             segment_index=segment_index,
-            segment_text=str(segment),
+            segment_type=segment_type,
         )
         findings.extend(detect_phi_in_hl7_segment(segment, segment_field_categories, context))
     return findings

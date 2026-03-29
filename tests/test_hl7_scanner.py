@@ -36,7 +36,7 @@ from phi_scan.models import Hl7ScanContext
 _FAKE_FILE_PATH: Path = Path("fake/test_patient.hl7")
 _FAKE_MRN_VALUE: str = "MRN-TEST-12345"
 _FAKE_PATIENT_NAME: str = "TestPatientName"
-_FAKE_SEGMENT_TEXT: str = "PID|1||MRN-TEST-12345|||TestPatientName"
+_FAKE_SEGMENT_TYPE: str = "PID"
 _EXPECTED_MRN_HASH: str = hashlib.sha256(_FAKE_MRN_VALUE.encode()).hexdigest()
 _EXPECTED_NAME_HASH: str = hashlib.sha256(_FAKE_PATIENT_NAME.encode()).hexdigest()
 
@@ -120,7 +120,7 @@ def _build_context(segment_index: int = _SEGMENT_INDEX_ZERO) -> Hl7ScanContext:
     return Hl7ScanContext(
         file_path=_FAKE_FILE_PATH,
         segment_index=segment_index,
-        segment_text=_FAKE_SEGMENT_TEXT,
+        segment_type=_FAKE_SEGMENT_TYPE,
     )
 
 
@@ -273,12 +273,12 @@ def test_build_hl7_finding_records_correct_file_path():
     assert finding.file_path == _FAKE_FILE_PATH
 
 
-def test_build_hl7_finding_uses_segment_text_as_code_context():
+def test_build_hl7_finding_uses_segment_type_as_code_context():
     context = _build_context()
 
     finding = _build_hl7_finding(_FAKE_MRN_VALUE, PhiCategory.MRN, context)
 
-    assert finding.code_context == _FAKE_SEGMENT_TEXT
+    assert finding.code_context == _FAKE_SEGMENT_TYPE
 
 
 # ---------------------------------------------------------------------------
