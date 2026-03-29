@@ -13,7 +13,7 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
-from phi_scan.audit import create_audit_schema, get_last_scan
+from phi_scan.audit import get_last_scan
 from phi_scan.cli import app
 from phi_scan.constants import EXIT_CODE_CLEAN
 
@@ -23,8 +23,21 @@ from phi_scan.constants import EXIT_CODE_CLEAN
 
 _TEST_FILE_ENCODING: str = "utf-8"
 
-# Configuration YAML template — version key required; audit.database_path redirected.
-_CONFIGURATION_YAML_TEMPLATE: str = "version: 1\naudit:\n  database_path: {database_path}\n"
+# Mirrors _SUPPORTED_CONFIG_VERSION in phi_scan/config.py — any schema version bump
+# must also update this constant so the test template stays in sync.
+_CONFIGURATION_SCHEMA_VERSION: int = 1
+
+# Configuration YAML template — uses _CONFIGURATION_SCHEMA_VERSION (not a literal),
+# explicitly sets exclude_paths so the exclude test does not rely on default
+# configuration that could change between releases.
+_CONFIGURATION_YAML_TEMPLATE: str = (
+    "version: {version}\n"
+    "scan:\n"
+    "  exclude_paths:\n"
+    "    - node_modules/\n"
+    "audit:\n"
+    "  database_path: {database_path}\n"
+)
 
 # Directory and file names used to build the two-file exclude fixture.
 _SOURCE_DIR_NAME: str = "src"
@@ -77,7 +90,10 @@ def _write_test_configuration(tmp_path: Path, database_path: Path) -> Path:
     """
     configuration_path = tmp_path / ".phi-scanner.yml"
     configuration_path.write_text(
-        _CONFIGURATION_YAML_TEMPLATE.format(database_path=str(database_path)),
+        _CONFIGURATION_YAML_TEMPLATE.format(
+            version=_CONFIGURATION_SCHEMA_VERSION,
+            database_path=str(database_path),
+        ),
         encoding=_TEST_FILE_ENCODING,
     )
     return configuration_path
@@ -129,7 +145,6 @@ def test_scan_empty_directory_writes_audit_record(tmp_path: Path, runner: CliRun
         ["scan", str(scan_root), "--output", "json", "--config", str(configuration_path)],
     )
 
-    create_audit_schema(database_path)
     last_scan = get_last_scan(database_path)
     assert last_scan is not None
 

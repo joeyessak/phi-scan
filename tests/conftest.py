@@ -29,6 +29,9 @@ _SAMPLE_CONFIG_CONTENT: str = (
 SAMPLE_FILE_CONTENT: str = _SAMPLE_FILE_CONTENT
 
 
+# Fixture names below are nouns by pytest convention (fixtures describe what they
+# provide, not what they do). This intentionally conflicts with the verb-noun pair
+# rule for functions — the trade-off is accepted for fixtures project-wide.
 @pytest.fixture()
 def tmp_project(tmp_path: Path) -> Path:
     """Create a minimal temporary project directory with nested files for scan tests.

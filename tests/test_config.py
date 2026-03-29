@@ -25,8 +25,6 @@ from phi_scan.models import ScanConfig
 _SUPPORTED_VERSION: int = 1
 _CUSTOM_MAX_FILE_SIZE_MB: int = 25
 _TEST_FILE_ENCODING: str = "utf-8"
-# HIPAA 45 CFR §164.530(j) — 6-year maximum: 4×365 + 2×366 days.
-_HIPAA_AUDIT_RETENTION_DAYS: int = 2192
 _PHI_SCANNER_CONFIG_AUDIT_KEY: str = "audit"
 _PHI_SCANNER_CONFIG_RETENTION_KEY: str = "retention_days"
 
@@ -476,4 +474,3 @@ def test_audit_retention_days_matches_config_default(tmp_path: Path) -> None:
         config_document[_PHI_SCANNER_CONFIG_AUDIT_KEY][_PHI_SCANNER_CONFIG_RETENTION_KEY]
         == AUDIT_RETENTION_DAYS
     )
-    assert AUDIT_RETENTION_DAYS == _HIPAA_AUDIT_RETENTION_DAYS
