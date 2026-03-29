@@ -8,10 +8,10 @@ from pathlib import Path
 import pytest
 
 from phi_scan.constants import (
-    CONFIDENCE_FHIR_MIN,
     CONFIDENCE_HIGH_FLOOR,
     CONFIDENCE_LOW_FLOOR,
     CONFIDENCE_MEDIUM_FLOOR,
+    CONFIDENCE_STRUCTURED_MIN,
     DetectionLayer,
     PhiCategory,
     SeverityLevel,
@@ -25,9 +25,9 @@ from phi_scan.fhir_recognizer import (  # type: ignore[attr-defined]
     _extract_fhir_matches_from_line,
     _FhirLineMatch,
     _is_null_or_empty_fhir_value,
-    _severity_from_confidence,
     detect_phi_in_structured_content,
 )
+from phi_scan.hashing import severity_from_confidence
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -90,42 +90,42 @@ def test_is_null_or_empty_fhir_value_accepts_single_character():
 
 
 # ---------------------------------------------------------------------------
-# _severity_from_confidence
+# severity_from_confidence
 # ---------------------------------------------------------------------------
 
 
-def test_severity_from_confidence_returns_high_at_high_floor():
-    result = _severity_from_confidence(_SCORE_AT_HIGH_FLOOR)
+def testseverity_from_confidence_returns_high_at_high_floor():
+    result = severity_from_confidence(_SCORE_AT_HIGH_FLOOR)
 
     assert result == SeverityLevel.HIGH
 
 
-def test_severity_from_confidence_returns_medium_just_below_high_floor():
-    result = _severity_from_confidence(_SCORE_JUST_BELOW_HIGH)
+def testseverity_from_confidence_returns_medium_just_below_high_floor():
+    result = severity_from_confidence(_SCORE_JUST_BELOW_HIGH)
 
     assert result == SeverityLevel.MEDIUM
 
 
-def test_severity_from_confidence_returns_medium_at_medium_floor():
-    result = _severity_from_confidence(_SCORE_AT_MEDIUM_FLOOR)
+def testseverity_from_confidence_returns_medium_at_medium_floor():
+    result = severity_from_confidence(_SCORE_AT_MEDIUM_FLOOR)
 
     assert result == SeverityLevel.MEDIUM
 
 
-def test_severity_from_confidence_returns_low_just_below_medium_floor():
-    result = _severity_from_confidence(_SCORE_JUST_BELOW_MEDIUM)
+def testseverity_from_confidence_returns_low_just_below_medium_floor():
+    result = severity_from_confidence(_SCORE_JUST_BELOW_MEDIUM)
 
     assert result == SeverityLevel.LOW
 
 
-def test_severity_from_confidence_returns_low_at_low_floor():
-    result = _severity_from_confidence(_SCORE_AT_LOW_FLOOR)
+def testseverity_from_confidence_returns_low_at_low_floor():
+    result = severity_from_confidence(_SCORE_AT_LOW_FLOOR)
 
     assert result == SeverityLevel.LOW
 
 
-def test_severity_from_confidence_returns_info_below_low_floor():
-    result = _severity_from_confidence(_SCORE_BELOW_LOW_FLOOR)
+def testseverity_from_confidence_returns_info_below_low_floor():
+    result = severity_from_confidence(_SCORE_BELOW_LOW_FLOOR)
 
     assert result == SeverityLevel.INFO
 
@@ -357,4 +357,4 @@ def test_detect_phi_in_structured_content_warns_and_returns_empty_when_hl7_libra
 
 
 def test_fhir_field_base_confidence_is_within_layer_three_range():
-    assert CONFIDENCE_FHIR_MIN <= _FHIR_FIELD_BASE_CONFIDENCE
+    assert CONFIDENCE_STRUCTURED_MIN <= _FHIR_FIELD_BASE_CONFIDENCE

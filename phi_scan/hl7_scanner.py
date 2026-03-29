@@ -8,36 +8,32 @@ Inspects PHI-bearing HL7 v2 segments: PID (patient identification), NK1
 (next of kin), and IN1 (insurance). Field indices follow the HL7 v2.x field
 numbering convention (1-based, segment-name field is index 0).
 
-Requires the optional ``hl7`` library. If absent, ``_import_hl7_library``
+Requires the optional ``hl7`` library. If absent, ``_require_hl7_library``
 raises ``MissingOptionalDependencyError`` and the caller (fhir_recognizer)
 handles the graceful degradation.
 
 Design constraints:
 - Raw PHI values are never stored — only their SHA-256 hex digests (HIPAA).
-- HL7 findings are attributed to ``DetectionLayer.FHIR`` (Layer 3 covers both
-  FHIR R4 and HL7 v2; the enum has no separate HL7 value).
+- HL7 findings are attributed to ``DetectionLayer.HL7`` so that audit queries
+  can distinguish HL7 v2 segment findings from FHIR R4 field-name findings.
 - ``detect_phi_in_hl7_segment`` is a named public function so it can be tested
   independently without parsing a full HL7 message.
 """
 
 from __future__ import annotations
 
-import hashlib
 import logging
 from pathlib import Path
 from typing import Any
 
 from phi_scan.constants import (
-    CONFIDENCE_FHIR_MIN,
-    CONFIDENCE_HIGH_FLOOR,
-    CONFIDENCE_LOW_FLOOR,
-    CONFIDENCE_MEDIUM_FLOOR,
+    CONFIDENCE_STRUCTURED_MIN,
     HIPAA_REMEDIATION_GUIDANCE,
     DetectionLayer,
     PhiCategory,
-    SeverityLevel,
 )
 from phi_scan.exceptions import MissingOptionalDependencyError
+from phi_scan.hashing import compute_value_hash, severity_from_confidence
 from phi_scan.models import Hl7ScanContext, ScanFinding
 
 __all__ = [
@@ -53,9 +49,9 @@ _logger: logging.Logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 
 _LINE_NUMBER_START: int = 1
-# HL7 structural matches are schema-confirmed; confidence matches the FHIR
-# layer minimum to keep Layer 3 findings in a consistent range.
-_HL7_FIELD_BASE_CONFIDENCE: float = CONFIDENCE_FHIR_MIN
+# HL7 structural matches are schema-confirmed; confidence matches the Layer 3
+# minimum so HL7 and FHIR findings occupy the same confidence band.
+_HL7_FIELD_BASE_CONFIDENCE: float = CONFIDENCE_STRUCTURED_MIN
 _HL7_INSTALL_HINT: str = (
     "HL7 v2 scanning requires the 'hl7' library — "
     "run 'pip install phi-scan[hl7]' to enable segment-level detection"
@@ -105,7 +101,7 @@ _HL7_SEGMENT_FIELD_CATEGORIES: dict[str, dict[int, PhiCategory]] = {
 # ---------------------------------------------------------------------------
 
 
-def _import_hl7_library() -> Any:
+def _require_hl7_library() -> Any:
     """Import the optional ``hl7`` library or raise MissingOptionalDependencyError.
 
     Centralises the single import-failure raise point so callers never need to
@@ -123,39 +119,6 @@ def _import_hl7_library() -> Any:
         return hl7_lib
     except ImportError as import_error:
         raise MissingOptionalDependencyError(_HL7_INSTALL_HINT) from import_error
-
-
-def _compute_value_hash(text: str) -> str:
-    """Return the SHA-256 hex digest of text.
-
-    Raw PHI values are never stored — only their hashes (HIPAA audit
-    requirement). The hash is computed over the UTF-8 encoding of the text.
-
-    Args:
-        text: The raw matched PHI value.
-
-    Returns:
-        64-character lowercase hex digest.
-    """
-    return hashlib.sha256(text.encode()).hexdigest()
-
-
-def _severity_from_confidence(confidence: float) -> SeverityLevel:
-    """Derive SeverityLevel from a confidence score.
-
-    Args:
-        confidence: Score in [CONFIDENCE_SCORE_MINIMUM, CONFIDENCE_SCORE_MAXIMUM].
-
-    Returns:
-        SeverityLevel for the given confidence band.
-    """
-    if confidence >= CONFIDENCE_HIGH_FLOOR:
-        return SeverityLevel.HIGH
-    if confidence >= CONFIDENCE_MEDIUM_FLOOR:
-        return SeverityLevel.MEDIUM
-    if confidence >= CONFIDENCE_LOW_FLOOR:
-        return SeverityLevel.LOW
-    return SeverityLevel.INFO
 
 
 def _is_null_or_empty_hl7_value(field_value: str) -> bool:
@@ -186,7 +149,7 @@ def _build_hl7_finding(
     Args:
         field_value: Raw string content of the HL7 field.
         phi_category: HIPAA category for this field.
-        context: File path and segment index for finding attribution.
+        context: File path, segment index, and raw segment text for attribution.
 
     Returns:
         Immutable ScanFinding for this HL7 field detection.
@@ -199,10 +162,10 @@ def _build_hl7_finding(
         entity_type=phi_category.value,
         hipaa_category=phi_category,
         confidence=confidence,
-        detection_layer=DetectionLayer.FHIR,
-        value_hash=_compute_value_hash(field_value),
-        severity=_severity_from_confidence(confidence),
-        code_context="",
+        detection_layer=DetectionLayer.HL7,
+        value_hash=compute_value_hash(field_value),
+        severity=severity_from_confidence(confidence),
+        code_context=context.segment_text,
         remediation_hint=HIPAA_REMEDIATION_GUIDANCE.get(phi_category, ""),
     )
 
@@ -238,7 +201,7 @@ def detect_phi_in_hl7_segment(
         segment: HL7 segment object from ``hl7.parse()``.
         segment_field_categories: Mapping of 1-based field indices to HIPAA
             PHI categories for this segment type.
-        context: File path and segment index for finding attribution.
+        context: File path, segment index, and raw segment text for attribution.
 
     Returns:
         List of ScanFinding objects, one per non-empty PHI field found.
@@ -275,7 +238,7 @@ def detect_phi_in_hl7_content(
     Raises:
         MissingOptionalDependencyError: If the ``hl7`` library is not installed.
     """
-    hl7_lib = _import_hl7_library()
+    hl7_lib = _require_hl7_library()
     message = hl7_lib.parse(file_content)
     findings: list[ScanFinding] = []
     for segment_index, segment in enumerate(message):
@@ -283,6 +246,10 @@ def detect_phi_in_hl7_content(
         if segment_type not in _HL7_SEGMENT_FIELD_CATEGORIES:
             continue
         segment_field_categories = _HL7_SEGMENT_FIELD_CATEGORIES[segment_type]
-        context = Hl7ScanContext(file_path=file_path, segment_index=segment_index)
+        context = Hl7ScanContext(
+            file_path=file_path,
+            segment_index=segment_index,
+            segment_text=str(segment),
+        )
         findings.extend(detect_phi_in_hl7_segment(segment, segment_field_categories, context))
     return findings

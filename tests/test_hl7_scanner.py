@@ -9,21 +9,20 @@ from unittest.mock import MagicMock
 import pytest
 
 from phi_scan.constants import (
-    CONFIDENCE_FHIR_MIN,
     CONFIDENCE_HIGH_FLOOR,
     CONFIDENCE_LOW_FLOOR,
     CONFIDENCE_MEDIUM_FLOOR,
+    CONFIDENCE_STRUCTURED_MIN,
     DetectionLayer,
     PhiCategory,
     SeverityLevel,
 )
 from phi_scan.exceptions import MissingOptionalDependencyError
+from phi_scan.hashing import compute_value_hash, severity_from_confidence
 from phi_scan.hl7_scanner import (  # type: ignore[attr-defined]
     _HL7_FIELD_BASE_CONFIDENCE,
     _build_hl7_finding,
-    _compute_value_hash,
     _is_null_or_empty_hl7_value,
-    _severity_from_confidence,
     detect_phi_in_hl7_content,
     detect_phi_in_hl7_segment,
     is_hl7_message_format,
@@ -37,6 +36,7 @@ from phi_scan.models import Hl7ScanContext
 _FAKE_FILE_PATH: Path = Path("fake/test_patient.hl7")
 _FAKE_MRN_VALUE: str = "MRN-TEST-12345"
 _FAKE_PATIENT_NAME: str = "TestPatientName"
+_FAKE_SEGMENT_TEXT: str = "PID|1||MRN-TEST-12345|||TestPatientName"
 _EXPECTED_MRN_HASH: str = hashlib.sha256(_FAKE_MRN_VALUE.encode()).hexdigest()
 _EXPECTED_NAME_HASH: str = hashlib.sha256(_FAKE_PATIENT_NAME.encode()).hexdigest()
 
@@ -79,6 +79,10 @@ class _MockHl7Segment:
             raise IndexError(f"No field at index {index}")
         return self._fields[index]
 
+    def __str__(self) -> str:
+        segment_name = self._fields.get(0, "UNK")
+        return f"{segment_name}|field1|field2|field3"
+
 
 class _MockHl7Message:
     """Minimal HL7 message stub that iterates over its segments."""
@@ -109,6 +113,15 @@ def _build_mock_hl7_lib(message: _MockHl7Message) -> MagicMock:
     mock_lib = MagicMock()
     mock_lib.parse.return_value = message
     return mock_lib
+
+
+def _build_context(segment_index: int = _SEGMENT_INDEX_ZERO) -> Hl7ScanContext:
+    """Build an Hl7ScanContext with the standard fake file path and segment text."""
+    return Hl7ScanContext(
+        file_path=_FAKE_FILE_PATH,
+        segment_index=segment_index,
+        segment_text=_FAKE_SEGMENT_TEXT,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -166,49 +179,49 @@ def test_is_null_or_empty_hl7_value_accepts_single_character():
 
 
 # ---------------------------------------------------------------------------
-# _compute_value_hash
+# compute_value_hash (shared via phi_scan.hashing)
 # ---------------------------------------------------------------------------
 
 
 def test_compute_value_hash_returns_64_char_hex_digest():
-    result = _compute_value_hash(_FAKE_MRN_VALUE)
+    result = compute_value_hash(_FAKE_MRN_VALUE)
 
     assert len(result) == 64
     assert result == _EXPECTED_MRN_HASH
 
 
 def test_compute_value_hash_is_deterministic():
-    first_result = _compute_value_hash(_FAKE_MRN_VALUE)
-    second_result = _compute_value_hash(_FAKE_MRN_VALUE)
+    first_result = compute_value_hash(_FAKE_MRN_VALUE)
+    second_result = compute_value_hash(_FAKE_MRN_VALUE)
 
     assert first_result == second_result
 
 
 # ---------------------------------------------------------------------------
-# _severity_from_confidence
+# severity_from_confidence (shared via phi_scan.hashing)
 # ---------------------------------------------------------------------------
 
 
 def test_severity_from_confidence_returns_high_at_high_floor():
-    result = _severity_from_confidence(_SCORE_AT_HIGH_FLOOR)
+    result = severity_from_confidence(_SCORE_AT_HIGH_FLOOR)
 
     assert result == SeverityLevel.HIGH
 
 
 def test_severity_from_confidence_returns_medium_just_below_high_floor():
-    result = _severity_from_confidence(_SCORE_JUST_BELOW_HIGH)
+    result = severity_from_confidence(_SCORE_JUST_BELOW_HIGH)
 
     assert result == SeverityLevel.MEDIUM
 
 
 def test_severity_from_confidence_returns_low_just_below_medium_floor():
-    result = _severity_from_confidence(_SCORE_JUST_BELOW_MEDIUM)
+    result = severity_from_confidence(_SCORE_JUST_BELOW_MEDIUM)
 
     assert result == SeverityLevel.LOW
 
 
 def test_severity_from_confidence_returns_info_below_low_floor():
-    result = _severity_from_confidence(_SCORE_BELOW_LOW_FLOOR)
+    result = severity_from_confidence(_SCORE_BELOW_LOW_FLOOR)
 
     assert result == SeverityLevel.INFO
 
@@ -219,7 +232,7 @@ def test_severity_from_confidence_returns_info_below_low_floor():
 
 
 def test_build_hl7_finding_constructs_finding_with_correct_phi_category():
-    context = Hl7ScanContext(file_path=_FAKE_FILE_PATH, segment_index=_SEGMENT_INDEX_ZERO)
+    context = _build_context()
 
     finding = _build_hl7_finding(_FAKE_MRN_VALUE, PhiCategory.MRN, context)
 
@@ -227,7 +240,7 @@ def test_build_hl7_finding_constructs_finding_with_correct_phi_category():
 
 
 def test_build_hl7_finding_stores_hash_not_raw_value():
-    context = Hl7ScanContext(file_path=_FAKE_FILE_PATH, segment_index=_SEGMENT_INDEX_ZERO)
+    context = _build_context()
 
     finding = _build_hl7_finding(_FAKE_MRN_VALUE, PhiCategory.MRN, context)
 
@@ -235,16 +248,16 @@ def test_build_hl7_finding_stores_hash_not_raw_value():
     assert _FAKE_MRN_VALUE not in str(finding.value_hash)
 
 
-def test_build_hl7_finding_uses_fhir_detection_layer():
-    context = Hl7ScanContext(file_path=_FAKE_FILE_PATH, segment_index=_SEGMENT_INDEX_ZERO)
+def test_build_hl7_finding_uses_hl7_detection_layer():
+    context = _build_context()
 
     finding = _build_hl7_finding(_FAKE_MRN_VALUE, PhiCategory.MRN, context)
 
-    assert finding.detection_layer == DetectionLayer.FHIR
+    assert finding.detection_layer == DetectionLayer.HL7
 
 
 def test_build_hl7_finding_computes_line_number_from_segment_index():
-    context = Hl7ScanContext(file_path=_FAKE_FILE_PATH, segment_index=_SEGMENT_INDEX_ONE)
+    context = _build_context(segment_index=_SEGMENT_INDEX_ONE)
 
     finding = _build_hl7_finding(_FAKE_MRN_VALUE, PhiCategory.MRN, context)
 
@@ -253,11 +266,19 @@ def test_build_hl7_finding_computes_line_number_from_segment_index():
 
 
 def test_build_hl7_finding_records_correct_file_path():
-    context = Hl7ScanContext(file_path=_FAKE_FILE_PATH, segment_index=_SEGMENT_INDEX_ZERO)
+    context = _build_context()
 
     finding = _build_hl7_finding(_FAKE_MRN_VALUE, PhiCategory.MRN, context)
 
     assert finding.file_path == _FAKE_FILE_PATH
+
+
+def test_build_hl7_finding_uses_segment_text_as_code_context():
+    context = _build_context()
+
+    finding = _build_hl7_finding(_FAKE_MRN_VALUE, PhiCategory.MRN, context)
+
+    assert finding.code_context == _FAKE_SEGMENT_TEXT
 
 
 # ---------------------------------------------------------------------------
@@ -268,7 +289,7 @@ def test_build_hl7_finding_records_correct_file_path():
 def test_detect_phi_in_hl7_segment_returns_finding_for_present_phi_field():
     segment = _build_pid_segment(mrn=_FAKE_MRN_VALUE)
     field_categories = {_PID_FIELD_INDEX_MRN: PhiCategory.MRN}
-    context = Hl7ScanContext(file_path=_FAKE_FILE_PATH, segment_index=_SEGMENT_INDEX_ZERO)
+    context = _build_context()
 
     findings = detect_phi_in_hl7_segment(segment, field_categories, context)
 
@@ -279,7 +300,7 @@ def test_detect_phi_in_hl7_segment_returns_finding_for_present_phi_field():
 def test_detect_phi_in_hl7_segment_skips_empty_field_value():
     segment = _MockHl7Segment({0: "PID", _PID_FIELD_INDEX_MRN: ""})
     field_categories = {_PID_FIELD_INDEX_MRN: PhiCategory.MRN}
-    context = Hl7ScanContext(file_path=_FAKE_FILE_PATH, segment_index=_SEGMENT_INDEX_ZERO)
+    context = _build_context()
 
     findings = detect_phi_in_hl7_segment(segment, field_categories, context)
 
@@ -289,7 +310,7 @@ def test_detect_phi_in_hl7_segment_skips_empty_field_value():
 def test_detect_phi_in_hl7_segment_skips_field_that_raises_index_error():
     segment = _MockHl7Segment({0: "PID"})  # MRN field not present
     field_categories = {_PID_FIELD_INDEX_MRN: PhiCategory.MRN}
-    context = Hl7ScanContext(file_path=_FAKE_FILE_PATH, segment_index=_SEGMENT_INDEX_ZERO)
+    context = _build_context()
 
     findings = detect_phi_in_hl7_segment(segment, field_categories, context)
 
@@ -302,7 +323,7 @@ def test_detect_phi_in_hl7_segment_returns_multiple_findings_for_multiple_phi_fi
         _PID_FIELD_INDEX_MRN: PhiCategory.MRN,
         _PID_FIELD_INDEX_NAME: PhiCategory.NAME,
     }
-    context = Hl7ScanContext(file_path=_FAKE_FILE_PATH, segment_index=_SEGMENT_INDEX_ZERO)
+    context = _build_context()
 
     findings = detect_phi_in_hl7_segment(segment, field_categories, context)
 
@@ -318,7 +339,7 @@ def test_detect_phi_in_hl7_content_raises_missing_dependency_error_when_hl7_abse
     monkeypatch,
 ):
     monkeypatch.setattr(
-        "phi_scan.hl7_scanner._import_hl7_library",
+        "phi_scan.hl7_scanner._require_hl7_library",
         lambda: (_ for _ in ()).throw(MissingOptionalDependencyError("hl7 not installed")),
     )
 
@@ -330,7 +351,7 @@ def test_detect_phi_in_hl7_content_returns_findings_for_pid_segment(monkeypatch)
     pid_segment = _build_pid_segment(mrn=_FAKE_MRN_VALUE)
     message = _MockHl7Message([pid_segment])
     mock_lib = _build_mock_hl7_lib(message)
-    monkeypatch.setattr("phi_scan.hl7_scanner._import_hl7_library", lambda: mock_lib)
+    monkeypatch.setattr("phi_scan.hl7_scanner._require_hl7_library", lambda: mock_lib)
 
     findings = detect_phi_in_hl7_content(_FAKE_HL7_MESSAGE, _FAKE_FILE_PATH)
 
@@ -342,7 +363,7 @@ def test_detect_phi_in_hl7_content_skips_unknown_segment_types(monkeypatch):
     unknown_segment = _MockHl7Segment({0: "ZZZ", 1: "some-value"})
     message = _MockHl7Message([unknown_segment])
     mock_lib = _build_mock_hl7_lib(message)
-    monkeypatch.setattr("phi_scan.hl7_scanner._import_hl7_library", lambda: mock_lib)
+    monkeypatch.setattr("phi_scan.hl7_scanner._require_hl7_library", lambda: mock_lib)
 
     findings = detect_phi_in_hl7_content(_FAKE_HL7_MESSAGE, _FAKE_FILE_PATH)
 
@@ -354,7 +375,7 @@ def test_detect_phi_in_hl7_content_processes_multiple_known_segments(monkeypatch
     nk1_segment = _MockHl7Segment({0: "NK1", 2: "NextOfKinTestName"})
     message = _MockHl7Message([pid_segment, nk1_segment])
     mock_lib = _build_mock_hl7_lib(message)
-    monkeypatch.setattr("phi_scan.hl7_scanner._import_hl7_library", lambda: mock_lib)
+    monkeypatch.setattr("phi_scan.hl7_scanner._require_hl7_library", lambda: mock_lib)
 
     findings = detect_phi_in_hl7_content(_FAKE_HL7_MESSAGE, _FAKE_FILE_PATH)
 
@@ -367,4 +388,4 @@ def test_detect_phi_in_hl7_content_processes_multiple_known_segments(monkeypatch
 
 
 def test_hl7_field_base_confidence_is_within_layer_three_range():
-    assert _HL7_FIELD_BASE_CONFIDENCE >= CONFIDENCE_FHIR_MIN
+    assert _HL7_FIELD_BASE_CONFIDENCE >= CONFIDENCE_STRUCTURED_MIN

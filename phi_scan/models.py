@@ -484,3 +484,4 @@ class Hl7ScanContext:
 
     file_path: Path
     segment_index: int
+    segment_text: str

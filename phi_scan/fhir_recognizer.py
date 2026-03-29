@@ -22,7 +22,6 @@ Design constraints:
 
 from __future__ import annotations
 
-import hashlib
 import logging
 import re
 import warnings
@@ -30,17 +29,13 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from phi_scan.constants import (
-    CONFIDENCE_FHIR_MAX,
-    CONFIDENCE_FHIR_MIN,
     CONFIDENCE_HIGH_FLOOR,
-    CONFIDENCE_LOW_FLOOR,
-    CONFIDENCE_MEDIUM_FLOOR,
     HIPAA_REMEDIATION_GUIDANCE,
     DetectionLayer,
     PhiCategory,
-    SeverityLevel,
 )
 from phi_scan.exceptions import MissingOptionalDependencyError
+from phi_scan.hashing import compute_value_hash, severity_from_confidence
 from phi_scan.models import ScanFinding
 
 __all__ = ["detect_phi_in_structured_content"]
@@ -153,39 +148,6 @@ class _FhirLineMatch:
 # ---------------------------------------------------------------------------
 
 
-def _compute_value_hash(text: str) -> str:
-    """Return the SHA-256 hex digest of text.
-
-    Raw PHI values are never stored — only their hashes (HIPAA audit
-    requirement). The hash is computed over the UTF-8 encoding of the text.
-
-    Args:
-        text: The raw matched PHI value.
-
-    Returns:
-        64-character lowercase hex digest.
-    """
-    return hashlib.sha256(text.encode()).hexdigest()
-
-
-def _severity_from_confidence(confidence: float) -> SeverityLevel:
-    """Derive SeverityLevel from a confidence score.
-
-    Args:
-        confidence: Score in [CONFIDENCE_SCORE_MINIMUM, CONFIDENCE_SCORE_MAXIMUM].
-
-    Returns:
-        SeverityLevel for the given confidence band.
-    """
-    if confidence >= CONFIDENCE_HIGH_FLOOR:
-        return SeverityLevel.HIGH
-    if confidence >= CONFIDENCE_MEDIUM_FLOOR:
-        return SeverityLevel.MEDIUM
-    if confidence >= CONFIDENCE_LOW_FLOOR:
-        return SeverityLevel.LOW
-    return SeverityLevel.INFO
-
-
 def _is_null_or_empty_fhir_value(raw_value: str) -> bool:
     """Return True when a FHIR field value carries no PHI-bearing content.
 
@@ -223,8 +185,8 @@ def _build_fhir_finding(file_path: Path, line_match: _FhirLineMatch) -> ScanFind
         hipaa_category=phi_category,
         confidence=confidence,
         detection_layer=DetectionLayer.FHIR,
-        value_hash=_compute_value_hash(line_match.raw_value),
-        severity=_severity_from_confidence(confidence),
+        value_hash=compute_value_hash(line_match.raw_value),
+        severity=severity_from_confidence(confidence),
         code_context=line_match.line_text.rstrip(),
         remediation_hint=HIPAA_REMEDIATION_GUIDANCE.get(phi_category, ""),
     )
@@ -320,9 +282,3 @@ def detect_phi_in_structured_content(
             warnings.warn(_HL7_UNAVAILABLE_WARNING, UserWarning, stacklevel=2)
             return []
     return _detect_phi_in_fhir_content(file_content, file_path)
-
-
-# Silence unused-import warnings for constants only referenced in __all__ context.
-# CONFIDENCE_FHIR_MIN and CONFIDENCE_FHIR_MAX are imported to document the layer
-# range in one place and keep this module's imports self-documenting.
-_FHIR_CONFIDENCE_RANGE: tuple[float, float] = (CONFIDENCE_FHIR_MIN, CONFIDENCE_FHIR_MAX)
