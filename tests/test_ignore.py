@@ -53,7 +53,7 @@ _DEFAULT_MAX_FILE_SIZE_MB: int = 10
 _DEFAULT_CONFIDENCE_THRESHOLD: float = 0.6
 
 
-def _build_default_scan_config() -> ScanConfig:
+def _build_minimal_scan_config() -> ScanConfig:
     """Return a minimal ScanConfig suitable for integration tests."""
     return ScanConfig(
         max_file_size_mb=_DEFAULT_MAX_FILE_SIZE_MB,
@@ -181,7 +181,7 @@ def test_collect_scan_targets_excludes_nested_node_modules_at_any_depth(
     app_file = src_dir / "app.py"
     app_file.write_text(_MINIMAL_FILE_CONTENT, encoding=DEFAULT_TEXT_ENCODING)
 
-    config = _build_default_scan_config()
+    config = _build_minimal_scan_config()
 
     scan_targets = collect_scan_targets(
         root_path=tmp_path,
@@ -207,7 +207,7 @@ def test_collect_scan_targets_respects_extension_exclusion_at_any_depth(
     py_file = tmp_path / "app.py"
     py_file.write_text(_MINIMAL_FILE_CONTENT, encoding=DEFAULT_TEXT_ENCODING)
 
-    config = _build_default_scan_config()
+    config = _build_minimal_scan_config()
 
     scan_targets = collect_scan_targets(
         root_path=tmp_path,

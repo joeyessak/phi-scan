@@ -21,7 +21,7 @@ from phi_scan.constants import EXIT_CODE_CLEAN
 # Test constants — no magic values
 # ---------------------------------------------------------------------------
 
-_RUNNER: CliRunner = CliRunner()
+_TEST_FILE_ENCODING: str = "utf-8"
 
 # Config YAML template — version key required; audit.database_path redirected.
 _CONFIG_YAML_TEMPLATE: str = "version: 1\naudit:\n  database_path: {db_path}\n"
@@ -47,32 +47,43 @@ _EXPECTED_FILES_SCANNED_WITH_EXCLUDE: int = 1
 
 
 # ---------------------------------------------------------------------------
+# Fixtures
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture()
+def runner() -> CliRunner:
+    """Return a fresh CliRunner instance isolated per test."""
+    return CliRunner()
+
+
+# ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
 
-def _make_config(tmp_path: Path) -> tuple[Path, Path]:
-    """Write a versioned .phi-scanner.yml that redirects audit writes to tmp_path.
+def _write_test_config(tmp_path: Path, db_path: Path) -> Path:
+    """Write a versioned .phi-scanner.yml that redirects audit writes to db_path.
 
-    The config file is written outside the scan root so it is never picked
-    up as a scan target.
+    The config file is written to tmp_path so it sits outside the scan root
+    and is never picked up as a scan target.
 
     Args:
         tmp_path: pytest tmp_path fixture directory.
+        db_path: Path where the audit database should be written.
 
     Returns:
-        Tuple of (config_path, db_path).
+        Path to the written config file.
     """
-    db_path = tmp_path / "audit.db"
     config_path = tmp_path / ".phi-scanner.yml"
     config_path.write_text(
         _CONFIG_YAML_TEMPLATE.format(db_path=str(db_path)),
-        encoding="utf-8",
+        encoding=_TEST_FILE_ENCODING,
     )
-    return config_path, db_path
+    return config_path
 
 
-def _make_scan_root(tmp_path: Path) -> Path:
+def _create_scan_root_directory(tmp_path: Path) -> Path:
     """Create an empty subdirectory to use as the scan root.
 
     Placing scan targets in a subdirectory keeps the config file (written to
@@ -95,11 +106,12 @@ def _make_scan_root(tmp_path: Path) -> Path:
 # ---------------------------------------------------------------------------
 
 
-def test_scan_empty_directory_exits_clean(tmp_path: Path) -> None:
-    config_path, _ = _make_config(tmp_path)
-    scan_root = _make_scan_root(tmp_path)
+def test_scan_empty_directory_exits_clean(tmp_path: Path, runner: CliRunner) -> None:
+    db_path = tmp_path / "audit.db"
+    config_path = _write_test_config(tmp_path, db_path)
+    scan_root = _create_scan_root_directory(tmp_path)
 
-    result = _RUNNER.invoke(
+    result = runner.invoke(
         app,
         ["scan", str(scan_root), "--output", "json", "--config", str(config_path)],
     )
@@ -107,11 +119,12 @@ def test_scan_empty_directory_exits_clean(tmp_path: Path) -> None:
     assert result.exit_code == EXIT_CODE_CLEAN
 
 
-def test_scan_empty_directory_writes_audit_record(tmp_path: Path) -> None:
-    config_path, db_path = _make_config(tmp_path)
-    scan_root = _make_scan_root(tmp_path)
+def test_scan_empty_directory_writes_audit_record(tmp_path: Path, runner: CliRunner) -> None:
+    db_path = tmp_path / "audit.db"
+    config_path = _write_test_config(tmp_path, db_path)
+    scan_root = _create_scan_root_directory(tmp_path)
 
-    _RUNNER.invoke(
+    runner.invoke(
         app,
         ["scan", str(scan_root), "--output", "json", "--config", str(config_path)],
     )
@@ -121,17 +134,22 @@ def test_scan_empty_directory_writes_audit_record(tmp_path: Path) -> None:
     assert last_scan is not None
 
 
-def test_scan_directory_with_exclude_does_not_scan_excluded_file(tmp_path: Path) -> None:
-    config_path, _ = _make_config(tmp_path)
-    scan_root = _make_scan_root(tmp_path)
+def test_scan_directory_with_exclude_does_not_scan_excluded_file(
+    tmp_path: Path, runner: CliRunner
+) -> None:
+    db_path = tmp_path / "audit.db"
+    config_path = _write_test_config(tmp_path, db_path)
+    scan_root = _create_scan_root_directory(tmp_path)
     src_dir = scan_root / _SRC_DIR_NAME
     src_dir.mkdir()
-    (src_dir / _SOURCE_FILE_NAME).write_text(_SOURCE_FILE_CONTENT, encoding="utf-8")
+    (src_dir / _SOURCE_FILE_NAME).write_text(_SOURCE_FILE_CONTENT, encoding=_TEST_FILE_ENCODING)
     excluded_dir = scan_root / _EXCLUDED_DIR_NAME
     excluded_dir.mkdir()
-    (excluded_dir / _EXCLUDED_FILE_NAME).write_text(_EXCLUDED_FILE_CONTENT, encoding="utf-8")
+    (excluded_dir / _EXCLUDED_FILE_NAME).write_text(
+        _EXCLUDED_FILE_CONTENT, encoding=_TEST_FILE_ENCODING
+    )
 
-    result = _RUNNER.invoke(
+    result = runner.invoke(
         app,
         ["scan", str(scan_root), "--output", "json", "--config", str(config_path)],
     )
@@ -140,11 +158,12 @@ def test_scan_directory_with_exclude_does_not_scan_excluded_file(tmp_path: Path)
     assert parsed[_JSON_KEY_FILES_SCANNED] == _EXPECTED_FILES_SCANNED_WITH_EXCLUDE
 
 
-def test_scan_directory_produces_clean_result_json(tmp_path: Path) -> None:
-    config_path, _ = _make_config(tmp_path)
-    scan_root = _make_scan_root(tmp_path)
+def test_scan_directory_produces_clean_result_json(tmp_path: Path, runner: CliRunner) -> None:
+    db_path = tmp_path / "audit.db"
+    config_path = _write_test_config(tmp_path, db_path)
+    scan_root = _create_scan_root_directory(tmp_path)
 
-    result = _RUNNER.invoke(
+    result = runner.invoke(
         app,
         ["scan", str(scan_root), "--output", "json", "--config", str(config_path)],
     )
@@ -154,32 +173,33 @@ def test_scan_directory_produces_clean_result_json(tmp_path: Path) -> None:
 
 
 def test_scan_report_command_returns_no_record_when_no_scan_performed(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, runner: CliRunner
 ) -> None:
     fresh_db_path = str(tmp_path / "audit.db")
+    # Patch the name bound in cli.py's namespace — that is the binding used at
+    # call time by the report command (imported via `from phi_scan.constants import`).
     monkeypatch.setattr("phi_scan.cli.DEFAULT_DATABASE_PATH", fresh_db_path)
 
-    result = _RUNNER.invoke(app, ["report"])
+    result = runner.invoke(app, ["report"])
 
     assert _NO_SCAN_RECORD_MESSAGE_FRAGMENT in result.output
 
 
-def test_full_pipeline_scan_then_report(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    shared_db_path = str(tmp_path / "audit.db")
-    monkeypatch.setattr("phi_scan.cli.DEFAULT_DATABASE_PATH", shared_db_path)
-    config_path, _ = _make_config(tmp_path)
-    # Override db path in config to match the monkeypatched report path.
-    config_path.write_text(
-        _CONFIG_YAML_TEMPLATE.format(db_path=shared_db_path),
-        encoding="utf-8",
-    )
-    scan_root = _make_scan_root(tmp_path)
+def test_full_pipeline_scan_then_report(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, runner: CliRunner
+) -> None:
+    shared_db_path = tmp_path / "audit.db"
+    # Both scan (via config) and report (via monkeypatched constant) must point
+    # at the same database so that report can read the record scan wrote.
+    monkeypatch.setattr("phi_scan.cli.DEFAULT_DATABASE_PATH", str(shared_db_path))
+    config_path = _write_test_config(tmp_path, shared_db_path)
+    scan_root = _create_scan_root_directory(tmp_path)
 
-    scan_result = _RUNNER.invoke(
+    scan_result = runner.invoke(
         app,
         ["scan", str(scan_root), "--output", "json", "--config", str(config_path)],
     )
-    report_result = _RUNNER.invoke(app, ["report"])
+    report_result = runner.invoke(app, ["report"])
 
     assert scan_result.exit_code == EXIT_CODE_CLEAN
     assert report_result.exit_code == EXIT_CODE_CLEAN
