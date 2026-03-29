@@ -30,6 +30,7 @@ __all__ = [
     "DBSNP_RS_ID_MAX_DIGITS",
     "DBSNP_RS_ID_MIN_DIGITS",
     "DEA_NUMBER_DIGIT_COUNT",
+    "DEA_NUMBER_PREFIX_LENGTH",
     "DetectionLayer",
     "ENSEMBL_GENE_ID_DIGIT_COUNT",
     "EXIT_CODE_CLEAN",
@@ -46,6 +47,7 @@ __all__ = [
     "MAX_FILE_SIZE_MB",
     "MBI_ALLOWED_LETTERS",
     "MBI_CHARACTER_COUNT",
+    "NPI_CMS_LUHN_ISSUER_PREFIX",
     "MINIMUM_QUASI_IDENTIFIER_COUNT",
     "OutputFormat",
     "PathspecMatchStyle",
@@ -252,6 +254,7 @@ MBI_CHARACTER_COUNT: int = 11
 # DEA registration number — 2-letter prefix followed by exactly this many digits,
 # validated by a checksum over digits 1, 3, 5, 2, 4, 6.
 DEA_NUMBER_DIGIT_COUNT: int = 7
+DEA_NUMBER_PREFIX_LENGTH: int = 2  # two letter characters before the digit sequence
 
 # Vehicle Identification Number — fixed-length per ISO 3779 (WMI + VDS + VIS).
 # Position 9 is a check digit; I, O, Q are never used.
@@ -264,6 +267,12 @@ DBSNP_RS_ID_MAX_DIGITS: int = 9
 
 # Ensembl gene ID — "ENSG" prefix followed by exactly this many zero-padded digits.
 ENSEMBL_GENE_ID_DIGIT_COUNT: int = 11
+
+# NPI Luhn validation — CMS prepends this ISO 7812 issuer prefix to the 10-digit NPI
+# before computing the Luhn check. The 5-digit prefix "80840" is the Health Care
+# Provider designation assigned by CMS under the ISO 7812 financial card standard.
+NPI_CMS_LUHN_ISSUER_PREFIX: str = "80840"
+
 
 # FCC-reserved fictional NANP telephone exchange and subscriber range.
 # Numbers in this range (555-0100 through 555-0199) are never assigned to real

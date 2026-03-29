@@ -30,6 +30,7 @@ from phi_scan.constants import (
     DBSNP_RS_ID_MAX_DIGITS,
     DBSNP_RS_ID_MIN_DIGITS,
     DEA_NUMBER_DIGIT_COUNT,
+    DEA_NUMBER_PREFIX_LENGTH,
     DEFAULT_TEXT_ENCODING,
     ENSEMBL_GENE_ID_DIGIT_COUNT,
     FICTIONAL_PHONE_EXCHANGE,
@@ -38,6 +39,7 @@ from phi_scan.constants import (
     HIPAA_AGE_RESTRICTION_THRESHOLD,
     HIPAA_REMEDIATION_GUIDANCE,
     MBI_ALLOWED_LETTERS,
+    NPI_CMS_LUHN_ISSUER_PREFIX,
     SSN_EXCLUDED_AREA_NUMBERS,
     SUD_FIELD_NAME_PATTERNS,
     VIN_CHARACTER_COUNT,
@@ -70,11 +72,12 @@ _SSN_EXCLUDED_AREA_ALTERNATION: str = "|".join(
 
 # --- NPI ---
 _NPI_DIGIT_COUNT: int = 10
-_NPI_LUHN_PREFIX: str = "80840"  # CMS ISO 7812 issuer prefix for Luhn validation
+# NPI_CMS_LUHN_ISSUER_PREFIX imported from constants — "80840" must not appear as literal
 
 # --- DEA ---
-_DEA_PREFIX_LENGTH: int = 2  # 2-letter prefix before the digit sequence
-_DEA_CHECKSUM_INDEX: int = DEA_NUMBER_DIGIT_COUNT - 1  # index of the check digit
+# DEA_NUMBER_PREFIX_LENGTH imported from constants — must not duplicate the literal 2
+_LAST_DIGIT_INDEX_OFFSET: int = 1  # length minus this gives the 0-based last index
+_DEA_CHECKSUM_INDEX: int = DEA_NUMBER_DIGIT_COUNT - _LAST_DIGIT_INDEX_OFFSET
 _DEA_EVEN_DIGIT_MULTIPLIER: int = 2
 
 # --- VIN ---
@@ -118,10 +121,6 @@ _RFC5737_TESTNET_PREFIXES: tuple[str, ...] = (
     "198.51.100.",
     "203.0.113.",
 )
-_RFC1918_PREFIXES: tuple[str, ...] = ("10.", "192.168.")
-_RFC1918_172_PREFIX: str = "172."
-_RFC1918_172_SECOND_OCTET_MIN: int = 16
-_RFC1918_172_SECOND_OCTET_MAX: int = 31
 _IPV4_OCTET_SEPARATOR: str = "."
 _IPV4_OCTET_SPLIT_LIMIT: int = 4
 
@@ -197,6 +196,16 @@ _AGE_CONTEXT_KEYWORDS: tuple[str, ...] = (
     "years_old",
     "dob_age",
 )
+
+# --- Account / health-plan / certificate pattern length bounds ---
+_ACCOUNT_NUMBER_MIN_LENGTH: int = 6
+_ACCOUNT_NUMBER_MAX_LENGTH: int = 20
+_HEALTH_PLAN_NUMBER_MIN_LENGTH: int = 8
+_HEALTH_PLAN_NUMBER_MAX_LENGTH: int = 20
+_CERTIFICATE_PREFIX_MIN_LENGTH: int = 2
+_CERTIFICATE_PREFIX_MAX_LENGTH: int = 3
+_CERTIFICATE_DIGIT_MIN_LENGTH: int = 5
+_CERTIFICATE_DIGIT_MAX_LENGTH: int = 10
 
 # --- Confidence values ---
 # Highest-confidence regex patterns: structured with checksum validation.
@@ -297,7 +306,7 @@ def _validate_npi_luhn(npi_text: str) -> bool:
     Returns:
         True if the NPI check digit is valid.
     """
-    full_sequence = _NPI_LUHN_PREFIX + npi_text
+    full_sequence = NPI_CMS_LUHN_ISSUER_PREFIX + npi_text
     return _compute_luhn_total(full_sequence) % _LUHN_MODULUS == 0
 
 
@@ -314,7 +323,7 @@ def _validate_dea_checksum(dea_text: str) -> bool:
     Returns:
         True if the checksum is valid.
     """
-    digit_characters = dea_text[_DEA_PREFIX_LENGTH:]
+    digit_characters = dea_text[DEA_NUMBER_PREFIX_LENGTH:]
     digit_values = [int(character) for character in digit_characters]
     odd_position_sum = digit_values[0] + digit_values[2] + digit_values[4]
     even_position_sum = digit_values[1] + digit_values[3] + digit_values[5]
@@ -506,7 +515,7 @@ def _build_dea_pattern() -> re.Pattern[str]:
     """
     pattern_string = (
         r"\b[A-Z]{"
-        + str(_DEA_PREFIX_LENGTH)
+        + str(DEA_NUMBER_PREFIX_LENGTH)
         + r"}"
         + r"\d{"
         + str(DEA_NUMBER_DIGIT_COUNT)
@@ -673,9 +682,33 @@ _PATTERN_URL_PATIENT = re.compile(
 _PATTERN_MRN_VALUE = re.compile(
     r"\b\d{" + str(_MRN_MIN_DIGIT_COUNT) + r"," + str(_MRN_MAX_DIGIT_COUNT) + r"}\b"
 )
-_PATTERN_ACCOUNT_VALUE = re.compile(r"\b[A-Z0-9]{6,20}\b")
-_PATTERN_HEALTH_PLAN_VALUE = re.compile(r"\b[A-Z0-9]{8,20}\b", re.IGNORECASE)
-_PATTERN_CERTIFICATE_VALUE = re.compile(r"\b[A-Z]{2,3}\d{5,10}\b", re.IGNORECASE)
+_PATTERN_ACCOUNT_VALUE = re.compile(
+    r"\b[A-Z0-9]{"
+    + str(_ACCOUNT_NUMBER_MIN_LENGTH)
+    + r","
+    + str(_ACCOUNT_NUMBER_MAX_LENGTH)
+    + r"}\b"
+)
+_PATTERN_HEALTH_PLAN_VALUE = re.compile(
+    r"\b[A-Z0-9]{"
+    + str(_HEALTH_PLAN_NUMBER_MIN_LENGTH)
+    + r","
+    + str(_HEALTH_PLAN_NUMBER_MAX_LENGTH)
+    + r"}\b",
+    re.IGNORECASE,
+)
+_PATTERN_CERTIFICATE_VALUE = re.compile(
+    r"\b[A-Z]{"
+    + str(_CERTIFICATE_PREFIX_MIN_LENGTH)
+    + r","
+    + str(_CERTIFICATE_PREFIX_MAX_LENGTH)
+    + r"}\d{"
+    + str(_CERTIFICATE_DIGIT_MIN_LENGTH)
+    + r","
+    + str(_CERTIFICATE_DIGIT_MAX_LENGTH)
+    + r"}\b",
+    re.IGNORECASE,
+)
 _PATTERN_BIOMETRIC_FIELDS = re.compile(
     r"\b(?:" + "|".join(re.escape(name) for name in _BIOMETRIC_FIELD_NAMES) + r")\b",
     re.IGNORECASE,
