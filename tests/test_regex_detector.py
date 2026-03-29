@@ -14,7 +14,10 @@ from phi_scan.constants import (
     PhiCategory,
     SeverityLevel,
 )
-from phi_scan.regex_detector import detect_phi_with_regex
+from phi_scan.regex_detector import (  # type: ignore[attr-defined]
+    _severity_from_confidence,
+    detect_phi_with_regex,
+)
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -116,9 +119,7 @@ class TestDetectPhiWithRegexReturnsFindings:
         ssn_findings = [f for f in findings if f.entity_type == "SSN"]
         assert ssn_findings
         assert all(len(f.value_hash) == 64 for f in ssn_findings)
-        assert all(
-            all(ch in "0123456789abcdef" for ch in f.value_hash) for f in ssn_findings
-        )
+        assert all(all(ch in "0123456789abcdef" for ch in f.value_hash) for f in ssn_findings)
 
     def test_line_number_is_one_indexed(self) -> None:
         findings = detect_phi_with_regex(f'ssn = "{_VALID_SSN}"', _FAKE_PATH)
@@ -513,8 +514,6 @@ class TestSeverityMapping:
     def test_confidence_threshold_boundaries(
         self, confidence: float, expected_severity: SeverityLevel
     ) -> None:
-        from phi_scan.regex_detector import _severity_from_confidence  # type: ignore[attr-defined]  # noqa: PLC0415
-
         assert _severity_from_confidence(confidence) == expected_severity
 
 
@@ -540,9 +539,7 @@ class TestFdaUdiDetection:
 
 class TestStreetAddressDetection:
     def test_detects_street_address(self) -> None:
-        assert "STREET_ADDRESS" in _entity_types_for(
-            'address = "123 Main Street"'
-        )
+        assert "STREET_ADDRESS" in _entity_types_for('address = "123 Main Street"')
 
     def test_street_address_category_is_geographic(self) -> None:
         findings = _findings_for('address = "123 Main Street"')
@@ -557,9 +554,7 @@ class TestStreetAddressDetection:
 
 class TestPatientUrlDetection:
     def test_detects_patient_url(self) -> None:
-        assert "PATIENT_URL" in _entity_types_for(
-            'url = "https://ehr.example.org/patient/ABC123"'
-        )
+        assert "PATIENT_URL" in _entity_types_for('url = "https://ehr.example.org/patient/ABC123"')
 
     def test_url_category_is_url(self) -> None:
         findings = _findings_for('url = "https://ehr.example.org/patient/ABC123"')
