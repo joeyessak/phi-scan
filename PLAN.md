@@ -1042,8 +1042,8 @@ in `.hl7`, `.msg`, or containing MSH segments in test fixtures are common source
 The killer feature: don't just find PHI — replace it with synthetic data automatically.
 Generate a git-applicable patch that developers can review and apply in seconds.
 
-- [ ] **2F.1** `phi_scan/fixer.py` — synthetic data replacement engine
-- [ ] **2F.2** Synthetic generators per HIPAA category (deterministic, seeded by original hash for consistency):
+- [x] **2F.1** `phi_scan/fixer.py` — synthetic data replacement engine
+- [x] **2F.2** Synthetic generators per HIPAA category (deterministic, seeded by original hash for consistency):
   - Names → faker `fake.name()` (seeded) — e.g., "Jane Thompson"
   - SSN → synthetic range `000-00-XXXX` (reserved non-real range)
   - MRN → synthetic `MRN-000001` through `MRN-999999`
@@ -1058,13 +1058,13 @@ Generate a git-applicable patch that developers can review and apply in seconds.
   - URL → `https://example.com/resource/{N}` (RFC 2606)
   - Account/plan numbers → synthetic `ACCT-000001`, `PLAN-000001`
   - Device/vehicle IDs → synthetic `DEV-000001`, `VIN-00000000000000000`
-- [ ] **2F.3** `phi-scan fix --dry-run <path>` — show unified diff preview without modifying files
-- [ ] **2F.4** `phi-scan fix --apply <path>` — apply replacements in-place after user confirmation
-- [ ] **2F.5** `phi-scan fix --patch <path>` — write `.patch` file for `git apply`
-- [ ] **2F.6** Deterministic replacements: same PHI value always maps to same synthetic value within a scan
+- [x] **2F.3** `phi-scan fix --dry-run <path>` — show unified diff preview without modifying files
+- [x] **2F.4** `phi-scan fix --apply <path>` — apply replacements in-place after user confirmation
+- [x] **2F.5** `phi-scan fix --patch <path>` — write `.patch` file for `git apply`
+- [x] **2F.6** Deterministic replacements: same PHI value always maps to same synthetic value within a scan
   - Ensures referential integrity ("John Smith" on line 10 and line 50 both become "Jane Thompson")
-- [ ] **2F.7** Respect suppressed lines — do not replace values on lines with `# phi-scan:ignore`
-- [ ] **2F.8** Interactive mode: `phi-scan fix --interactive` — prompt per-finding: `Replace? [y/n/a(ll)/s(kip file)]`
+- [x] **2F.7** Respect suppressed lines — do not replace values on lines with `# phi-scan:ignore`
+- [x] **2F.8** Interactive mode: `phi-scan fix --interactive` — prompt per-finding: `Replace? [y/n/a(ll)/s(kip file)]`
 
 **New Dependency:** `faker` (for synthetic data generation)
 
