@@ -230,7 +230,7 @@ def test_scan_discovers_files_at_depth_four(tmp_path: Path) -> None:
     """Files nested four directory levels deep are returned by collect_scan_targets."""
     nested_dir = tmp_path.joinpath(*_NESTED_DEEP_DIR_PARTS)
     nested_dir.mkdir(parents=True)
-    nested_file = nested_dir / f"data{_NESTED_PYTHON_EXTENSION}"
+    nested_file = nested_dir / f"email_phi{_NESTED_PYTHON_EXTENSION}"
     nested_file.write_text(_NESTED_EMAIL_FILE_CONTENT, encoding="utf-8")
 
     config = ScanConfig()
@@ -499,12 +499,7 @@ def test_scan_finding_severity_matches_confidence_band(tmp_path: Path) -> None:
 
 
 def _build_benchmark_repository(root: Path) -> None:
-    """Create BENCHMARK_FILE_COUNT clean Python files spread across subdirectories.
-
-    Files are distributed across BENCHMARK_SUBDIR_COUNT subdirectories with
-    BENCHMARK_FILES_PER_DIR files each. All content is _BENCHMARK_CLEAN_FILE_CONTENT
-    so detection layers exit quickly.
-    """
+    """Populate root with BENCHMARK_FILE_COUNT clean Python files across flat subdirectories."""
     for subdir_index in range(_BENCHMARK_SUBDIR_COUNT):
         subdir = root / f"pkg_{subdir_index:02d}"
         subdir.mkdir()
@@ -523,9 +518,10 @@ def test_scan_1000_clean_files_within_time_budget(tmp_path: Path) -> None:
     assert len(scan_targets) == _BENCHMARK_FILE_COUNT
 
     start_time = time.monotonic()
-    _benchmark_scan_result = execute_scan(scan_targets, config)
+    completed_scan = execute_scan(scan_targets, config)
     elapsed_seconds = time.monotonic() - start_time
 
+    assert completed_scan.files_scanned == _BENCHMARK_FILE_COUNT
     assert elapsed_seconds < _BENCHMARK_TIME_BUDGET_SECONDS, (
         f"Benchmark exceeded budget: {elapsed_seconds:.1f}s > "
         f"{_BENCHMARK_TIME_BUDGET_SECONDS}s for {_BENCHMARK_FILE_COUNT} files"
