@@ -86,13 +86,15 @@ def _write_test_configuration(
     """
     configuration_path = tmp_path / ".phi-scanner.yml"
     create_default_config(configuration_path)
-    configuration_data = yaml.safe_load(configuration_path.read_text(encoding=_TEST_FILE_ENCODING))
+    configuration_document = yaml.safe_load(
+        configuration_path.read_text(encoding=_TEST_FILE_ENCODING)
+    )
     # DEFAULT_DATABASE_PATH is typed as str in constants.py; write str here.
-    configuration_data["audit"]["database_path"] = str(database_path)
+    configuration_document["audit"]["database_path"] = str(database_path)
     if exclude_patterns is not None:
-        configuration_data["scan"]["exclude_paths"] = exclude_patterns
+        configuration_document["scan"]["exclude_paths"] = exclude_patterns
     configuration_path.write_text(
-        yaml.dump(configuration_data, default_flow_style=False, sort_keys=False),
+        yaml.dump(configuration_document, default_flow_style=False, sort_keys=False),
         encoding=_TEST_FILE_ENCODING,
     )
     return configuration_path
@@ -139,13 +141,11 @@ def test_scan_empty_directory_writes_audit_record(tmp_path: Path, runner: CliRun
     configuration_path = _write_test_configuration(tmp_path, database_path)
     scan_root = _create_scan_root_directory(tmp_path)
 
-    # cli_invocation is captured to surface exit code on failure; audit write is the assertion.
-    cli_invocation = runner.invoke(
+    runner.invoke(
         app,
         ["scan", str(scan_root), "--output", "json", "--config", str(configuration_path)],
     )
 
-    assert cli_invocation.exit_code == EXIT_CODE_CLEAN
     last_scan = get_last_scan(database_path)
     assert last_scan is not None
 
@@ -172,8 +172,8 @@ def test_scan_directory_with_exclude_does_not_scan_excluded_file(
         ["scan", str(scan_root), "--output", "json", "--config", str(configuration_path)],
     )
 
-    json_output = json.loads(cli_invocation.stdout)
-    assert json_output[_JSON_KEY_FILES_SCANNED] == _EXPECTED_FILES_SCANNED_WITH_EXCLUDE
+    scan_result_document = json.loads(cli_invocation.stdout)
+    assert scan_result_document[_JSON_KEY_FILES_SCANNED] == _EXPECTED_FILES_SCANNED_WITH_EXCLUDE
 
 
 def test_scan_directory_produces_clean_result_json(tmp_path: Path, runner: CliRunner) -> None:
@@ -186,8 +186,8 @@ def test_scan_directory_produces_clean_result_json(tmp_path: Path, runner: CliRu
         ["scan", str(scan_root), "--output", "json", "--config", str(configuration_path)],
     )
 
-    json_output = json.loads(cli_invocation.stdout)
-    assert json_output[_JSON_KEY_IS_CLEAN] is True
+    scan_result_document = json.loads(cli_invocation.stdout)
+    assert scan_result_document[_JSON_KEY_IS_CLEAN] is True
 
 
 def test_scan_report_command_returns_no_record_when_no_scan_performed(

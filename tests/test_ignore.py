@@ -9,7 +9,9 @@ from pathlib import Path
 import pathspec
 
 from phi_scan.constants import (
+    DEFAULT_CONFIDENCE_THRESHOLD,
     DEFAULT_TEXT_ENCODING,
+    MAX_FILE_SIZE_MB,
     PathspecMatchStyle,
     SeverityLevel,
 )
@@ -45,16 +47,12 @@ _MINIMAL_FILE_CONTENT: str = "# placeholder\n"
 _COMMENT_LINE: str = "# this is a comment\n"
 _BLANK_LINE: str = "\n"
 
-# ScanConfig construction values — named to avoid magic numbers
-_DEFAULT_MAX_FILE_SIZE_MB: int = 10
-_DEFAULT_CONFIDENCE_THRESHOLD: float = 0.6
-
 
 def _build_minimal_scan_configuration() -> ScanConfig:
     """Return a minimal ScanConfig suitable for integration tests."""
     return ScanConfig(
-        max_file_size_mb=_DEFAULT_MAX_FILE_SIZE_MB,
-        confidence_threshold=_DEFAULT_CONFIDENCE_THRESHOLD,
+        max_file_size_mb=MAX_FILE_SIZE_MB,
+        confidence_threshold=DEFAULT_CONFIDENCE_THRESHOLD,
         severity_threshold=SeverityLevel.LOW,
         include_extensions=None,
         exclude_paths=[],
@@ -217,3 +215,24 @@ def test_collect_scan_targets_respects_extension_exclusion_at_any_depth(
     assert shallow_log not in scan_targets
     assert deep_log not in scan_targets
     assert py_file in scan_targets
+
+
+def test_collect_scan_targets_respects_negation_pattern_for_reinclusion(
+    tmp_path: Path,
+) -> None:
+    excluded_log = tmp_path / "debug.log"
+    excluded_log.write_text(_MINIMAL_FILE_CONTENT, encoding=DEFAULT_TEXT_ENCODING)
+
+    included_log = tmp_path / _IMPORTANT_LOG_FILENAME
+    included_log.write_text(_MINIMAL_FILE_CONTENT, encoding=DEFAULT_TEXT_ENCODING)
+
+    scan_configuration = _build_minimal_scan_configuration()
+
+    scan_targets = collect_scan_targets(
+        root_path=tmp_path,
+        excluded_patterns=[_EXTENSION_PATTERN_LOG, _NEGATION_LOG_PATTERN],
+        config=scan_configuration,
+    )
+
+    assert excluded_log not in scan_targets
+    assert included_log in scan_targets
