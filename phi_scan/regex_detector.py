@@ -85,8 +85,12 @@ _VIN_CHECK_REMAINDER_FOR_X: int = 10
 
 # --- Luhn ---
 _LUHN_MODULUS: int = 10
+_LUHN_DOUBLE_EVERY_NTH: int = 2  # double every second digit from the right
 _LUHN_DOUBLE_MAX_SINGLE_DIGIT: int = 9
 _LUHN_DOUBLE_ADJUSTMENT: int = 9
+
+# --- Decimal base (distinct from _LUHN_MODULUS — used for integer decomposition) ---
+_DECIMAL_BASE: int = 10
 
 # --- MRN ---
 _MRN_MIN_DIGIT_COUNT: int = 6
@@ -103,9 +107,10 @@ _PHONE_DIGIT_COUNT_E164: int = 11
 _PHONE_E164_COUNTRY_CODE: str = "1"
 
 # --- Age over HIPAA threshold ---
-_MIN_RESTRICTED_AGE: int = HIPAA_AGE_RESTRICTION_THRESHOLD + 1  # 91
-_MIN_RESTRICTED_AGE_TENS: int = _MIN_RESTRICTED_AGE // _LUHN_MODULUS  # 9
-_MIN_RESTRICTED_AGE_UNITS: int = _MIN_RESTRICTED_AGE % _LUHN_MODULUS  # 1
+_AGE_THRESHOLD_OFFSET: int = 1  # threshold is exclusive: flag ages strictly above it
+_MIN_RESTRICTED_AGE: int = HIPAA_AGE_RESTRICTION_THRESHOLD + _AGE_THRESHOLD_OFFSET  # 91
+_MIN_RESTRICTED_AGE_TENS: int = _MIN_RESTRICTED_AGE // _DECIMAL_BASE  # 9
+_MIN_RESTRICTED_AGE_UNITS: int = _MIN_RESTRICTED_AGE % _DECIMAL_BASE  # 1
 
 # --- IPv4 exclusion ranges ---
 _RFC5737_TESTNET_PREFIXES: tuple[str, ...] = (
@@ -170,6 +175,14 @@ _CERTIFICATE_CONTEXT_KEYWORDS: tuple[str, ...] = (
     "nursing_license",
     "pharmacy_license",
     "license_id",
+)
+_NPI_CONTEXT_KEYWORDS: tuple[str, ...] = (
+    "npi",
+    "national_provider",
+    "provider_id",
+    "prescriber_npi",
+    "rendering_provider",
+    "billing_provider",
 )
 _HICN_CONTEXT_KEYWORDS: tuple[str, ...] = (
     "hicn",
@@ -263,7 +276,7 @@ def _compute_luhn_total(digit_string: str) -> int:
     running_total = 0
     for position_index, digit_character in enumerate(reversed(digit_string)):
         digit_value = int(digit_character)
-        if position_index % 2 == 1:
+        if position_index % _LUHN_DOUBLE_EVERY_NTH == 1:
             digit_value *= 2
             if digit_value > _LUHN_DOUBLE_MAX_SINGLE_DIGIT:
                 digit_value -= _LUHN_DOUBLE_ADJUSTMENT
@@ -401,7 +414,7 @@ def _is_not_documentation_email(matched_text: str) -> bool:
     return domain_portion not in _DOCUMENTATION_EMAIL_DOMAINS
 
 
-def _is_public_ipv4(matched_text: str) -> bool:
+def _is_not_testnet_ipv4(matched_text: str) -> bool:
     """Return True if the IPv4 address is not an RFC 5737 TEST-NET address.
 
     RFC 5737 documentation ranges are never PHI and are excluded entirely.
@@ -681,6 +694,7 @@ _PATTERN_FDA_UDI = re.compile(
 )
 
 # Context patterns (same-line variable name checks)
+_CONTEXT_NPI = _build_context_pattern(_NPI_CONTEXT_KEYWORDS)
 _CONTEXT_MRN = _build_context_pattern(_MRN_CONTEXT_KEYWORDS)
 _CONTEXT_ACCOUNT = _build_context_pattern(_ACCOUNT_CONTEXT_KEYWORDS)
 _CONTEXT_HEALTH_PLAN = _build_context_pattern(_HEALTH_PLAN_CONTEXT_KEYWORDS)
@@ -715,13 +729,18 @@ _PATTERN_REGISTRY: tuple[PhiPattern, ...] = (
         base_confidence=_CONFIDENCE_VALIDATED_STRUCTURED,
         validator=_validate_dea_checksum,
     ),
-    # --- NPI (Luhn validated) ---
+    # --- NPI (Luhn validated, context-dependent) ---
+    # Any 10-digit number can match the NPI pattern; the Luhn check reduces but
+    # does not eliminate false positives. A context_pattern is required to keep
+    # no-context confidence below the reporting threshold for ambiguous matches.
     PhiPattern(
         entity_type="NPI",
         phi_category=PhiCategory.UNIQUE_ID,
         compiled_pattern=_PATTERN_NPI,
         base_confidence=_CONFIDENCE_HIGH_STRUCTURAL,
         validator=_validate_npi_luhn,
+        context_pattern=_CONTEXT_NPI,
+        no_context_confidence=_CONFIDENCE_CONTEXT_ABSENT,
     ),
     # --- VIN (ISO 3779 check digit validated) ---
     PhiPattern(
@@ -770,7 +789,7 @@ _PATTERN_REGISTRY: tuple[PhiPattern, ...] = (
         phi_category=PhiCategory.IP,
         compiled_pattern=_PATTERN_IPV4,
         base_confidence=_CONFIDENCE_STANDARD_REGEX,
-        validator=_is_public_ipv4,
+        validator=_is_not_testnet_ipv4,
     ),
     # --- IPv6 ---
     PhiPattern(
