@@ -45,9 +45,13 @@ __all__ = [
     "BYTES_PER_MEGABYTE",
     "MAX_FILE_SIZE_BYTES",
     "MAX_FILE_SIZE_MB",
+    "BIOMETRIC_FIELD_NAMES",
     "MBI_ALLOWED_LETTERS",
     "MBI_CHARACTER_COUNT",
     "NPI_CMS_LUHN_ISSUER_PREFIX",
+    "VCF_GENETIC_DATA_COLUMN_HEADER",
+    "ZIP_CODE_DIGIT_COUNT",
+    "ZIP_PLUS4_SUFFIX_DIGIT_COUNT",
     "MINIMUM_QUASI_IDENTIFIER_COUNT",
     "OutputFormat",
     "PathspecMatchStyle",
@@ -317,6 +321,31 @@ SSN_EXCLUDED_AREA_NUMBERS: frozenset[int] = frozenset({666, *range(900, 1000)})
 # The scanner flags any variable name, JSON key, or column name that matches
 # a member of this set as a potential SUD record under 42 CFR Part 2.
 # Detection logic must iterate this constant — never embed these strings inline.
+# Biometric identifiers that must never be stored in source code.
+# Any variable or field with one of these names is flagged as a HIPAA biometric
+# identifier under Safe Harbor §164.514(b)(2) category 16.
+# Use this tuple to build the biometric field name pattern — never embed inline.
+BIOMETRIC_FIELD_NAMES: tuple[str, ...] = (
+    "fingerprint",
+    "iris_scan",
+    "retinal_scan",
+    "face_template",
+    "voiceprint",
+    "palm_print",
+    "gait_signature",
+    "dna_sequence",
+    "biometric_hash",
+)
+
+# VCF (Variant Call Format) genomic data column header sentinel.
+# Presence of this header in source code indicates embedded genomic data,
+# which is a genetic identifier under GINA and GDPR Art. 9 in addition to HIPAA.
+VCF_GENETIC_DATA_COLUMN_HEADER: str = "CHROM"
+
+# ZIP code digit counts for the US Postal Service standard and extended formats.
+ZIP_CODE_DIGIT_COUNT: int = 5  # standard 5-digit ZIP code
+ZIP_PLUS4_SUFFIX_DIGIT_COUNT: int = 4  # ZIP+4 extension suffix
+
 SUD_FIELD_NAME_PATTERNS: frozenset[str] = frozenset(
     {
         "substance_use",

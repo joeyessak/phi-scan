@@ -23,6 +23,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from phi_scan.constants import (
+    BIOMETRIC_FIELD_NAMES,
     CONFIDENCE_HIGH_FLOOR,
     CONFIDENCE_LOW_FLOOR,
     CONFIDENCE_MEDIUM_FLOOR,
@@ -42,7 +43,10 @@ from phi_scan.constants import (
     NPI_CMS_LUHN_ISSUER_PREFIX,
     SSN_EXCLUDED_AREA_NUMBERS,
     SUD_FIELD_NAME_PATTERNS,
+    VCF_GENETIC_DATA_COLUMN_HEADER,
     VIN_CHARACTER_COUNT,
+    ZIP_CODE_DIGIT_COUNT,
+    ZIP_PLUS4_SUFFIX_DIGIT_COUNT,
     DetectionLayer,
     PhiCategory,
     SeverityLevel,
@@ -130,19 +134,6 @@ _DOCUMENTATION_EMAIL_DOMAINS: frozenset[str] = frozenset(
 )
 _EMAIL_DOMAIN_SEPARATOR: str = "@"
 
-# --- Biometric field names ---
-_BIOMETRIC_FIELD_NAMES: tuple[str, ...] = (
-    "fingerprint",
-    "iris_scan",
-    "retinal_scan",
-    "face_template",
-    "voiceprint",
-    "palm_print",
-    "gait_signature",
-    "dna_sequence",
-    "biometric_hash",
-)
-
 # --- Context keywords for ambiguous identifiers ---
 _MRN_CONTEXT_KEYWORDS: tuple[str, ...] = (
     "mrn",
@@ -197,6 +188,52 @@ _AGE_CONTEXT_KEYWORDS: tuple[str, ...] = (
     "dob_age",
 )
 
+# --- Confidence floor offset ---
+_CONFIDENCE_VALIDATED_FLOOR_OFFSET: float = 0.15  # subtracted from CONFIDENCE_REGEX_MAX
+
+# --- IPv4 octet max value (255) and derived character-class anchors ---
+_IPV4_OCTET_MAX_VALUE: int = 255
+# 250–255 range: tens pair = 25, max unit digit = 5
+_IPV4_OCTET_MAX_TENS_PAIR: int = _IPV4_OCTET_MAX_VALUE // _DECIMAL_BASE
+_IPV4_OCTET_MAX_UNITS_DIGIT: int = _IPV4_OCTET_MAX_VALUE % _DECIMAL_BASE
+# 200–249 range: hundreds digit = 2, max tens digit in range = 4
+_IPV4_OCTET_HIGH_RANGE_HUNDREDS: int = _IPV4_OCTET_MAX_VALUE // 100
+_IPV4_OCTET_HIGH_RANGE_MAX_TENS: int = (
+    _IPV4_OCTET_MAX_TENS_PAIR % _DECIMAL_BASE - _LAST_DIGIT_INDEX_OFFSET
+)
+
+# --- IPv6 hex group structure ---
+_IPV6_HEX_GROUP_MIN_CHARS: int = 1  # minimum hex characters per group (e.g., ":1:")
+_IPV6_HEX_GROUP_MAX_CHARS: int = 4  # maximum hex characters per group (e.g., ":ffff:")
+_IPV6_GROUP_COUNT: int = 8  # total colon-separated groups in a full IPv6 address
+
+# --- Phone ---
+_NANP_SEGMENT_DIGIT_COUNT: int = 3  # area code and exchange are each 3 digits
+_PHONE_SUBSCRIBER_LAST_DIGIT_COUNT: int = 4  # final 4-digit subscriber block
+_PHONE_INTL_MIN_DIGITS: int = 6  # minimum digits after country code (non-NANP)
+_PHONE_INTL_MAX_DIGITS: int = 14  # maximum digits after country code (non-NANP)
+
+# --- Email ---
+_EMAIL_TLD_MIN_CHARS: int = 2  # minimum TLD length (.io, .uk)
+
+# --- Date ---
+_YEAR_DIGIT_COUNT: int = 4  # 4-digit Gregorian year (YYYY)
+
+# --- Street address house number ---
+_STREET_NUMBER_MIN_DIGITS: int = 1
+_STREET_NUMBER_MAX_DIGITS: int = 5
+
+# --- FDA UDI GS1 Application Identifiers and structure ---
+_FDA_UDI_AI_GTIN: str = "01"  # GS1 AI for GTIN-14
+_FDA_UDI_AI_LOT: str = "10"  # GS1 AI for lot / batch number
+_FDA_UDI_AI_MFG_DATE: str = "11"  # GS1 AI for manufacture date (YYMMDD)
+_FDA_UDI_GTIN_DIGIT_COUNT: int = 14  # GTIN-14 is always exactly 14 digits
+_FDA_UDI_LOT_MIN_LENGTH: int = 1
+_FDA_UDI_LOT_MAX_LENGTH: int = 20
+_FDA_UDI_DATE_DIGIT_COUNT: int = 6  # YYMMDD = 6 digits
+
+# --- VCF_COLUMN_HEADER now lives in constants.py as VCF_GENETIC_DATA_COLUMN_HEADER ---
+
 # --- Account / health-plan / certificate pattern length bounds ---
 _ACCOUNT_NUMBER_MIN_LENGTH: int = 6
 _ACCOUNT_NUMBER_MAX_LENGTH: int = 20
@@ -219,7 +256,7 @@ _CONFIDENCE_CONTEXT_CONFIRMED: float = 0.88
 # Context-dependent patterns when required context is absent.
 _CONFIDENCE_CONTEXT_ABSENT: float = 0.65
 # Regex floor — validated patterns must stay at or above this.
-_CONFIDENCE_REGEX_VALIDATED_FLOOR: float = CONFIDENCE_REGEX_MAX - 0.15  # 0.85
+_CONFIDENCE_REGEX_VALIDATED_FLOOR: float = CONFIDENCE_REGEX_MAX - _CONFIDENCE_VALIDATED_FLOOR_OFFSET
 
 # --- URL patient-path segments ---
 _URL_PATIENT_PATH_SEGMENTS: tuple[str, ...] = (
@@ -230,7 +267,7 @@ _URL_PATIENT_PATH_SEGMENTS: tuple[str, ...] = (
 )
 
 # --- VCF format column header pattern ---
-_VCF_COLUMN_HEADER: str = "CHROM"
+# VCF_GENETIC_DATA_COLUMN_HEADER now lives in constants.py
 
 
 # ---------------------------------------------------------------------------
@@ -620,6 +657,195 @@ def _build_hicn_pattern() -> re.Pattern[str]:
     return re.compile(pattern_string, re.IGNORECASE)
 
 
+def _build_phone_pattern() -> re.Pattern[str]:
+    """Build the phone pattern from NANP structural constants.
+
+    Returns:
+        Compiled phone pattern covering NANP, E.164, and international formats.
+    """
+    seg = r"\d{" + str(_NANP_SEGMENT_DIGIT_COUNT) + r"}"
+    sub = r"\d{" + str(_PHONE_SUBSCRIBER_LAST_DIGIT_COUNT) + r"}"
+    domestic = str(_PHONE_DIGIT_COUNT_DOMESTIC)
+    intl_range = str(_PHONE_INTL_MIN_DIGITS) + r"," + str(_PHONE_INTL_MAX_DIGITS)
+    pattern_string = (
+        r"(?:\+1[-.\s]?)?(?:\("
+        + seg
+        + r"\)|"
+        + seg
+        + r")[-.\s]"
+        + seg
+        + r"[-.\s]"
+        + sub
+        + r"|\+1\d{"
+        + domestic
+        + r"}"
+        + r"|\+[2-9]\d{"
+        + intl_range
+        + r"}"
+    )
+    return re.compile(pattern_string)
+
+
+def _build_email_pattern() -> re.Pattern[str]:
+    """Build the email pattern with TLD minimum length from a named constant.
+
+    Returns:
+        Compiled email pattern.
+    """
+    pattern_string = (
+        r"\b[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{" + str(_EMAIL_TLD_MIN_CHARS) + r",}\b"
+    )
+    return re.compile(pattern_string)
+
+
+def _build_ipv4_pattern() -> re.Pattern[str]:
+    """Build the IPv4 octet pattern anchored on _IPV4_OCTET_MAX_VALUE (255).
+
+    Constructs the three-range octet form: 250–255 | 200–249 | 0–199.
+    All character-class boundaries are derived from _IPV4_OCTET_MAX_VALUE.
+
+    Returns:
+        Compiled IPv4 pattern.
+    """
+    tens_pair = str(_IPV4_OCTET_MAX_TENS_PAIR)
+    max_unit = str(_IPV4_OCTET_MAX_UNITS_DIGIT)
+    hundreds = str(_IPV4_OCTET_HIGH_RANGE_HUNDREDS)
+    high_tens_max = str(_IPV4_OCTET_HIGH_RANGE_MAX_TENS)
+    octet = (
+        r"(?:"
+        + tens_pair
+        + r"[0-"
+        + max_unit
+        + r"]"
+        + r"|"
+        + hundreds
+        + r"[0-"
+        + high_tens_max
+        + r"]\d"
+        + r"|[01]?\d\d?"
+        + r")"
+    )
+    pattern_string = r"\b(?:" + octet + r"\.){3}" + octet + r"\b"
+    return re.compile(pattern_string)
+
+
+def _build_ipv6_pattern() -> re.Pattern[str]:
+    """Build the IPv6 address pattern from _IPV6_GROUP_COUNT and hex group constants.
+
+    IPv6 has _IPV6_GROUP_COUNT (8) hex groups. All quantifiers in the pattern
+    are derived from this constant. The nine alternations cover full notation
+    and all compressed (::) forms defined by RFC 5952.
+
+    Returns:
+        Compiled IPv6 pattern.
+    """
+    hex_group = (
+        r"[0-9a-fA-F]{"
+        + str(_IPV6_HEX_GROUP_MIN_CHARS)
+        + r","
+        + str(_IPV6_HEX_GROUP_MAX_CHARS)
+        + r"}"
+    )
+    n = _IPV6_GROUP_COUNT  # 8 total groups; all quantifiers derive from this
+    one = _LAST_DIGIT_INDEX_OFFSET  # 1
+    full = str(n - one)  # "7" prefix groups in full notation
+    alternations = [
+        r"(?:" + hex_group + r":){" + full + r"}" + hex_group,
+        r"(?:" + hex_group + r":){1," + full + r"}:",
+        r"(?:" + hex_group + r":){1," + str(n - 2) + r"}:" + hex_group,
+        r"(?:" + hex_group + r":){1," + str(n - 3) + r"}(?::" + hex_group + r"){1,2}",
+        r"(?:" + hex_group + r":){1," + str(n - 4) + r"}(?::" + hex_group + r"){1,3}",
+        r"(?:" + hex_group + r":){1," + str(n - 5) + r"}(?::" + hex_group + r"){1,4}",
+        r"(?:" + hex_group + r":){1," + str(n - 6) + r"}(?::" + hex_group + r"){1,5}",
+        hex_group + r":(?::" + hex_group + r"){1," + str(n - 2) + r"}",
+        r"::(?:" + hex_group + r":){0," + str(n - 3) + r"}" + hex_group,
+    ]
+    return re.compile("|".join(alternations))
+
+
+def _build_zip_plus4_pattern() -> re.Pattern[str]:
+    """Build the ZIP+4 pattern from ZIP_CODE_DIGIT_COUNT and ZIP_PLUS4_SUFFIX_DIGIT_COUNT.
+
+    Returns:
+        Compiled ZIP+4 pattern.
+    """
+    pattern_string = (
+        r"\b\d{"
+        + str(ZIP_CODE_DIGIT_COUNT)
+        + r"}"
+        + r"-\d{"
+        + str(ZIP_PLUS4_SUFFIX_DIGIT_COUNT)
+        + r"}\b"
+    )
+    return re.compile(pattern_string)
+
+
+def _build_zip5_pattern() -> re.Pattern[str]:
+    """Build the 5-digit ZIP code pattern from ZIP_CODE_DIGIT_COUNT.
+
+    Returns:
+        Compiled 5-digit ZIP pattern.
+    """
+    return re.compile(r"\b\d{" + str(ZIP_CODE_DIGIT_COUNT) + r"}\b")
+
+
+def _build_street_address_pattern() -> re.Pattern[str]:
+    """Build the street address pattern from street number digit count constants.
+
+    Returns:
+        Compiled street address pattern.
+    """
+    pattern_string = (
+        r"\b\d{"
+        + str(_STREET_NUMBER_MIN_DIGITS)
+        + r","
+        + str(_STREET_NUMBER_MAX_DIGITS)
+        + r"}\s+(?:[A-Z][a-z]+\s+)+"
+        + r"(?:St(?:reet)?|Ave(?:nue)?|Blvd|Rd|Dr(?:ive)?|Ln|Ct|Circle|Way|Pkwy|Hwy)\b"
+    )
+    return re.compile(pattern_string)
+
+
+def _build_date_pattern(separator: str, year_position: str) -> re.Pattern[str]:
+    """Build an ISO or US date pattern with _YEAR_DIGIT_COUNT for the year.
+
+    Args:
+        separator: Character separating date components ("-" or "/").
+        year_position: "prefix" puts year first (ISO), "suffix" puts year last (US).
+
+    Returns:
+        Compiled date pattern.
+    """
+    year = r"\d{" + str(_YEAR_DIGIT_COUNT) + r"}"
+    month = r"(?:0[1-9]|1[0-2])"
+    day = r"(?:0[1-9]|[12]\d|3[01])"
+    if year_position == "prefix":
+        pattern_string = r"\b" + year + separator + month + separator + day + r"\b"
+    else:
+        pattern_string = r"\b" + month + separator + day + separator + year + r"\b"
+    return re.compile(pattern_string)
+
+
+def _build_fda_udi_pattern() -> re.Pattern[str]:
+    """Build the FDA UDI pattern from GS1 Application Identifier constants.
+
+    Returns:
+        Compiled FDA UDI pattern covering GTIN-14, lot number, and manufacture date.
+    """
+    gtin = r"\(" + _FDA_UDI_AI_GTIN + r"\)\d{" + str(_FDA_UDI_GTIN_DIGIT_COUNT) + r"}"
+    lot = (
+        r"\("
+        + _FDA_UDI_AI_LOT
+        + r"\)[A-Z0-9]{"
+        + str(_FDA_UDI_LOT_MIN_LENGTH)
+        + r","
+        + str(_FDA_UDI_LOT_MAX_LENGTH)
+        + r"}"
+    )
+    mfg_date = r"\(" + _FDA_UDI_AI_MFG_DATE + r"\)\d{" + str(_FDA_UDI_DATE_DIGIT_COUNT) + r"}"
+    return re.compile(r"(?:" + gtin + r"|" + lot + r"|" + mfg_date + r")", re.IGNORECASE)
+
+
 # ---------------------------------------------------------------------------
 # Pre-compiled patterns used in the registry
 # ---------------------------------------------------------------------------
@@ -634,47 +860,27 @@ _PATTERN_AGE_OVER_THRESHOLD = _build_age_over_threshold_pattern()
 _PATTERN_HICN = _build_hicn_pattern()
 
 _PATTERN_NPI = re.compile(r"\b\d{" + str(_NPI_DIGIT_COUNT) + r"}\b")
-_PATTERN_PHONE = re.compile(
-    r"(?:\+1[-.\s]?)?(?:\(\d{3}\)|\d{3})[-.\s]\d{3}[-.\s]\d{4}"
-    r"|\+1\d{10}"
-    r"|\+[2-9]\d{6,14}"
-)
+_PATTERN_PHONE = _build_phone_pattern()
 _PATTERN_FAX = _PATTERN_PHONE  # Same structural patterns as phone
-_PATTERN_EMAIL = re.compile(r"\b[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}\b")
-_PATTERN_IPV4 = re.compile(
-    r"\b(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}"
-    r"(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\b"
-)
-_PATTERN_IPV6 = re.compile(
-    r"(?:[0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}"
-    r"|(?:[0-9a-fA-F]{1,4}:){1,7}:"
-    r"|(?:[0-9a-fA-F]{1,4}:){1,6}:[0-9a-fA-F]{1,4}"
-    r"|(?:[0-9a-fA-F]{1,4}:){1,5}(?::[0-9a-fA-F]{1,4}){1,2}"
-    r"|(?:[0-9a-fA-F]{1,4}:){1,4}(?::[0-9a-fA-F]{1,4}){1,3}"
-    r"|(?:[0-9a-fA-F]{1,4}:){1,3}(?::[0-9a-fA-F]{1,4}){1,4}"
-    r"|(?:[0-9a-fA-F]{1,4}:){1,2}(?::[0-9a-fA-F]{1,4}){1,5}"
-    r"|[0-9a-fA-F]{1,4}:(?::[0-9a-fA-F]{1,4}){1,6}"
-    r"|::(?:[0-9a-fA-F]{1,4}:){0,5}[0-9a-fA-F]{1,4}"
-)
-_PATTERN_DATE_ISO = re.compile(r"\b\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])\b")
-_PATTERN_DATE_US = re.compile(r"\b(?:0[1-9]|1[0-2])/(?:0[1-9]|[12]\d|3[01])/\d{4}\b")
+_PATTERN_EMAIL = _build_email_pattern()
+_PATTERN_IPV4 = _build_ipv4_pattern()
+_PATTERN_IPV6 = _build_ipv6_pattern()
+_PATTERN_DATE_ISO = _build_date_pattern(separator="-", year_position="prefix")
+_PATTERN_DATE_US = _build_date_pattern(separator="/", year_position="suffix")
 _PATTERN_DATE_LONG = re.compile(
     r"\b(?:January|February|March|April|May|June|July|August|"
     r"September|October|November|December)"
-    r"\s+(?:0?[1-9]|[12]\d|3[01]),\s*\d{4}\b",
+    r"\s+(?:0?[1-9]|[12]\d|3[01]),\s*\d{" + str(_YEAR_DIGIT_COUNT) + r"}\b",
     re.IGNORECASE,
 )
 _PATTERN_DATE_SHORT_MON = re.compile(
     r"\b(?:0?[1-9]|[12]\d|3[01])-"
-    r"(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)-\d{4}\b",
+    r"(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)-\d{" + str(_YEAR_DIGIT_COUNT) + r"}\b",
     re.IGNORECASE,
 )
-_PATTERN_ZIP_PLUS4 = re.compile(r"\b\d{5}-\d{4}\b")
-_PATTERN_ZIP5 = re.compile(r"\b\d{5}\b")
-_PATTERN_STREET_ADDRESS = re.compile(
-    r"\b\d{1,5}\s+(?:[A-Z][a-z]+\s+)+"
-    r"(?:St(?:reet)?|Ave(?:nue)?|Blvd|Rd|Dr(?:ive)?|Ln|Ct|Circle|Way|Pkwy|Hwy)\b"
-)
+_PATTERN_ZIP_PLUS4 = _build_zip_plus4_pattern()
+_PATTERN_ZIP5 = _build_zip5_pattern()
+_PATTERN_STREET_ADDRESS = _build_street_address_pattern()
 _PATTERN_URL_PATIENT = re.compile(
     r"https?://[^\s\"']+" + r"(?:" + "|".join(_URL_PATIENT_PATH_SEGMENTS) + r")" + r"[^\s\"']*",
     re.IGNORECASE,
@@ -710,7 +916,7 @@ _PATTERN_CERTIFICATE_VALUE = re.compile(
     re.IGNORECASE,
 )
 _PATTERN_BIOMETRIC_FIELDS = re.compile(
-    r"\b(?:" + "|".join(re.escape(name) for name in _BIOMETRIC_FIELD_NAMES) + r")\b",
+    r"\b(?:" + "|".join(re.escape(name) for name in BIOMETRIC_FIELD_NAMES) + r")\b",
     re.IGNORECASE,
 )
 _PATTERN_SUD_FIELDS = re.compile(
@@ -718,13 +924,10 @@ _PATTERN_SUD_FIELDS = re.compile(
     re.IGNORECASE,
 )
 _PATTERN_VCF_DATA = re.compile(
-    r"\b" + re.escape(_VCF_COLUMN_HEADER) + r"\s+POS\s+ID\s+REF\s+ALT\b",
+    r"\b" + re.escape(VCF_GENETIC_DATA_COLUMN_HEADER) + r"\s+POS\s+ID\s+REF\s+ALT\b",
     re.IGNORECASE,
 )
-_PATTERN_FDA_UDI = re.compile(
-    r"(?:\(01\)\d{14}|\(10\)[A-Z0-9]{1,20}|\(11\)\d{6})",
-    re.IGNORECASE,
-)
+_PATTERN_FDA_UDI = _build_fda_udi_pattern()
 
 # Context patterns (same-line variable name checks)
 _CONTEXT_NPI = _build_context_pattern(_NPI_CONTEXT_KEYWORDS)
