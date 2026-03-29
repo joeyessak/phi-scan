@@ -13,9 +13,13 @@ unexport DIFF_BASE
 
 .PHONY: install lint format typecheck test ci scan clean help
 
-install: ## Install dependencies and download spaCy model (hash-verified)
+install: ## Install dependencies; download spaCy model if [nlp] extras are installed
 	uv sync
-	uv pip install --require-hashes -r constraints/spacy-model.txt
+	@if uv run python -c "import spacy" 2>/dev/null; then \
+		uv pip install --require-hashes -r constraints/spacy-model.txt; \
+	else \
+		echo "spaCy not installed — skipping model download (run 'pip install phi-scan[nlp]' to enable NLP layer)"; \
+	fi
 
 lint: ## Check code style without modifying files (CI-safe)
 	uv run ruff check . --no-fix
