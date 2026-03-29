@@ -74,6 +74,9 @@ _MANIFEST_KEY_NOTES: str = "notes"
 # Fixture note substring that marks NLP-only fixtures
 _NLP_REQUIRED_NOTE: str = "NLP layer required"
 
+# Filename of the names fixture — used by the NLP-layer test
+_NAMES_FIXTURE_FILE_NAME: str = "names.py"
+
 # ---------------------------------------------------------------------------
 # Scan configuration constants
 # ---------------------------------------------------------------------------
@@ -88,15 +91,15 @@ _LOW_CONFIDENCE_THRESHOLD: float = 0.3
 _NESTED_DIR_PARTS: tuple[str, ...] = ("depth_a", "depth_b", "depth_c")
 _NESTED_DEEP_DIR_PARTS: tuple[str, ...] = ("depth_a", "depth_b", "depth_c", "depth_d")
 
-# SSN that is not a reserved range — triggers the regex layer.
-_SSN_VALUE: str = "321-54-9870"
-_NESTED_SSN_FILE_CONTENT: str = f'patient_ssn = "{_SSN_VALUE}"\n'
+# Synthetic file content used as scanner input — values are provably fictional.
+# SSN 321-54-9870 is outside all reserved ranges and has no real-world equivalent.
+_NESTED_SSN_FILE_CONTENT: str = 'patient_ssn = "321-54-9870"\n'
 
-# Email with a non-documentation domain (hospital-records.org) — triggers the
-# regex layer. Documentation domains (example.com, example.org, test.com) are
-# excluded by the email pattern to reduce false positives on fixture comments.
-_EMAIL_VALUE: str = "patient@hospital-records.org"
-_NESTED_EMAIL_FILE_CONTENT: str = f'contact_email = "{_EMAIL_VALUE}"\n'
+# Email uses hospital-records.org (non-documentation domain) — triggers the regex
+# layer. Documentation domains (example.com, example.org, test.com) are excluded
+# by the email pattern to reduce false positives on fixture comments.
+# Value is provably fictional — no such domain is operated for patient records.
+_NESTED_EMAIL_FILE_CONTENT: str = 'contact_email = "patient@hospital-records.org"\n'
 
 _NESTED_PYTHON_EXTENSION: str = ".py"
 
@@ -499,11 +502,11 @@ def test_scan_finding_severity_matches_confidence_band(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _write_benchmark_files_to_directory(subdir: Path) -> None:
-    """Write BENCHMARK_FILES_PER_DIR clean Python files into subdir."""
+def _write_benchmark_files_to_directory(target_directory: Path) -> None:
+    """Write BENCHMARK_FILES_PER_DIR clean Python files into target_directory."""
     for file_index in range(_BENCHMARK_FILES_PER_DIR):
         file_name = f"{_BENCHMARK_FILE_NAME_PREFIX}{file_index:{_BENCHMARK_FILE_INDEX_FORMAT}}.py"
-        file_path = subdir / file_name
+        file_path = target_directory / file_name
         file_path.write_text(_BENCHMARK_CLEAN_FILE_CONTENT, encoding="utf-8")
 
 
@@ -611,7 +614,7 @@ def test_non_phi_variable_name_does_not_reach_maximum_confidence() -> None:
 @_requires_nlp
 def test_names_fixture_produces_name_category_findings_with_nlp() -> None:
     """names.py PHI fixture produces NAME-category findings when NLP is available."""
-    names_fixture_path = _PHI_FIXTURE_DIR / "names.py"
+    names_fixture_path = _PHI_FIXTURE_DIR / _NAMES_FIXTURE_FILE_NAME
     config = ScanConfig(confidence_threshold=_LOW_CONFIDENCE_THRESHOLD)
 
     findings = scan_file(names_fixture_path, config)
