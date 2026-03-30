@@ -20,6 +20,7 @@ from xml.etree import ElementTree
 from rich import box as rich_box
 from rich.console import Console
 from rich.layout import Layout
+from rich.markup import escape as escape_markup
 from rich.panel import Panel
 from rich.progress import (
     BarColumn,
@@ -748,7 +749,7 @@ def _build_findings_table(findings: tuple[ScanFinding, ...], title: str) -> Tabl
         style = _SEVERITY_STYLE[finding.severity]
         confidence_str = _build_confidence_dots(finding.confidence)
         table.add_row(
-            str(finding.file_path),
+            escape_markup(str(finding.file_path)),
             str(finding.line_number),
             finding.entity_type,
             finding.hipaa_category.value,
@@ -1617,9 +1618,12 @@ def display_file_tree(findings: tuple[ScanFinding, ...]) -> None:
         count = len(file_findings)
         finding_word = _FINDING_WORD if count == _SINGULAR_COUNT else _FINDING_WORD_PLURAL
         icon = _highest_severity_icon(file_findings)
-        branch = tree.add(f"{icon} {file_path} ({count} {finding_word})")
+        branch = tree.add(f"{icon} {escape_markup(str(file_path))} ({count} {finding_word})")
         for finding in file_findings:
             style = _SEVERITY_STYLE[finding.severity]
+            # line_number is an int; entity_type is a hardcoded pattern constant
+            # (e.g. "SSN", "EMAIL") — neither comes from scanned file content,
+            # so escape_markup is not required here.
             branch.add(
                 f"[{style}]{_LINE_LABEL} {finding.line_number}[/{style}]"
                 f"{_EM_DASH_SEPARATOR}{finding.entity_type}"
@@ -1860,19 +1864,23 @@ def display_violation_summary_panel(scan_result: ScanResult) -> None:
 def display_code_context_panel(finding: ScanFinding) -> None:
     """Render a bordered panel showing the code context and remediation hint for a finding.
 
+    finding.code_context has the matched PHI value already replaced by [REDACTED]
+    by the detection layer. escape_markup is still applied because the surrounding
+    source code may contain bracket sequences that Rich would misinterpret as tags.
+
     Args:
         finding: A single scan finding with code_context and remediation_hint populated.
     """
     severity_style = _SEVERITY_STYLE[finding.severity]
     title = _CODE_CONTEXT_PANEL_FORMAT.format(
-        file=finding.file_path,
+        file=escape_markup(str(finding.file_path)),
         line=finding.line_number,
         entity=finding.entity_type,
         severity=finding.severity.value,
     )
     content = "\n".join(
         [
-            f"{_CODE_CONTEXT_ARROW} {finding.code_context}",
+            f"{_CODE_CONTEXT_ARROW} {escape_markup(finding.code_context)}",
             "",
             f"[{severity_style}]{_CODE_CONTEXT_REMEDIATION_PREFIX}"
             f"{finding.remediation_hint}[/{severity_style}]",

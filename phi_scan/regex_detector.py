@@ -23,6 +23,7 @@ from pathlib import Path
 
 from phi_scan.constants import (
     BIOMETRIC_FIELD_NAMES,
+    CODE_CONTEXT_REDACTED_VALUE,
     CONFIDENCE_REGEX_MAX,
     DBSNP_RS_ID_MAX_DIGITS,
     DBSNP_RS_ID_MIN_DIGITS,
@@ -1208,24 +1209,33 @@ def _build_finding(
     line_number: int,
     line_text: str,
     matched_text: str,
+    match_start: int,
+    match_end: int,
     phi_pattern: PhiPattern,
     confidence: float,
 ) -> ScanFinding:
     """Construct a ScanFinding for one validated regex match.
 
     The raw matched_text is hashed immediately; only the hash is stored.
+    code_context uses span-based replacement so only the exact match position
+    is redacted — str.replace would incorrectly redact repeated occurrences.
 
     Args:
         file_path: Path of the source file.
         line_number: 1-indexed source line number.
-        line_text: Full text of the source line (stored as code_context).
-        matched_text: The exact matched string — hashed, never stored raw.
+        line_text: Full text of the source line.
+        matched_text: The exact matched string — hashed, then discarded.
+        match_start: Start offset of the match within line_text.
+        match_end: End offset of the match within line_text.
         phi_pattern: The pattern that produced the match.
         confidence: Pre-computed confidence float.
 
     Returns:
         Immutable ScanFinding.
     """
+    redacted_context = (
+        line_text[:match_start] + CODE_CONTEXT_REDACTED_VALUE + line_text[match_end:]
+    ).rstrip()
     return ScanFinding(
         file_path=file_path,
         line_number=line_number,
@@ -1235,7 +1245,7 @@ def _build_finding(
         detection_layer=DetectionLayer.REGEX,
         value_hash=compute_value_hash(matched_text),
         severity=severity_from_confidence(confidence),
-        code_context=line_text.rstrip(),
+        code_context=redacted_context,
         remediation_hint=HIPAA_REMEDIATION_GUIDANCE.get(phi_pattern.phi_category, ""),
     )
 
@@ -1267,7 +1277,16 @@ def _scan_line_for_pattern(
             continue
         confidence = _determine_confidence(line_text, phi_pattern)
         line_findings.append(
-            _build_finding(file_path, line_number, line_text, matched_text, phi_pattern, confidence)
+            _build_finding(
+                file_path,
+                line_number,
+                line_text,
+                matched_text,
+                regex_match.start(),
+                regex_match.end(),
+                phi_pattern,
+                confidence,
+            )
         )
     return line_findings
 
