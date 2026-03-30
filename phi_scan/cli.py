@@ -269,7 +269,7 @@ _AUDIT_WRITE_FAILURE_WARNING: str = "Audit log write failed — scan result not 
 _IMPLEMENTED_FORMAT_NAMES: str = ", ".join(sorted(fmt.value for fmt in IMPLEMENTED_OUTPUT_FORMATS))
 _UNSUPPORTED_OUTPUT_FORMAT_ERROR: str = (
     "Output format {fmt!r} is not yet implemented. "
-    "Currently supported: " + _IMPLEMENTED_FORMAT_NAMES + ". "
+    f"Currently supported: {_IMPLEMENTED_FORMAT_NAMES}. "
     "Additional formats are not yet available."
 )
 _INVALID_SEVERITY_THRESHOLD_ERROR: str = (

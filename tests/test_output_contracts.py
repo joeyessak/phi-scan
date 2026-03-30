@@ -105,6 +105,13 @@ _SARIF_RESULTS_FIELD: str = "results"
 # Exit codes
 _EXIT_CODE_CLI_ERROR: int = 2
 
+# CSV row count constants
+_CSV_HEADER_ROW_COUNT: int = 1
+_CSV_EXPECTED_ROW_COUNT_ONE_FINDING: int = _CSV_HEADER_ROW_COUNT + 1
+
+# SHA-256 hex digest length — 32 bytes × 2 hex chars = 64 characters
+_SHA256_HEX_DIGEST_LENGTH: int = 64
+
 # Minimal finding data — synthetic, not real PHI
 _TEST_VALUE_HASH: str = hashlib.sha256(b"contract-test-seed").hexdigest()
 _TEST_FILE_PATH: Path = Path("src/contract_test.py")
@@ -118,7 +125,17 @@ _TEST_SCAN_DURATION: float = 0.1
 # A format that is a valid OutputFormat enum member but not yet implemented
 _UNIMPLEMENTED_FORMAT_VALUE: str = OutputFormat.GITLAB_SAST.value
 
-_runner = CliRunner()
+
+# ---------------------------------------------------------------------------
+# Fixtures
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture()
+def runner() -> CliRunner:
+    """Fresh CliRunner per test — avoids shared mutable state across tests."""
+    return CliRunner()
+
 
 # ---------------------------------------------------------------------------
 # Shared builders
@@ -225,7 +242,7 @@ def test_json_output_never_contains_raw_phi_value() -> None:
 
     finding_dict = parsed["findings"][0]
     assert finding_dict["value_hash"] == _TEST_VALUE_HASH
-    assert len(finding_dict["value_hash"]) == 64  # SHA-256 hex digest length
+    assert len(finding_dict["value_hash"]) == _SHA256_HEX_DIGEST_LENGTH
 
 
 # ---------------------------------------------------------------------------
@@ -251,8 +268,7 @@ def test_csv_output_has_one_data_row_per_finding() -> None:
     csv_output = format_csv(dirty_result)
     rows = list(csv.reader(io.StringIO(csv_output)))
 
-    # rows[0] is the header; rows[1:] are data rows
-    assert len(rows) == 2  # noqa: PLR2004 — 1 header + 1 finding
+    assert len(rows) == _CSV_EXPECTED_ROW_COUNT_ONE_FINDING
 
 
 # ---------------------------------------------------------------------------
@@ -280,16 +296,24 @@ def test_sarif_output_schema_url_references_2_1_0() -> None:
     assert _SARIF_SCHEMA_URL_FRAGMENT in parsed[_SARIF_SCHEMA_FIELD]
 
 
-def test_sarif_output_has_runs_array_with_tool_and_results() -> None:
-    """format_sarif runs[0] contains both tool and results keys."""
+def test_sarif_runs_array_contains_tool_field() -> None:
+    """format_sarif runs[0] contains the tool field required by the SARIF spec."""
     clean_result = _build_clean_result()
 
     sarif_output = format_sarif(clean_result)
     parsed = json.loads(sarif_output)
 
-    first_run = parsed[_SARIF_RUNS_FIELD][0]
-    assert _SARIF_TOOL_FIELD in first_run
-    assert _SARIF_RESULTS_FIELD in first_run
+    assert _SARIF_TOOL_FIELD in parsed[_SARIF_RUNS_FIELD][0]
+
+
+def test_sarif_runs_array_contains_results_field() -> None:
+    """format_sarif runs[0] contains the results field required by the SARIF spec."""
+    clean_result = _build_clean_result()
+
+    sarif_output = format_sarif(clean_result)
+    parsed = json.loads(sarif_output)
+
+    assert _SARIF_RESULTS_FIELD in parsed[_SARIF_RUNS_FIELD][0]
 
 
 # ---------------------------------------------------------------------------
@@ -297,14 +321,18 @@ def test_sarif_output_has_runs_array_with_tool_and_results() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_exit_code_is_clean_when_scan_produces_no_findings(tmp_path: Path) -> None:
+def test_exit_code_is_clean_when_scan_produces_no_findings(
+    tmp_path: Path, runner: CliRunner
+) -> None:
     """Exit 0 (CLEAN) when the scanned directory contains no PHI."""
-    result = _runner.invoke(app, ["scan", str(tmp_path), "--quiet"])
+    result = runner.invoke(app, ["scan", str(tmp_path), "--quiet"])
 
     assert result.exit_code == EXIT_CODE_CLEAN
 
 
-def test_exit_code_is_violation_when_scan_produces_findings(tmp_path: Path) -> None:
+def test_exit_code_is_violation_when_scan_produces_findings(
+    tmp_path: Path, runner: CliRunner
+) -> None:
     """Exit 1 (VIOLATION) when the scanned directory contains PHI."""
     phi_file = tmp_path / "patient.py"
     # SYNTHETIC TEST FIXTURE — NOT A REAL SSN.
@@ -312,14 +340,16 @@ def test_exit_code_is_violation_when_scan_produces_findings(tmp_path: Path) -> N
     # 900-00-0001 cannot identify any real individual.
     phi_file.write_text('ssn = "900-00-0001"\n', encoding="utf-8")
 
-    result = _runner.invoke(app, ["scan", str(tmp_path), "--quiet"])
+    result = runner.invoke(app, ["scan", str(tmp_path), "--quiet"])
 
     assert result.exit_code == EXIT_CODE_VIOLATION
 
 
-def test_exit_code_is_error_for_unimplemented_output_format(tmp_path: Path) -> None:
+def test_exit_code_is_error_for_unimplemented_output_format(
+    tmp_path: Path, runner: CliRunner
+) -> None:
     """Exit 2 (error) when an unimplemented output format is requested via --output."""
-    result = _runner.invoke(app, ["scan", str(tmp_path), "--output", _UNIMPLEMENTED_FORMAT_VALUE])
+    result = runner.invoke(app, ["scan", str(tmp_path), "--output", _UNIMPLEMENTED_FORMAT_VALUE])
 
     assert result.exit_code == _EXIT_CODE_CLI_ERROR
 
@@ -334,11 +364,9 @@ def test_exit_code_is_error_for_unimplemented_output_format(tmp_path: Path) -> N
     sorted(IMPLEMENTED_OUTPUT_FORMATS - {OutputFormat.TABLE}, key=lambda fmt: fmt.value),
 )
 def test_each_implemented_format_exits_clean_without_error(
-    tmp_path: Path, output_format: OutputFormat
+    tmp_path: Path, output_format: OutputFormat, runner: CliRunner
 ) -> None:
     """Every format in IMPLEMENTED_OUTPUT_FORMATS (except TABLE) exits 0 on a clean scan."""
-    result = _runner.invoke(
-        app, ["scan", str(tmp_path), "--output", output_format.value, "--quiet"]
-    )
+    result = runner.invoke(app, ["scan", str(tmp_path), "--output", output_format.value, "--quiet"])
 
     assert result.exit_code == EXIT_CODE_CLEAN

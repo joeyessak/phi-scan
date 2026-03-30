@@ -275,18 +275,18 @@ def _parse_output_format(output_section: dict[str, Any]) -> OutputFormat:
     """
     format_value = output_section.get(_YAML_KEY_OUTPUT_FORMAT, OutputFormat.TABLE.value)
     try:
-        resolved = OutputFormat(format_value)
+        output_format_member = OutputFormat(format_value)
     except ValueError as error:
         valid = ", ".join(member.value for member in OutputFormat)
         raise ConfigurationError(
             _INVALID_OUTPUT_FORMAT_ERROR.format(value=format_value, valid=valid)
         ) from error
-    if resolved not in IMPLEMENTED_OUTPUT_FORMATS:
+    if output_format_member not in IMPLEMENTED_OUTPUT_FORMATS:
         supported = ", ".join(sorted(fmt.value for fmt in IMPLEMENTED_OUTPUT_FORMATS))
         raise ConfigurationError(
             _UNIMPLEMENTED_OUTPUT_FORMAT_ERROR.format(value=format_value, supported=supported)
         )
-    return resolved
+    return output_format_member
 
 
 def _parse_database_path(audit_section: dict[str, Any]) -> Path:
