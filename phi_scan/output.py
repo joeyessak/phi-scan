@@ -283,7 +283,6 @@ _SEVERITY_TO_CODEQUALITY: dict[SeverityLevel, str] = {
     SeverityLevel.INFO: _CODEQUALITY_SEVERITY_INFO,
 }
 _CODEQUALITY_DESCRIPTION_FORMAT: str = "PHI detected: {entity_type} ({category})"
-_CODEQUALITY_FINGERPRINT_INPUT_FORMAT: str = "{file_path}:{line_number}:{entity_type}"
 
 # ---------------------------------------------------------------------------
 # GitLab SAST protocol constants
@@ -300,7 +299,6 @@ _GITLAB_SAST_IDENTIFIER_TYPE: str = "phi_scan_rule"
 _GITLAB_SAST_VULNERABILITY_NAME_FORMAT: str = "PHI detected: {entity_type}"
 _GITLAB_SAST_DESCRIPTION_FORMAT: str = "{category} identifier found by the {layer} detection layer"
 _GITLAB_SAST_TIMESTAMP_FORMAT: str = "%Y-%m-%dT%H:%M:%S"
-_GITLAB_SAST_FINGERPRINT_INPUT_FORMAT: str = "{file_path}:{line_number}:{entity_type}"
 _GITLAB_SAST_SEVERITY_CRITICAL: str = "Critical"
 _GITLAB_SAST_SEVERITY_HIGH: str = "High"
 _GITLAB_SAST_SEVERITY_MEDIUM: str = "Medium"
@@ -1139,6 +1137,11 @@ def format_junit(scan_result: ScanResult) -> str:
 # Fingerprint primitive — shared by Code Quality and GitLab SAST formatters
 # ---------------------------------------------------------------------------
 
+# Both Code Quality and GitLab SAST fingerprints are keyed on the same
+# three non-PHI metadata fields. One constant prevents the two formatters
+# from drifting silently if the fingerprint scheme is ever updated.
+_FINDING_FINGERPRINT_INPUT_FORMAT: str = "{file_path}:{line_number}:{entity_type}"
+
 
 def _compute_sha256_hex(raw: str) -> str:
     """Return the lowercase SHA-256 hex digest of raw encoded as UTF-8.
@@ -1166,7 +1169,7 @@ def _build_codequality_fingerprint(finding: ScanFinding) -> str:
     Returns:
         Lowercase hex digest — stable across runs for the same file/line/type.
     """
-    fingerprint_input = _CODEQUALITY_FINGERPRINT_INPUT_FORMAT.format(
+    fingerprint_input = _FINDING_FINGERPRINT_INPUT_FORMAT.format(
         file_path=finding.file_path,
         line_number=finding.line_number,
         entity_type=finding.entity_type,
@@ -1227,7 +1230,7 @@ def _build_gitlab_sast_fingerprint(finding: ScanFinding) -> str:
     Returns:
         Lowercase hex digest used as the vulnerability id field.
     """
-    fingerprint_input = _GITLAB_SAST_FINGERPRINT_INPUT_FORMAT.format(
+    fingerprint_input = _FINDING_FINGERPRINT_INPUT_FORMAT.format(
         file_path=finding.file_path,
         line_number=finding.line_number,
         entity_type=finding.entity_type,
