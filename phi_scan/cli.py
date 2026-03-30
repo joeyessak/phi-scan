@@ -989,7 +989,8 @@ def scan(
     if is_rich_mode:
         display_file_type_summary(scan_targets)
         display_phase_scanning()
-    _emit_verbose_phase(_VERBOSE_PHASE_SCANNING.format(count=len(scan_targets)), is_verbose)
+    scanning_phase_message = _VERBOSE_PHASE_SCANNING.format(count=len(scan_targets))
+    _emit_verbose_phase(scanning_phase_message, is_verbose)
     scan_result = _execute_scan_with_progress(scan_targets, scan_config, is_rich_mode)
     if is_rich_mode:
         display_phase_audit()

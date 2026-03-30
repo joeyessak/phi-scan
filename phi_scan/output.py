@@ -11,7 +11,7 @@ import sys
 from collections.abc import Generator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Literal
@@ -298,7 +298,7 @@ _GITLAB_SAST_SCAN_STATUS: str = "success"
 _GITLAB_SAST_IDENTIFIER_TYPE: str = "phi_scan_rule"
 _GITLAB_SAST_VULNERABILITY_NAME_FORMAT: str = "PHI detected: {entity_type}"
 _GITLAB_SAST_DESCRIPTION_FORMAT: str = "{category} identifier found by the {layer} detection layer"
-_GITLAB_SAST_TIMESTAMP_FORMAT: str = "%Y-%m-%dT%H:%M:%S"
+_GITLAB_SAST_TIMESTAMP_FORMAT: str = "%Y-%m-%dT%H:%M:%SZ"
 _GITLAB_SAST_SEVERITY_CRITICAL: str = "Critical"
 _GITLAB_SAST_SEVERITY_HIGH: str = "High"
 _GITLAB_SAST_SEVERITY_MEDIUM: str = "Medium"
@@ -1064,6 +1064,14 @@ def format_sarif(scan_result: ScanResult) -> str:
 def _build_junit_testcase(finding: ScanFinding) -> ElementTree.Element:
     """Build a JUnit <testcase> element with a <failure> child for one finding.
 
+    PHI-safety: this function embeds file_path, line_number, entity_type, and
+    remediation_hint into the XML output. These are non-PHI metadata fields —
+    they tell a developer WHERE to look, not WHAT the PHI value is. The raw
+    PHI value (e.g. the actual SSN digits) is never included; only
+    finding.value_hash (a SHA-256 digest) would carry that role, and it is not
+    written here. Entity type (e.g. "us_ssn") is a detection-rule identifier.
+    CI output formats must include location metadata to be actionable.
+
     Args:
         finding: The PHI finding to represent as a test failure.
 
@@ -1160,14 +1168,20 @@ def _compute_sha256_hex(raw: str) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _build_codequality_fingerprint(finding: ScanFinding) -> str:
-    """Compute a stable SHA-256 fingerprint for a GitLab Code Quality entry.
+def _compute_finding_fingerprint(finding: ScanFinding) -> str:
+    """Compute a stable SHA-256 fingerprint for a finding's location metadata.
+
+    PHI-safety: only non-PHI metadata fields (file path, line number, entity
+    type) are included in the fingerprint input. The raw PHI value is never
+    hashed here — that is stored separately as finding.value_hash. Entity type
+    (e.g. "us_ssn") is a detection-rule identifier, not the PHI value itself.
 
     Args:
-        finding: The finding to fingerprint.
+        finding: The PHI finding to fingerprint.
 
     Returns:
-        Lowercase hex digest — stable across runs for the same file/line/type.
+        64-character lowercase hex digest, stable across runs for the same
+        file/line/entity-type combination.
     """
     fingerprint_input = _FINDING_FINGERPRINT_INPUT_FORMAT.format(
         file_path=finding.file_path,
@@ -1180,6 +1194,11 @@ def _build_codequality_fingerprint(finding: ScanFinding) -> str:
 def _build_codequality_entry(finding: ScanFinding) -> dict[str, object]:
     """Serialize one ScanFinding to a GitLab Code Quality issue dict.
 
+    PHI-safety: description, location, and fingerprint contain only non-PHI
+    metadata (entity_type rule name, file path, line number). The raw PHI
+    value is never serialized into output. See _compute_finding_fingerprint
+    for the PHI-safety rationale for entity_type.
+
     Args:
         finding: The finding to serialize.
 
@@ -1191,7 +1210,7 @@ def _build_codequality_entry(finding: ScanFinding) -> dict[str, object]:
             entity_type=finding.entity_type,
             category=finding.hipaa_category.value,
         ),
-        "fingerprint": _build_codequality_fingerprint(finding),
+        "fingerprint": _compute_finding_fingerprint(finding),
         "severity": _SEVERITY_TO_CODEQUALITY[finding.severity],
         "location": {
             "path": str(finding.file_path),
@@ -1221,25 +1240,13 @@ def format_codequality(scan_result: ScanResult) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _build_gitlab_sast_fingerprint(finding: ScanFinding) -> str:
-    """Compute a stable SHA-256 fingerprint for a GitLab SAST vulnerability ID.
-
-    Args:
-        finding: The finding to fingerprint.
-
-    Returns:
-        Lowercase hex digest used as the vulnerability id field.
-    """
-    fingerprint_input = _FINDING_FINGERPRINT_INPUT_FORMAT.format(
-        file_path=finding.file_path,
-        line_number=finding.line_number,
-        entity_type=finding.entity_type,
-    )
-    return _compute_sha256_hex(fingerprint_input)
-
-
 def _build_gitlab_sast_vulnerability(finding: ScanFinding) -> dict[str, object]:
     """Serialize one ScanFinding to a GitLab SAST vulnerability dict.
+
+    PHI-safety: name, description, location, and identifiers contain only
+    non-PHI metadata (entity_type rule name, HIPAA category, file path, line
+    number). The raw PHI value is never serialized into output. See
+    _compute_finding_fingerprint for the PHI-safety rationale for entity_type.
 
     Args:
         finding: The finding to serialize.
@@ -1248,7 +1255,7 @@ def _build_gitlab_sast_vulnerability(finding: ScanFinding) -> dict[str, object]:
         A dict conforming to the gl-sast-report.json v15.0.4 schema.
     """
     return {
-        "id": _build_gitlab_sast_fingerprint(finding),
+        "id": _compute_finding_fingerprint(finding),
         "category": _GITLAB_SAST_CATEGORY,
         "name": _GITLAB_SAST_VULNERABILITY_NAME_FORMAT.format(entity_type=finding.entity_type),
         "description": _GITLAB_SAST_DESCRIPTION_FORMAT.format(
@@ -1282,7 +1289,7 @@ def _build_gitlab_sast_scan_section(scan_result: ScanResult) -> dict[str, object
     Returns:
         A scan dict with analyzer, scanner, type, timestamps, and status.
     """
-    end_time = datetime.now()
+    end_time = datetime.now(tz=UTC)
     start_time = end_time - timedelta(seconds=scan_result.scan_duration)
     start_time_str = start_time.strftime(_GITLAB_SAST_TIMESTAMP_FORMAT)
     end_time_str = end_time.strftime(_GITLAB_SAST_TIMESTAMP_FORMAT)
