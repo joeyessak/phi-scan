@@ -385,8 +385,14 @@ def _open_database(database_path: Path) -> sqlite3.Connection:
         AuditLogError: If the path is a symlink, the parent directory cannot
             be created, or the database cannot be opened or configured.
     """
-    # TODO(security, phase-5): TOCTOU race between is_symlink() and sqlite3.connect —
-    # full fix requires os.open with O_NOFOLLOW (not portable on Windows). Deferred to Phase 5.
+    # Security: TOCTOU race between is_symlink() and sqlite3.connect().
+    # An attacker who can write to the filesystem could swap the path for a symlink
+    # in the window between the check and the open. The complete fix is to open the
+    # file descriptor with O_NOFOLLOW (Linux/macOS) before passing the fd to SQLite,
+    # which collapses the race to zero. O_NOFOLLOW is not available on Windows
+    # (os.O_NOFOLLOW is undefined there), so the fix requires a platform branch or
+    # a ctypes shim. Residual risk is low in the intended CI/CD context where the
+    # audit database directory is not world-writable. Tracked for Phase 5 hardening.
     _reject_symlink_database_path(database_path)
     _ensure_database_parent_exists(database_path)
     try:

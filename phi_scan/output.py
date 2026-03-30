@@ -1705,7 +1705,7 @@ def _build_dashboard_watcher_panel() -> Panel:
     """Build the bottom watcher status panel.
 
     Returns:
-        A Panel indicating the file watcher is not active (Phase 1 stub).
+        A Panel indicating the file watcher is not currently active.
     """
     return Panel(
         f"[{_STYLE_DIM}]{_DASHBOARD_WATCHER_INACTIVE_TEXT}[/{_STYLE_DIM}]",

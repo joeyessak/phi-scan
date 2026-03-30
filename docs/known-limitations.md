@@ -127,10 +127,10 @@ required spaCy model (`en_core_web_lg`).
 
 **Status:** Degraded capability when the `hl7` library is not installed.
 
-The HL7 v2 segment parser requires the `hl7` library (bundled with `phi-scan[fhir]`):
+The HL7 v2 segment parser requires the `hl7` library:
 
 ```
-pip install phi-scan[fhir]
+pip install phi-scan[hl7]
 ```
 
 Without this dependency, HL7 v2 files are scanned by the regex layer only.
@@ -141,14 +141,25 @@ findings or be missed entirely.
 
 ## Archive Files
 
+### ZIP, JAR, WAR (`.zip`, `.jar`, `.war`)
+
+**Status:** Scanned in-memory. Text members only.
+
+PhiScan opens these files with `zipfile.ZipFile` and scans text-based members
+whose extension appears in `ARCHIVE_SCANNABLE_EXTENSIONS` (`.conf`, `.json`,
+`.properties`, `.xml`, `.yaml`, `.yml`). Binary members (`.class`, `.pyc`,
+media files) are skipped within the archive. Archive contents are never
+extracted to disk — the local-execution-only contract is preserved.
+
+### TAR and Compressed Archives (`.tar`, `.tar.gz`, `.gz`)
+
 **Status:** Not scanned. Skipped as binary.
 
-`.zip`, `.tar`, `.tar.gz`, `.jar`, `.war` files are listed in
-`KNOWN_BINARY_EXTENSIONS` or `ARCHIVE_EXTENSIONS`. PHI committed inside
-archive files is not detected.
+`.tar`, `.tar.gz`, and `.gz` files are listed in `KNOWN_BINARY_EXTENSIONS`.
+PHI committed inside these archives is not detected.
 
-**Rationale:** Archives typically contain build artefacts or dependency
-bundles. Expanding and scanning archive contents is out of scope for Phase 2.
+**Rationale:** TAR inspection requires the `tarfile` module and a separate
+streaming decompression path. This is deferred to a post-Phase 2 enhancement.
 
 ---
 
