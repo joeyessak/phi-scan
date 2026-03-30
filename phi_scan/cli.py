@@ -140,9 +140,7 @@ _SCAN_SEVERITY_HELP: str = "Minimum severity threshold: info, low, medium, high.
 _SCAN_LOG_LEVEL_HELP: str = "Logging verbosity: debug, info, warning, error."
 _SCAN_LOG_FILE_HELP: str = "Write structured logs to this file in addition to stderr."
 _SCAN_QUIET_HELP: str = "Suppress all terminal output. Exit code still reflects findings."
-_SCAN_NO_CACHE_HELP: str = (
-    "Bypass the content-hash scan cache. No-op in Phase 1; active from Phase 2."
-)
+_SCAN_NO_CACHE_HELP: str = "Bypass the content-hash scan cache. Forces a full re-scan of all files."
 
 # ---------------------------------------------------------------------------
 # Watch command
@@ -234,7 +232,7 @@ _CONFIG_ALREADY_EXISTS_MESSAGE: str = "Config file already exists at {path} — 
 # ---------------------------------------------------------------------------
 
 _INIT_STUB_MESSAGE: str = (
-    "phi-scan init: full guided setup wizard is coming in Phase 1C. "
+    "phi-scan init: full guided setup wizard is coming in Phase 3. "
     "Run `phi-scan config init` to generate a config file now."
 )
 _SETUP_STUB_MESSAGE: str = (
@@ -268,7 +266,9 @@ _CONFIG_LOAD_FAILURE_WARNING: str = (
 )
 _AUDIT_WRITE_FAILURE_WARNING: str = "Audit log write failed — scan result not persisted: {error}"
 _UNSUPPORTED_OUTPUT_FORMAT_ERROR: str = (
-    "Output format {fmt!r} is not supported in Phase 1. Supported: table, json, csv, sarif."
+    "Output format {fmt!r} is not yet implemented. "
+    "Currently supported: table, json, csv, sarif. "
+    "Additional formats (pdf, html, junit, codequality, gitlab-sast) are coming in Phase 3."
 )
 _INVALID_SEVERITY_THRESHOLD_ERROR: str = (
     "Invalid severity threshold {value!r}. Accepted values: info, low, medium, high."
@@ -361,8 +361,8 @@ class _WatchState:
 class _FileChangeMonitor(FileSystemEventHandler):
     """Watchdog event handler — appends a watch event to the rolling log on each file change.
 
-    Phase 1: scan_file returns no findings so result is always clean. The Phase 1
-    note is displayed in the watch header; per-event result shows the actual outcome.
+    Each file-change event triggers a full scan of the changed file. Findings are
+    displayed inline; the watch header shows cumulative session state.
     """
 
     def __init__(self, watch_state: _WatchState) -> None:
@@ -422,8 +422,8 @@ def _configure_logging(log_level: str, log_file: Path | None, is_quiet: bool) ->
 def _load_scan_config(config_path: Path | None, severity_threshold: str | None) -> ScanConfig:
     """Load ScanConfig from file, applying a CLI severity override if provided.
 
-    A missing or unreadable config file is not an error in Phase 1 — defaults
-    are used so `phi-scan scan .` works out of the box without any config file.
+    A missing or unreadable config file is not an error — defaults are used so
+    `phi-scan scan .` works out of the box without any config file.
 
     Args:
         config_path: Path to .phi-scanner.yml, or None to use the default name.
@@ -580,11 +580,11 @@ def _emit_scan_output(scan_result: ScanResult, output_format: str, is_rich_mode:
 
     Args:
         scan_result: The completed scan result.
-        output_format: One of table, json, csv, sarif (others unsupported in Phase 1).
+        output_format: One of table, json, csv, sarif. Additional formats ship in Phase 3.
         is_rich_mode: True when table format and not quiet — activates the Rich UI path.
 
     Raises:
-        typer.Exit: If output_format is not supported in Phase 1.
+        typer.Exit: If output_format is not yet implemented.
     """
     if output_format == OutputFormat.TABLE.value:
         if is_rich_mode:
@@ -782,8 +782,7 @@ def _append_watch_event(
 def _build_watch_result(findings: list[ScanFinding]) -> _WatchScanOutcome:
     """Return a structured scan outcome for a per-file watch event.
 
-    Phase 1: scan_file always returns an empty list, so this always returns
-    the clean outcome. Phase 2+ will surface real finding counts.
+    Maps the finding list to a display-ready outcome and clean/not-clean flag.
 
     Args:
         findings: Findings returned by scan_file for the changed file.
