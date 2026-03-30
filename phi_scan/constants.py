@@ -34,6 +34,7 @@ __all__ = [
     "DetectionLayer",
     "ENSEMBL_GENE_ID_DIGIT_COUNT",
     "EXIT_CODE_CLEAN",
+    "EXIT_CODE_ERROR",
     "EXIT_CODE_VIOLATION",
     "FICTIONAL_PHONE_EXCHANGE",
     "FICTIONAL_PHONE_SUBSCRIBER_DISPLAY_PREFIX",
@@ -56,6 +57,7 @@ __all__ = [
     "ZIP_PLUS4_SUFFIX_DIGIT_COUNT",
     "COMBINATION_REPRESENTATIVE_COUNT",
     "MINIMUM_QUASI_IDENTIFIER_COUNT",
+    "IMPLEMENTED_OUTPUT_FORMATS",
     "OutputFormat",
     "SWEENEY_REIDENTIFICATION_PERCENTAGE",
     "PHI_SUGGESTIVE_VARIABLE_PATTERNS",
@@ -239,6 +241,8 @@ AUDIT_RETENTION_DAYS: int = (
 
 EXIT_CODE_CLEAN: int = 0
 EXIT_CODE_VIOLATION: int = 1
+# Exit 2 signals a CLI or configuration error (bad argument, unsupported format).
+EXIT_CODE_ERROR: int = 2
 
 # ---------------------------------------------------------------------------
 # Detection parameters
@@ -479,6 +483,20 @@ class OutputFormat(StrEnum):
             if member.value == candidate_string.lower():
                 return member
         return None
+
+
+# Output formats with a complete runtime serializer. This is the single source
+# of truth for which formats are accepted by CLI validation, config validation,
+# and explain-reports documentation. When Phase 3 adds a new formatter, add its
+# OutputFormat member here — one change enables the format everywhere.
+IMPLEMENTED_OUTPUT_FORMATS: frozenset[OutputFormat] = frozenset(
+    {
+        OutputFormat.TABLE,
+        OutputFormat.JSON,
+        OutputFormat.CSV,
+        OutputFormat.SARIF,
+    }
+)
 
 
 class SeverityLevel(StrEnum):

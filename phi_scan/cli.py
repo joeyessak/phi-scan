@@ -31,7 +31,9 @@ from phi_scan.constants import (
     DEFAULT_IGNORE_FILENAME,
     DEFAULT_TEXT_ENCODING,
     EXIT_CODE_CLEAN,
+    EXIT_CODE_ERROR,
     EXIT_CODE_VIOLATION,
+    IMPLEMENTED_OUTPUT_FORMATS,
     OutputFormat,
     SeverityLevel,
 )
@@ -265,10 +267,11 @@ _CONFIG_LOAD_FAILURE_WARNING: str = (
     "Config file {path!r} exists but could not be loaded — using defaults: {error}"
 )
 _AUDIT_WRITE_FAILURE_WARNING: str = "Audit log write failed — scan result not persisted: {error}"
+_IMPLEMENTED_FORMAT_NAMES: str = ", ".join(sorted(fmt.value for fmt in IMPLEMENTED_OUTPUT_FORMATS))
 _UNSUPPORTED_OUTPUT_FORMAT_ERROR: str = (
     "Output format {fmt!r} is not yet implemented. "
-    "Currently supported: table, json, csv, sarif. "
-    "Additional formats (pdf, html, junit, codequality, gitlab-sast) are coming in Phase 3."
+    f"Currently supported: {_IMPLEMENTED_FORMAT_NAMES}. "
+    "Additional formats are not yet available."
 )
 _INVALID_SEVERITY_THRESHOLD_ERROR: str = (
     "Invalid severity threshold {value!r}. Accepted values: info, low, medium, high."
@@ -294,17 +297,16 @@ _LOG_LEVEL_MAP: dict[str, int] = {
 # Output format serializer dispatch table
 # ---------------------------------------------------------------------------
 
+# Must stay in sync with IMPLEMENTED_OUTPUT_FORMATS - {OutputFormat.TABLE}.
+# TABLE is handled before this dict is consulted (_emit_scan_output checks it
+# first as a special case). Using .get() on this dict is the runtime gate —
+# a missing key means the format is not yet implemented.
 _FORMAT_SERIALIZERS: dict[str, Callable[[ScanResult], str]] = {
     OutputFormat.JSON.value: format_json,
     OutputFormat.CSV.value: format_csv,
     OutputFormat.SARIF.value: format_sarif,
 }
 
-# ---------------------------------------------------------------------------
-# Internal error exit code (distinct from VIOLATION — means CLI/config error)
-# ---------------------------------------------------------------------------
-
-_EXIT_CODE_ERROR: int = 2
 _RGLOB_ALL_FILES_PATTERN: str = "*"
 
 # ---------------------------------------------------------------------------
@@ -452,7 +454,7 @@ def _load_scan_config(config_path: Path | None, severity_threshold: str | None) 
         parsed_severity = SeverityLevel(severity_threshold.lower())
     except ValueError:
         typer.echo(_INVALID_SEVERITY_THRESHOLD_ERROR.format(value=severity_threshold), err=True)
-        raise typer.Exit(code=_EXIT_CODE_ERROR)
+        raise typer.Exit(code=EXIT_CODE_ERROR)
     return dataclasses.replace(scan_config, severity_threshold=parsed_severity)
 
 
@@ -593,7 +595,7 @@ def _emit_scan_output(scan_result: ScanResult, output_format: str, is_rich_mode:
     serializer = _FORMAT_SERIALIZERS.get(output_format)
     if serializer is None:
         typer.echo(_UNSUPPORTED_OUTPUT_FORMAT_ERROR.format(fmt=output_format), err=True)
-        raise typer.Exit(code=_EXIT_CODE_ERROR)
+        raise typer.Exit(code=EXIT_CODE_ERROR)
     typer.echo(serializer(scan_result))
 
 
@@ -681,7 +683,7 @@ def _reject_hook_path_with_symlinked_component(hook_path: Path) -> None:
                 _HOOK_SYMLINKED_COMPONENT_ERROR.format(component=str(ancestor)),
                 err=True,
             )
-            raise typer.Exit(code=_EXIT_CODE_ERROR)
+            raise typer.Exit(code=EXIT_CODE_ERROR)
 
 
 def _reject_missing_git_directory() -> None:
@@ -700,7 +702,7 @@ def _reject_missing_git_directory() -> None:
     """
     if not _GIT_DIR_PATH.is_dir():
         typer.echo(_GIT_DIR_NOT_FOUND_MESSAGE, err=True)
-        raise typer.Exit(code=_EXIT_CODE_ERROR)
+        raise typer.Exit(code=EXIT_CODE_ERROR)
 
 
 # ---------------------------------------------------------------------------
@@ -1165,7 +1167,7 @@ def _run_interactive_fix(file_path: Path) -> None:
         replacements = collect_file_replacements(file_path)
     except MissingOptionalDependencyError:
         typer.echo(_FIX_FAKER_MISSING_MESSAGE, err=True)
-        raise typer.Exit(code=_EXIT_CODE_ERROR) from None
+        raise typer.Exit(code=EXIT_CODE_ERROR) from None
     if not replacements:
         console.print(_FIX_NO_FINDINGS_MESSAGE.format(path=file_path))
         return
@@ -1207,10 +1209,10 @@ def fix_command(
     mode_count = sum(selected_modes)
     if mode_count == 0:
         typer.echo(_FIX_NO_MODE_ERROR, err=True)
-        raise typer.Exit(code=_EXIT_CODE_ERROR)
+        raise typer.Exit(code=EXIT_CODE_ERROR)
     if mode_count > 1:
         typer.echo(_FIX_MULTI_MODE_ERROR, err=True)
-        raise typer.Exit(code=_EXIT_CODE_ERROR)
+        raise typer.Exit(code=EXIT_CODE_ERROR)
     target_files = _collect_target_files(path)
     if interactive:
         for target_file in target_files:
@@ -1227,7 +1229,7 @@ def fix_command(
             fix_result = fix_file(target_file, fix_mode)
         except MissingOptionalDependencyError:
             typer.echo(_FIX_FAKER_MISSING_MESSAGE, err=True)
-            raise typer.Exit(code=_EXIT_CODE_ERROR) from None
+            raise typer.Exit(code=EXIT_CODE_ERROR) from None
         _print_fix_result(fix_result, fix_mode)
 
 
