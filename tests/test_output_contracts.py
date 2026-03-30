@@ -19,6 +19,7 @@ import csv
 import hashlib
 import io
 import json
+from collections.abc import Callable
 from pathlib import Path
 from types import MappingProxyType
 
@@ -38,7 +39,14 @@ from phi_scan.constants import (
     SeverityLevel,
 )
 from phi_scan.models import ScanFinding, ScanResult
-from phi_scan.output import format_csv, format_json, format_sarif
+from phi_scan.output import (
+    format_codequality,
+    format_csv,
+    format_gitlab_sast,
+    format_json,
+    format_junit,
+    format_sarif,
+)
 
 # ---------------------------------------------------------------------------
 # Test constants — no magic values
@@ -47,7 +55,7 @@ from phi_scan.output import format_csv, format_json, format_sarif
 # Expected count of formats in IMPLEMENTED_OUTPUT_FORMATS.
 # Paired with individual membership tests below so that both adding and
 # removing a format without updating the tests is caught.
-_IMPLEMENTED_FORMAT_COUNT: int = 4
+_IMPLEMENTED_FORMAT_COUNT: int = 7
 
 # JSON schema: exact top-level keys emitted by format_json
 _JSON_TOP_LEVEL_KEYS: frozenset[str] = frozenset(
@@ -117,12 +125,28 @@ _TEST_FILES_WITH_FINDINGS_DIRTY: int = 1
 _TEST_SCAN_DURATION: float = 0.1
 
 # A format that is a valid OutputFormat enum member but not yet implemented
-_UNIMPLEMENTED_FORMAT_VALUE: str = OutputFormat.GITLAB_SAST.value
+_UNIMPLEMENTED_FORMAT_VALUE: str = OutputFormat.PDF.value
 
 # SYNTHETIC TEST FIXTURE — NOT A REAL SSN.
 # Area 900 is in SSN_EXCLUDED_AREA_NUMBERS — never assigned by the SSA.
 # 900-00-0001 cannot identify any real individual.
 _PHI_VIOLATION_FIXTURE_CONTENT: str = 'ssn = "900-00-0001"\n'
+
+# Sentinel value embedded in code_context to verify that no CI output format
+# serializes the surrounding-source-lines field. The value is deliberately
+# non-PHI and structured to be unmistakable if it ever appears in output.
+_CODE_CONTEXT_SENTINEL: str = "SENTINEL__CODE_CTX__MUST_NOT_APPEAR_IN_CI_OUTPUT"
+
+# All CI formatters share the signature (ScanResult) -> str. Parametrized with
+# a human-readable name so pytest failure output identifies the failing format.
+_CI_FORMATTERS: list[tuple[str, Callable[[ScanResult], str]]] = [
+    ("json", format_json),
+    ("csv", format_csv),
+    ("sarif", format_sarif),
+    ("junit", format_junit),
+    ("codequality", format_codequality),
+    ("gitlab_sast", format_gitlab_sast),
+]
 
 
 # ---------------------------------------------------------------------------
@@ -185,6 +209,38 @@ def _build_dirty_result() -> ScanResult:
     )
 
 
+def _build_dirty_result_with_code_context_sentinel() -> ScanResult:
+    """Build a dirty ScanResult whose finding carries the code_context sentinel value.
+
+    Used to assert that no CI output formatter serializes the surrounding-source-lines
+    field — only location metadata (file, line, entity type) should appear in output.
+    """
+    finding = ScanFinding(
+        file_path=_TEST_FILE_PATH,
+        line_number=_TEST_LINE_NUMBER,
+        entity_type=_TEST_ENTITY_TYPE,
+        hipaa_category=PhiCategory.SSN,
+        confidence=0.95,
+        detection_layer=DetectionLayer.REGEX,
+        value_hash=_TEST_VALUE_HASH,
+        severity=SeverityLevel.HIGH,
+        code_context=_CODE_CONTEXT_SENTINEL,
+        remediation_hint="",
+    )
+    return ScanResult(
+        findings=(finding,),
+        files_scanned=_TEST_FILES_SCANNED,
+        files_with_findings=_TEST_FILES_WITH_FINDINGS_DIRTY,
+        scan_duration=_TEST_SCAN_DURATION,
+        is_clean=False,
+        risk_level=RiskLevel.CRITICAL,
+        severity_counts=MappingProxyType(
+            {**{level: 0 for level in SeverityLevel}, SeverityLevel.HIGH: 1}
+        ),
+        category_counts=MappingProxyType({**{cat: 0 for cat in PhiCategory}, PhiCategory.SSN: 1}),
+    )
+
+
 # ---------------------------------------------------------------------------
 # Registry contract
 # ---------------------------------------------------------------------------
@@ -210,6 +266,21 @@ def test_implemented_output_formats_contains_sarif() -> None:
     assert OutputFormat.SARIF in IMPLEMENTED_OUTPUT_FORMATS
 
 
+def test_implemented_output_formats_contains_junit() -> None:
+    """JUnit must be implemented — it is the CI test-summary format for CircleCI/Jenkins."""
+    assert OutputFormat.JUNIT in IMPLEMENTED_OUTPUT_FORMATS
+
+
+def test_implemented_output_formats_contains_codequality() -> None:
+    """Code Quality must be implemented — it is the GitLab MR annotation format."""
+    assert OutputFormat.CODEQUALITY in IMPLEMENTED_OUTPUT_FORMATS
+
+
+def test_implemented_output_formats_contains_gitlab_sast() -> None:
+    """GitLab SAST must be implemented — it is the GitLab Security Dashboard format."""
+    assert OutputFormat.GITLAB_SAST in IMPLEMENTED_OUTPUT_FORMATS
+
+
 def test_implemented_output_formats_has_expected_member_count() -> None:
     """IMPLEMENTED_OUTPUT_FORMATS contains exactly _IMPLEMENTED_FORMAT_COUNT members.
 
@@ -220,15 +291,12 @@ def test_implemented_output_formats_has_expected_member_count() -> None:
     assert len(IMPLEMENTED_OUTPUT_FORMATS) == _IMPLEMENTED_FORMAT_COUNT
 
 
-def test_implemented_output_formats_does_not_include_phase_3_formats() -> None:
-    """Phase 3 formats are not in IMPLEMENTED_OUTPUT_FORMATS until their formatters ship."""
-    phase_3_formats = set(OutputFormat) - IMPLEMENTED_OUTPUT_FORMATS
+def test_implemented_output_formats_does_not_include_future_formats() -> None:
+    """PDF and HTML are not in IMPLEMENTED_OUTPUT_FORMATS until their formatters ship."""
+    unimplemented_formats = set(OutputFormat) - IMPLEMENTED_OUTPUT_FORMATS
 
-    assert OutputFormat.PDF in phase_3_formats
-    assert OutputFormat.HTML in phase_3_formats
-    assert OutputFormat.JUNIT in phase_3_formats
-    assert OutputFormat.CODEQUALITY in phase_3_formats
-    assert OutputFormat.GITLAB_SAST in phase_3_formats
+    assert OutputFormat.PDF in unimplemented_formats
+    assert OutputFormat.HTML in unimplemented_formats
 
 
 # ---------------------------------------------------------------------------
@@ -391,3 +459,33 @@ def test_each_implemented_format_exits_clean_without_error(
     result = runner.invoke(app, ["scan", str(tmp_path), "--output", output_format.value, "--quiet"])
 
     assert result.exit_code == EXIT_CODE_CLEAN
+
+
+# ---------------------------------------------------------------------------
+# PHI-safety contract — code_context must not appear in CI output formats
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("format_name,serializer", _CI_FORMATTERS)
+def test_ci_format_does_not_serialize_code_context(
+    format_name: str,
+    serializer: Callable[[ScanResult], str],
+) -> None:
+    """No CI output format serializes code_context (surrounding source lines).
+
+    code_context holds raw source lines adjacent to the detection — those lines
+    may contain PHI values beyond the detected entity. CI consumers (dashboards,
+    SAST tools, JUnit panels) need only location metadata to act on a finding;
+    they must never receive the source context itself.
+
+    If this test fails for a new format, the formatter must strip code_context
+    before serializing, or document a deliberate policy exception here.
+    """
+    dirty_result = _build_dirty_result_with_code_context_sentinel()
+
+    serialized = serializer(dirty_result)
+
+    assert _CODE_CONTEXT_SENTINEL not in serialized, (
+        f"format '{format_name}' serialized code_context sentinel value — "
+        "surrounding source lines must not appear in CI output"
+    )
