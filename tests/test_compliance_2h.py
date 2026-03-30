@@ -29,6 +29,10 @@ from phi_scan.help_text import EXPLAIN_HIPAA_TEXT
 # ---------------------------------------------------------------------------
 
 _DOCS_ROOT: Path = Path(__file__).parent.parent / "docs"
+
+# Attribution path passed to detect_phi_in_text_content — metadata only,
+# no filesystem resolution is performed by the detector.
+_FIXTURE_SOURCE_PATH: Path = Path("module.py")
 _DE_IDENTIFICATION_DOC_PATH: Path = _DOCS_ROOT / "de-identification.md"
 _KNOWN_LIMITATIONS_DOC_PATH: Path = _DOCS_ROOT / "known-limitations.md"
 
@@ -172,9 +176,7 @@ def test_sud_field_name_produces_finding(field_name: str) -> None:
     """Each SUD field name in SUD_FIELD_NAME_PATTERNS produces at least one finding."""
     source_line = _SUD_ASSIGNMENT_TEMPLATE.format(field_name=field_name)
 
-    # Relative path is intentional — detect_phi_in_text_content uses file_path
-    # for attribution metadata only; no filesystem resolution is performed.
-    findings = detect_phi_in_text_content(source_line, Path("module.py"))
+    findings = detect_phi_in_text_content(source_line, _FIXTURE_SOURCE_PATH)
 
     assert len(findings) >= 1, _NO_SUD_FINDING_MESSAGE.format(field_name=field_name)
 
