@@ -12,7 +12,7 @@ import xml.etree.ElementTree as ET
 from collections.abc import Generator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from types import MappingProxyType
 from typing import Any, Literal
@@ -1260,7 +1260,8 @@ def _build_gitlab_sast_scan_section(scan_result: ScanResult) -> dict[str, object
         A scan dict with analyzer, scanner, type, timestamps, and status.
     """
     end_time = datetime.now()
-    start_time_str = end_time.strftime(_GITLAB_SAST_TIMESTAMP_FORMAT)
+    start_time = end_time - timedelta(seconds=scan_result.scan_duration)
+    start_time_str = start_time.strftime(_GITLAB_SAST_TIMESTAMP_FORMAT)
     end_time_str = end_time.strftime(_GITLAB_SAST_TIMESTAMP_FORMAT)
     scanner_block = {
         "id": _GITLAB_SAST_SCANNER_ID,
@@ -1292,7 +1293,9 @@ def format_gitlab_sast(scan_result: ScanResult) -> str:
     """
     sast_doc: dict[str, object] = {
         "version": _GITLAB_SAST_VERSION,
-        "vulnerabilities": [_build_gitlab_sast_vulnerability(f) for f in scan_result.findings],
+        "vulnerabilities": [
+            _build_gitlab_sast_vulnerability(finding) for finding in scan_result.findings
+        ],
         "scan": _build_gitlab_sast_scan_section(scan_result),
     }
     return json.dumps(sast_doc, indent=_JSON_INDENT)

@@ -969,9 +969,8 @@ def scan(
     results table) is suppressed for serialised formats (json/csv/sarif) to keep
     stdout clean for pipe and file consumption.
     """
-    if is_verbose:
-        log_level = _LOG_LEVEL_DEBUG
-    _configure_logging(log_level, log_file, is_quiet)
+    effective_log_level = _LOG_LEVEL_DEBUG if is_verbose else log_level
+    _configure_logging(effective_log_level, log_file, is_quiet)
     is_rich_mode = not is_quiet and output_format == OutputFormat.TABLE.value
     with display_status_spinner(_SPINNER_CONFIG_LOAD_MESSAGE, is_active=is_rich_mode):
         scan_config = _load_scan_config(config_path, severity_threshold)
