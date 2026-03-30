@@ -45,8 +45,8 @@ _MINIMUM_PRE_COMMIT_VERSION_KEY: str = "minimum_pre_commit_version"
 
 
 @pytest.fixture(scope="module")
-def load_hooks_list() -> list[dict[str, object]]:
-    """Load and return the parsed list of hook definitions."""
+def hooks_list() -> list[dict[str, object]]:
+    """Parsed list of hook definitions from .pre-commit-hooks.yaml."""
     raw_text = _HOOKS_FILE.read_text(encoding="utf-8")
     parsed = yaml.safe_load(raw_text)
     assert isinstance(parsed, list), ".pre-commit-hooks.yaml must be a YAML list"
@@ -54,17 +54,17 @@ def load_hooks_list() -> list[dict[str, object]]:
 
 
 @pytest.fixture(scope="module")
-def find_phi_scan_hook(load_hooks_list: list[dict[str, object]]) -> dict[str, object]:
-    """Return the hook definition with id == 'phi-scan'."""
-    matching = [hook for hook in load_hooks_list if hook.get("id") == _EXPECTED_HOOK_ID]
-    assert matching, f"No hook with id={_EXPECTED_HOOK_ID!r} found in {_HOOKS_FILE}"
-    return matching[0]
+def phi_scan_hook(hooks_list: list[dict[str, object]]) -> dict[str, object]:
+    """The hook definition with id == 'phi-scan'."""
+    phi_scan_hooks = [hook for hook in hooks_list if hook.get("id") == _EXPECTED_HOOK_ID]
+    assert phi_scan_hooks, f"No hook with id={_EXPECTED_HOOK_ID!r} found in {_HOOKS_FILE}"
+    return phi_scan_hooks[0]
 
 
 @pytest.fixture(scope="module")
-def extract_hook_stages(find_phi_scan_hook: dict[str, object]) -> frozenset[str]:
-    """Return the stages set from the phi-scan hook definition."""
-    return frozenset(find_phi_scan_hook.get("stages", []))  # type: ignore[arg-type]
+def hook_stages(phi_scan_hook: dict[str, object]) -> frozenset[str]:
+    """The stages set from the phi-scan hook definition."""
+    return frozenset(phi_scan_hook.get("stages", []))  # type: ignore[arg-type]
 
 
 # ---------------------------------------------------------------------------
@@ -78,21 +78,21 @@ class TestPreCommitHooksFileStructure:
     def test_hooks_file_exists(self) -> None:
         assert _HOOKS_FILE.exists(), f"{_HOOKS_FILE} not found in repository root"
 
-    def test_hooks_file_is_valid_yaml(self, load_hooks_list: list[dict[str, object]]) -> None:
-        # Delegates to the fixture: load_hooks_list raises on invalid YAML,
+    def test_hooks_file_is_valid_yaml(self, hooks_list: list[dict[str, object]]) -> None:
+        # Delegates to the fixture: hooks_list raises on invalid YAML,
         # so a non-None result here confirms the file is parseable.
-        assert load_hooks_list is not None
+        assert hooks_list is not None
 
-    def test_hooks_file_is_a_list(self, load_hooks_list: list[dict[str, object]]) -> None:
-        assert isinstance(load_hooks_list, list)
+    def test_hooks_file_is_a_list(self, hooks_list: list[dict[str, object]]) -> None:
+        assert isinstance(hooks_list, list)
 
     def test_hooks_file_contains_at_least_one_hook(
-        self, load_hooks_list: list[dict[str, object]]
+        self, hooks_list: list[dict[str, object]]
     ) -> None:
-        assert len(load_hooks_list) >= 1
+        assert len(hooks_list) >= 1
 
-    def test_every_hook_has_an_id(self, load_hooks_list: list[dict[str, object]]) -> None:
-        for hook in load_hooks_list:
+    def test_every_hook_has_an_id(self, hooks_list: list[dict[str, object]]) -> None:
+        for hook in hooks_list:
             assert "id" in hook, f"Hook missing 'id' field: {hook}"
 
 
@@ -104,17 +104,17 @@ class TestPreCommitHooksFileStructure:
 class TestPhiScanHookIdentity:
     """Verify the phi-scan hook has the correct identifier and display name."""
 
-    def test_hook_id_is_phi_scan(self, find_phi_scan_hook: dict[str, object]) -> None:
-        assert find_phi_scan_hook["id"] == _EXPECTED_HOOK_ID
+    def test_hook_id_is_phi_scan(self, phi_scan_hook: dict[str, object]) -> None:
+        assert phi_scan_hook["id"] == _EXPECTED_HOOK_ID
 
-    def test_hook_name_starts_with_phiscan(self, find_phi_scan_hook: dict[str, object]) -> None:
-        hook_name = str(find_phi_scan_hook.get("name", ""))
+    def test_hook_name_starts_with_phiscan(self, phi_scan_hook: dict[str, object]) -> None:
+        hook_name = str(phi_scan_hook.get("name", ""))
         assert hook_name.startswith(_EXPECTED_HOOK_NAME_PREFIX), (
             f"Hook name {hook_name!r} should start with {_EXPECTED_HOOK_NAME_PREFIX!r}"
         )
 
-    def test_hook_has_description(self, find_phi_scan_hook: dict[str, object]) -> None:
-        hook_description = str(find_phi_scan_hook.get("description", "")).strip()
+    def test_hook_has_description(self, phi_scan_hook: dict[str, object]) -> None:
+        hook_description = str(phi_scan_hook.get("description", "")).strip()
         assert hook_description, "Hook is missing a description"
 
 
@@ -126,11 +126,11 @@ class TestPhiScanHookIdentity:
 class TestPhiScanHookExecutionContract:
     """Verify the fields that control how pre-commit invokes the hook."""
 
-    def test_language_is_python(self, find_phi_scan_hook: dict[str, object]) -> None:
-        assert find_phi_scan_hook.get("language") == _EXPECTED_LANGUAGE
+    def test_language_is_python(self, phi_scan_hook: dict[str, object]) -> None:
+        assert phi_scan_hook.get("language") == _EXPECTED_LANGUAGE
 
-    def test_entry_invokes_scan_diff(self, find_phi_scan_hook: dict[str, object]) -> None:
-        entry_command = str(find_phi_scan_hook.get("entry", ""))
+    def test_entry_invokes_scan_diff(self, phi_scan_hook: dict[str, object]) -> None:
+        entry_command = str(phi_scan_hook.get("entry", ""))
         assert entry_command.startswith(_EXPECTED_ENTRY_COMMAND), (
             f"Entry {entry_command!r} must start with {_EXPECTED_ENTRY_COMMAND!r}. "
             "The hook must invoke 'phi-scan scan --diff <ref>' so that phi-scan "
@@ -138,22 +138,22 @@ class TestPhiScanHookExecutionContract:
             "on pre-commit's file arguments."
         )
 
-    def test_pass_filenames_is_false(self, find_phi_scan_hook: dict[str, object]) -> None:
+    def test_pass_filenames_is_false(self, phi_scan_hook: dict[str, object]) -> None:
         # phi-scan drives its own file discovery from the git diff; pre-commit
         # must not inject individual file paths as positional arguments.
-        assert find_phi_scan_hook.get(_PASS_FILENAMES_KEY) == _PASS_FILENAMES_EXPECTED
+        assert phi_scan_hook.get(_PASS_FILENAMES_KEY) == _PASS_FILENAMES_EXPECTED
 
-    def test_stages_include_pre_commit(self, extract_hook_stages: frozenset[str]) -> None:
-        assert "pre-commit" in extract_hook_stages
+    def test_stages_include_pre_commit(self, hook_stages: frozenset[str]) -> None:
+        assert "pre-commit" in hook_stages
 
-    def test_stages_include_pre_push(self, extract_hook_stages: frozenset[str]) -> None:
-        assert "pre-push" in extract_hook_stages
+    def test_stages_include_pre_push(self, hook_stages: frozenset[str]) -> None:
+        assert "pre-push" in hook_stages
 
-    def test_stages_match_expected_set(self, extract_hook_stages: frozenset[str]) -> None:
-        assert extract_hook_stages == _EXPECTED_STAGES
+    def test_stages_match_expected_set(self, hook_stages: frozenset[str]) -> None:
+        assert hook_stages == _EXPECTED_STAGES
 
-    def test_minimum_pre_commit_version_is_set(self, find_phi_scan_hook: dict[str, object]) -> None:
-        assert _MINIMUM_PRE_COMMIT_VERSION_KEY in find_phi_scan_hook, (
+    def test_minimum_pre_commit_version_is_set(self, phi_scan_hook: dict[str, object]) -> None:
+        assert _MINIMUM_PRE_COMMIT_VERSION_KEY in phi_scan_hook, (
             "minimum_pre_commit_version should be declared to prevent installation "
             "on very old pre-commit versions that lack required features."
         )
