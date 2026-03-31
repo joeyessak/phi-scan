@@ -117,6 +117,7 @@ from phi_scan.output import (
     format_sarif,
     get_console,
 )
+from phi_scan.report import generate_html_report, generate_pdf_report
 from phi_scan.scanner import (
     build_scan_result,
     collect_scan_targets,
@@ -187,8 +188,13 @@ _SCAN_REPORT_PATH_HELP: str = (
 _SCAN_NO_CACHE_HELP: str = "Bypass the content-hash scan cache. Forces a full re-scan of all files."
 _REPORT_PATH_TABLE_FORMAT_ERROR: str = (
     "--report-path requires a serialized output format. "
-    "Use --output json, sarif, csv, junit, codequality, or gitlab-sast."
+    "Use --output json, sarif, csv, junit, codequality, gitlab-sast, pdf, or html."
 )
+_REPORT_PATH_BINARY_FORMAT_REQUIRED_ERROR: str = (
+    "--output {fmt} requires --report-path <file.{fmt}> "
+    "-- binary formats cannot be written to stdout."
+)
+_TREND_CHART_LOOKBACK_DAYS: int = 30
 _REPORT_PATH_WRITE_ERROR: str = "Failed to write report to {path!r}: {error}"
 _REPORT_PATH_WRITTEN_MESSAGE: str = "Report written to {path}"
 _VERBOSE_TIMESTAMP_FORMAT: str = "%Y-%m-%d %H:%M:%S"
@@ -515,6 +521,7 @@ class _ScanOutputOptions:
     output_format: str
     is_rich_mode: bool
     report_path: Path | None
+    scan_target: Path = Path(".")
 
 
 def _configure_logging(log_level: str, log_file: Path | None, is_quiet: bool) -> None:
@@ -731,6 +738,52 @@ def _write_report_to_file(content: str, report_path: Path) -> None:
     typer.echo(_REPORT_PATH_WRITTEN_MESSAGE.format(path=report_path), err=True)
 
 
+def _write_report_bytes_to_file(content: bytes, report_path: Path) -> None:
+    """Write binary report content (PDF or HTML) to a file and confirm on stderr.
+
+    Args:
+        content: Raw bytes to write (PDF or UTF-8 HTML).
+        report_path: Destination file path.
+
+    Raises:
+        typer.Exit: If the file cannot be written (e.g. permission error).
+    """
+    try:
+        report_path.write_bytes(content)
+    except OSError as write_error:
+        typer.echo(_REPORT_PATH_WRITE_ERROR.format(path=report_path, error=write_error), err=True)
+        raise typer.Exit(code=EXIT_CODE_ERROR) from write_error
+    typer.echo(_REPORT_PATH_WRITTEN_MESSAGE.format(path=report_path), err=True)
+
+
+def _emit_binary_report(scan_result: ScanResult, options: _ScanOutputOptions) -> None:
+    """Generate and write a PDF or HTML enterprise report.
+
+    Binary formats cannot be streamed to stdout — a --report-path is required.
+    Fetches the last 30 days of audit rows for the trend chart.
+
+    Args:
+        scan_result: The completed scan result.
+        options: Must have output_format in (pdf, html) and a non-None report_path.
+
+    Raises:
+        typer.Exit: If report_path is missing or the file cannot be written.
+    """
+    if options.report_path is None:
+        typer.echo(
+            _REPORT_PATH_BINARY_FORMAT_REQUIRED_ERROR.format(fmt=options.output_format),
+            err=True,
+        )
+        raise typer.Exit(code=EXIT_CODE_ERROR)
+    database_path = Path(DEFAULT_DATABASE_PATH).expanduser()
+    audit_rows = query_recent_scans(database_path, _TREND_CHART_LOOKBACK_DAYS)
+    if options.output_format == OutputFormat.PDF.value:
+        report_bytes = generate_pdf_report(scan_result, options.scan_target, audit_rows)
+    else:
+        report_bytes = generate_html_report(scan_result, options.scan_target, audit_rows)
+    _write_report_bytes_to_file(report_bytes, options.report_path)
+
+
 def _emit_scan_output(scan_result: ScanResult, options: _ScanOutputOptions) -> None:
     """Render or serialize scan results in the requested output format.
 
@@ -750,6 +803,9 @@ def _emit_scan_output(scan_result: ScanResult, options: _ScanOutputOptions) -> N
             raise typer.Exit(code=EXIT_CODE_ERROR)
         if options.is_rich_mode:
             _display_rich_scan_results(scan_result)
+        return
+    if options.output_format in (OutputFormat.PDF.value, OutputFormat.HTML.value):
+        _emit_binary_report(scan_result, options)
         return
     serializer = _FORMAT_SERIALIZERS.get(options.output_format)
     if serializer is None:
@@ -1166,6 +1222,7 @@ def scan(
         output_format=output_format,
         is_rich_mode=is_rich_mode,
         report_path=report_path,
+        scan_target=path,
     )
     if should_use_baseline:
         _emit_scan_output_with_baseline(scan_result, output_options)
