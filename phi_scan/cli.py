@@ -7,7 +7,7 @@ import json
 import logging
 import time
 from collections import deque
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Annotated, Any
@@ -399,13 +399,13 @@ _LOG_LEVEL_MAP: dict[str, int] = {
 # TABLE is handled before this dict is consulted (_emit_scan_output checks it
 # first as a special case). Using .get() on this dict is the runtime gate —
 # a missing key means the format is not yet implemented.
-_FORMAT_SERIALIZERS: dict[str, Callable[[ScanResult], str]] = {
-    OutputFormat.JSON.value: format_json,
-    OutputFormat.CSV.value: format_csv,
-    OutputFormat.SARIF.value: format_sarif,
-    OutputFormat.JUNIT.value: format_junit,
-    OutputFormat.CODEQUALITY.value: format_codequality,
-    OutputFormat.GITLAB_SAST.value: format_gitlab_sast,
+_FORMAT_SERIALIZERS: dict[OutputFormat, Callable[[ScanResult], str]] = {
+    OutputFormat.JSON: format_json,
+    OutputFormat.CSV: format_csv,
+    OutputFormat.SARIF: format_sarif,
+    OutputFormat.JUNIT: format_junit,
+    OutputFormat.CODEQUALITY: format_codequality,
+    OutputFormat.GITLAB_SAST: format_gitlab_sast,
 }
 
 _RGLOB_ALL_FILES_PATTERN: str = "*"
@@ -518,10 +518,10 @@ class _ScanOutputOptions:
     three-argument limit required by CLAUDE.md.
     """
 
-    output_format: str
+    output_format: OutputFormat
     is_rich_mode: bool
     report_path: Path | None
-    scan_target: Path = Path(".")
+    scan_target: Path = field(default_factory=lambda: Path("."))
 
 
 def _configure_logging(log_level: str, log_file: Path | None, is_quiet: bool) -> None:
@@ -771,13 +771,13 @@ def _emit_binary_report(scan_result: ScanResult, options: _ScanOutputOptions) ->
     """
     if options.report_path is None:
         typer.echo(
-            _REPORT_PATH_BINARY_FORMAT_REQUIRED_ERROR.format(fmt=options.output_format),
+            _REPORT_PATH_BINARY_FORMAT_REQUIRED_ERROR.format(fmt=options.output_format.value),
             err=True,
         )
         raise typer.Exit(code=EXIT_CODE_ERROR)
     database_path = Path(DEFAULT_DATABASE_PATH).expanduser()
     audit_rows = query_recent_scans(database_path, _TREND_CHART_LOOKBACK_DAYS)
-    if options.output_format == OutputFormat.PDF.value:
+    if options.output_format == OutputFormat.PDF:
         report_bytes = generate_pdf_report(scan_result, options.scan_target, audit_rows)
     else:
         report_bytes = generate_html_report(scan_result, options.scan_target, audit_rows)
@@ -797,19 +797,20 @@ def _emit_scan_output(scan_result: ScanResult, options: _ScanOutputOptions) -> N
     Raises:
         typer.Exit: If the format is not implemented or report file cannot be written.
     """
-    if options.output_format == OutputFormat.TABLE.value:
+    if options.output_format == OutputFormat.TABLE:
         if options.report_path is not None:
             typer.echo(_REPORT_PATH_TABLE_FORMAT_ERROR, err=True)
             raise typer.Exit(code=EXIT_CODE_ERROR)
         if options.is_rich_mode:
             _display_rich_scan_results(scan_result)
         return
-    if options.output_format in (OutputFormat.PDF.value, OutputFormat.HTML.value):
+    if options.output_format in (OutputFormat.PDF, OutputFormat.HTML):
         _emit_binary_report(scan_result, options)
         return
     serializer = _FORMAT_SERIALIZERS.get(options.output_format)
     if serializer is None:
-        typer.echo(_UNSUPPORTED_OUTPUT_FORMAT_ERROR.format(fmt=options.output_format), err=True)
+        error_message = _UNSUPPORTED_OUTPUT_FORMAT_ERROR.format(fmt=options.output_format.value)
+        typer.echo(error_message, err=True)
         raise typer.Exit(code=EXIT_CODE_ERROR)
     serialized = serializer(scan_result)
     if options.report_path is not None:
@@ -1189,7 +1190,12 @@ def scan(
     """
     effective_log_level = _LOG_LEVEL_DEBUG if is_verbose else log_level
     _configure_logging(effective_log_level, log_file, is_quiet)
-    is_rich_mode = not is_quiet and output_format == OutputFormat.TABLE.value
+    try:
+        output_format_enum = OutputFormat(output_format)
+    except ValueError:
+        typer.echo(_UNSUPPORTED_OUTPUT_FORMAT_ERROR.format(fmt=output_format), err=True)
+        raise typer.Exit(code=EXIT_CODE_ERROR)
+    is_rich_mode = not is_quiet and output_format_enum is OutputFormat.TABLE
     with display_status_spinner(_SPINNER_CONFIG_LOAD_MESSAGE, is_active=is_rich_mode):
         scan_config = _load_scan_config(config_path, severity_threshold)
     target_options = _ScanTargetOptions(
@@ -1219,7 +1225,7 @@ def scan(
         display_phase_report()
     _emit_verbose_phase(_VERBOSE_PHASE_REPORT, is_verbose)
     output_options = _ScanOutputOptions(
-        output_format=output_format,
+        output_format=output_format_enum,
         is_rich_mode=is_rich_mode,
         report_path=report_path,
         scan_target=path,
