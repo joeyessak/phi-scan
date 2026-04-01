@@ -756,7 +756,7 @@ def _write_report_bytes_to_file(content: bytes, report_path: Path) -> None:
     typer.echo(_REPORT_PATH_WRITTEN_MESSAGE.format(path=report_path), err=True)
 
 
-def _emit_binary_report(scan_result: ScanResult, options: _ScanOutputOptions) -> None:
+def _write_binary_report(scan_result: ScanResult, options: _ScanOutputOptions) -> None:
     """Generate and write a PDF or HTML enterprise report.
 
     Binary formats cannot be streamed to stdout — a --report-path is required.
@@ -805,7 +805,7 @@ def _emit_scan_output(scan_result: ScanResult, options: _ScanOutputOptions) -> N
             _display_rich_scan_results(scan_result)
         return
     if options.output_format in (OutputFormat.PDF, OutputFormat.HTML):
-        _emit_binary_report(scan_result, options)
+        _write_binary_report(scan_result, options)
         return
     serializer = _FORMAT_SERIALIZERS.get(options.output_format)
     if serializer is None:
@@ -1192,9 +1192,9 @@ def scan(
     _configure_logging(effective_log_level, log_file, is_quiet)
     try:
         output_format_enum = OutputFormat(output_format)
-    except ValueError:
+    except ValueError as value_error:
         typer.echo(_UNSUPPORTED_OUTPUT_FORMAT_ERROR.format(fmt=output_format), err=True)
-        raise typer.Exit(code=EXIT_CODE_ERROR)
+        raise typer.Exit(code=EXIT_CODE_ERROR) from value_error
     is_rich_mode = not is_quiet and output_format_enum is OutputFormat.TABLE
     with display_status_spinner(_SPINNER_CONFIG_LOAD_MESSAGE, is_active=is_rich_mode):
         scan_config = _load_scan_config(config_path, severity_threshold)

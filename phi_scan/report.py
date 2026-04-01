@@ -23,8 +23,10 @@ Usage::
 from __future__ import annotations
 
 import base64
+import functools
 import io
 import textwrap
+from collections import Counter
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from operator import itemgetter
@@ -134,6 +136,7 @@ _CHART_NO_DATA_FONT_SIZE: int = 14
 _CHART_NO_HISTORY_FONT_SIZE: int = 12
 _CHART_PIE_START_ANGLE: int = 90
 _CHART_GRID_ALPHA: float = 0.5
+_CHART_DONUT_WIDTH: float = 0.5
 
 # Marker used by the scanner layer to replace raw PHI values in code context
 _REDACTED_MARKER: str = "[REDACTED]"
@@ -223,25 +226,28 @@ def _get_severity_row_colour(severity: SeverityLevel) -> str:
 
 
 def _truncate_code_context(context: str) -> str:
-    """Truncate code context for report rendering and warn if PHI may not be redacted.
+    """Truncate code context for report rendering, stripping unredacted content.
 
     The scanner layer is expected to substitute detected PHI values with
-    _REDACTED_MARKER before populating ScanFinding.code_context.  This function
-    logs a warning when the marker is absent from a non-empty context so that
-    any regression in the scanner redaction path surfaces immediately.
+    _REDACTED_MARKER before populating ScanFinding.code_context.  When the
+    marker is absent from a non-empty context, the content may contain raw PHI —
+    the entire context is replaced with _REDACTED_MARKER and a warning is logged
+    so that any scanner redaction regression surfaces immediately without
+    allowing PHI to escape into report output.
 
     Args:
         context: Raw code_context field from a ScanFinding.
 
     Returns:
-        Truncated context string (at most _MAX_CONTEXT_CHARS characters).
+        Truncated context string, or _REDACTED_MARKER if redaction cannot be confirmed.
     """
     if context and _REDACTED_MARKER not in context:
         _logger.warning(
-            "code_context rendered in report without '%s' marker — "
-            "verify that the scanner layer has redacted PHI values",
+            "code_context passed to report without '%s' marker — "
+            "stripping content to prevent PHI leaking into report output",
             _REDACTED_MARKER,
         )
+        return _REDACTED_MARKER
     return context[:_MAX_CONTEXT_CHARS]
 
 
@@ -264,13 +270,15 @@ def _truncate_chart_label(label: str) -> str:
     return "..." + label[-(_MAX_LABEL_CHARS - 1) :]
 
 
+@functools.cache
 def _configure_agg_backend() -> None:
-    """Set the non-interactive Agg backend before any matplotlib.pyplot import.
+    """Configure the non-interactive Agg backend — executed exactly once per process.
 
-    Must be called before `import matplotlib.pyplot` inside each chart builder so
-    that chart rendering works in headless CI environments with no display server.
-    The lazy import keeps matplotlib out of the module-load critical path for
-    users who do not use report output.
+    lru_cache with no arguments makes this a call-once function: the first
+    invocation sets the backend; every subsequent call is a cache hit that
+    returns immediately.  Chart builders must not call this directly — it is
+    called once before the chart-building block in each public report entry point
+    so that individual chart builders have a single responsibility.
     """
     import matplotlib
 
@@ -312,25 +320,26 @@ def _render_chart_to_bytes(figure: object) -> bytes:
 class _HorizontalBarChartSpec:
     """Specification for rendering a horizontal bar chart figure."""
 
-    labels: list[str]
-    values: list[int]
-    colours: list[str]
+    labels: tuple[str, ...]
+    values: tuple[int, ...]
+    colours: tuple[str, ...]
     title: str
     xlabel: str
-    height: float
+    chart_height_inches: float
 
 
 def _render_horizontal_bar_figure(spec: _HorizontalBarChartSpec) -> object:
     """Build and return a horizontal bar chart Figure from a spec."""
-    _configure_agg_backend()
     import matplotlib.pyplot as plt
 
-    fig, axis = plt.subplots(figsize=(_CHART_WIDTH_INCHES, spec.height))
-    bars = axis.barh(spec.labels, spec.values, color=spec.colours)
-    axis.bar_label(bars, padding=_CHART_BAR_LABEL_PADDING, fontsize=_CHART_BAR_LABEL_FONT_SIZE)
-    axis.set_xlabel(spec.xlabel)
-    axis.set_title(spec.title)
-    axis.invert_yaxis()
+    fig, chart_axes = plt.subplots(figsize=(_CHART_WIDTH_INCHES, spec.chart_height_inches))
+    bars = chart_axes.barh(spec.labels, spec.values, color=spec.colours)
+    chart_axes.bar_label(
+        bars, padding=_CHART_BAR_LABEL_PADDING, fontsize=_CHART_BAR_LABEL_FONT_SIZE
+    )
+    chart_axes.set_xlabel(spec.xlabel)
+    chart_axes.set_title(spec.title)
+    chart_axes.invert_yaxis()
     fig.tight_layout()
     plt.close(fig)
     return fig
@@ -359,12 +368,12 @@ def _build_category_chart(scan_result: ScanResult) -> object:
     labels, values, colours = _prepare_category_chart_data(scan_result)
     return _render_horizontal_bar_figure(
         _HorizontalBarChartSpec(
-            labels=labels,
-            values=values,
-            colours=colours,
+            labels=tuple(labels),
+            values=tuple(values),
+            colours=tuple(colours),
             title="Findings by HIPAA Category",
             xlabel="Findings Count",
-            height=_CHART_HEIGHT_CATEGORY_INCHES,
+            chart_height_inches=_CHART_HEIGHT_CATEGORY_INCHES,
         )
     )
 
@@ -395,13 +404,12 @@ def _prepare_severity_chart_data(
 
 def _build_severity_chart(scan_result: ScanResult) -> object:
     """Donut chart — severity distribution."""
-    _configure_agg_backend()
     import matplotlib.pyplot as plt
 
-    fig, axis = plt.subplots(figsize=(_CHART_WIDTH_INCHES, _CHART_HEIGHT_PIE_INCHES))
+    fig, chart_axes = plt.subplots(figsize=(_CHART_WIDTH_INCHES, _CHART_HEIGHT_PIE_INCHES))
     chart_data = _prepare_severity_chart_data(scan_result)
     if chart_data is None:
-        axis.text(
+        chart_axes.text(
             0.5,
             0.5,
             _CHART_NO_FINDINGS_TEXT,
@@ -409,20 +417,20 @@ def _build_severity_chart(scan_result: ScanResult) -> object:
             va="center",
             fontsize=_CHART_NO_DATA_FONT_SIZE,
         )
-        axis.axis("off")
+        chart_axes.axis("off")
         fig.tight_layout()
         plt.close(fig)
         return fig
     labels, values, colours = chart_data
-    axis.pie(
+    chart_axes.pie(
         values,
         labels=labels,
         colors=colours,
-        wedgeprops={"width": 0.5},
+        wedgeprops={"width": _CHART_DONUT_WIDTH},
         startangle=_CHART_PIE_START_ANGLE,
         autopct="%1.0f%%",
     )
-    axis.set_title("Severity Distribution")
+    chart_axes.set_title("Severity Distribution")
     fig.tight_layout()
     plt.close(fig)
     return fig
@@ -430,8 +438,6 @@ def _build_severity_chart(scan_result: ScanResult) -> object:
 
 def _prepare_top_files_chart_data(scan_result: ScanResult) -> tuple[list[str], list[int]]:
     """Return (display_labels, counts) for the top-N files bar chart."""
-    from collections import Counter
-
     file_counts: Counter[str] = Counter(str(finding.file_path) for finding in scan_result.findings)
     top_files = file_counts.most_common(_TOP_FILES_COUNT)
     labels = [_truncate_chart_label(file_path) for file_path, _ in top_files]
@@ -441,13 +447,12 @@ def _prepare_top_files_chart_data(scan_result: ScanResult) -> tuple[list[str], l
 
 def _build_top_files_chart(scan_result: ScanResult) -> object:
     """Horizontal bar chart — top N files with most findings."""
-    _configure_agg_backend()
     import matplotlib.pyplot as plt
 
     labels, counts = _prepare_top_files_chart_data(scan_result)
-    fig, axis = plt.subplots(figsize=(_CHART_WIDTH_INCHES, _CHART_HEIGHT_FILES_INCHES))
+    fig, chart_axes = plt.subplots(figsize=(_CHART_WIDTH_INCHES, _CHART_HEIGHT_FILES_INCHES))
     if not labels:
-        axis.text(
+        chart_axes.text(
             0.5,
             0.5,
             _CHART_NO_FINDINGS_TEXT,
@@ -455,15 +460,17 @@ def _build_top_files_chart(scan_result: ScanResult) -> object:
             va="center",
             fontsize=_CHART_NO_DATA_FONT_SIZE,
         )
-        axis.axis("off")
+        chart_axes.axis("off")
         fig.tight_layout()
         plt.close(fig)
         return fig
-    bars = axis.barh(labels, counts, color=_CHART_COLOUR_BLUE)
-    axis.bar_label(bars, padding=_CHART_BAR_LABEL_PADDING, fontsize=_CHART_BAR_LABEL_FONT_SIZE)
-    axis.set_xlabel("Findings Count")
-    axis.set_title(f"Top {len(labels)} Files by Finding Count")
-    axis.invert_yaxis()
+    bars = chart_axes.barh(labels, counts, color=_CHART_COLOUR_BLUE)
+    chart_axes.bar_label(
+        bars, padding=_CHART_BAR_LABEL_PADDING, fontsize=_CHART_BAR_LABEL_FONT_SIZE
+    )
+    chart_axes.set_xlabel("Findings Count")
+    chart_axes.set_title(f"Top {len(labels)} Files by Finding Count")
+    chart_axes.invert_yaxis()
     fig.tight_layout()
     plt.close(fig)
     return fig
@@ -497,15 +504,13 @@ def _parse_audit_dates_and_counts(
 def _build_trend_chart(audit_rows: list[dict[str, object]]) -> object:
     """Line chart — findings over time from audit log history."""
     import matplotlib.dates as mdates
-
-    _configure_agg_backend()
     import matplotlib.pyplot as plt
 
-    fig, axis = plt.subplots(figsize=(_CHART_WIDTH_INCHES, _CHART_HEIGHT_TREND_INCHES))
+    fig, chart_axes = plt.subplots(figsize=(_CHART_WIDTH_INCHES, _CHART_HEIGHT_TREND_INCHES))
     dates, counts = _parse_audit_dates_and_counts(audit_rows) if audit_rows else ([], [])
 
     if not dates:
-        axis.text(
+        chart_axes.text(
             0.5,
             0.5,
             _CHART_NO_HISTORY_TEXT,
@@ -513,26 +518,26 @@ def _build_trend_chart(audit_rows: list[dict[str, object]]) -> object:
             va="center",
             fontsize=_CHART_NO_HISTORY_FONT_SIZE,
         )
-        axis.axis("off")
+        chart_axes.axis("off")
         fig.tight_layout()
         plt.close(fig)
         return fig
 
     date_nums = mdates.date2num(dates)  # type: ignore[no-untyped-call]
-    axis.plot(
+    chart_axes.plot(
         date_nums,
         counts,
         marker=_CHART_MARKER_STYLE,
         linewidth=_CHART_LINE_WIDTH,
         color=_CHART_COLOUR_BLUE,
     )
-    axis.fill_between(date_nums, counts, alpha=_CHART_FILL_ALPHA, color=_CHART_COLOUR_BLUE)
-    axis.xaxis.set_major_formatter(mdates.DateFormatter("%b %d"))  # type: ignore[no-untyped-call]
-    axis.xaxis.set_major_locator(mdates.AutoDateLocator())  # type: ignore[no-untyped-call]
+    chart_axes.fill_between(date_nums, counts, alpha=_CHART_FILL_ALPHA, color=_CHART_COLOUR_BLUE)
+    chart_axes.xaxis.set_major_formatter(mdates.DateFormatter("%b %d"))  # type: ignore[no-untyped-call]
+    chart_axes.xaxis.set_major_locator(mdates.AutoDateLocator())  # type: ignore[no-untyped-call]
     fig.autofmt_xdate()
-    axis.set_ylabel("Findings")
-    axis.set_title("Findings Trend (Audit Log History)")
-    axis.grid(axis="y", linestyle="--", alpha=_CHART_GRID_ALPHA)
+    chart_axes.set_ylabel("Findings")
+    chart_axes.set_title("Findings Trend (Audit Log History)")
+    chart_axes.grid(axis="y", linestyle="--", alpha=_CHART_GRID_ALPHA)
     fig.tight_layout()
     plt.close(fig)
     return fig
@@ -754,6 +759,7 @@ def _build_html_context(
     }
 
     charts: dict[str, str] = {}
+    _configure_agg_backend()
     try:
         charts["category"] = _render_chart_to_base64(_build_category_chart(scan_result))
         charts["severity"] = _render_chart_to_base64(_build_severity_chart(scan_result))
@@ -1111,6 +1117,7 @@ def generate_pdf_report(
     timestamp = datetime.now(tz=UTC).strftime("%Y-%m-%d %H:%M UTC")
 
     charts: dict[str, bytes] = {}
+    _configure_agg_backend()
     try:
         charts["category"] = _render_chart_to_bytes(_build_category_chart(scan_result))
         charts["severity"] = _render_chart_to_bytes(_build_severity_chart(scan_result))
