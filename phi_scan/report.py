@@ -16,8 +16,8 @@ Usage::
 
     from phi_scan.report import generate_html_report, generate_pdf_report
 
-    html_bytes = generate_html_report(scan_result, scan_target=Path("./src"))
-    pdf_bytes  = generate_pdf_report(scan_result, scan_target=Path("./src"))
+    html_bytes = generate_html_report(scan_result, scan_target=Path("."))
+    pdf_bytes  = generate_pdf_report(scan_result, scan_target=Path("."))
 """
 
 from __future__ import annotations
@@ -158,8 +158,11 @@ _CHART_NO_HISTORY_TEXT: str = "No audit history available"
 _PDF_ROW_HEIGHT: float = 5.5
 _PDF_HEADER_HEIGHT: float = 7.0
 
+# Height reserved at the bottom of each PDF page for the footer area.
+# The page-break threshold is derived from this so the two values stay in sync.
+_PDF_FOOTER_HEIGHT_MM: float = 25.0
 # Page-break threshold for findings table (stop before footer area)
-_PDF_PAGE_BREAK_Y_MM: float = _PAGE_HEIGHT_MM - 25.0
+_PDF_PAGE_BREAK_Y_MM: float = _PAGE_HEIGHT_MM - _PDF_FOOTER_HEIGHT_MM
 
 # Audit row column keys consumed by the trend chart sanitization boundary.
 # Only these two columns are ever read from audit rows in report.py.
@@ -588,13 +591,17 @@ def _extract_trend_data_points(
     return tuple(points)
 
 
-def _build_trend_chart(audit_rows: list[dict[str, object]]) -> _MatplotlibFigure:
-    """Line chart — findings over time from audit log history."""
+def _build_trend_chart(trend_points: tuple[_TrendDataPoint, ...]) -> _MatplotlibFigure:
+    """Line chart — findings over time from audit log history.
+
+    Accepts only pre-sanitized _TrendDataPoint values so raw audit row dicts
+    never enter chart rendering. Callers must pass the output of
+    _extract_trend_data_points rather than raw audit_rows.
+    """
     import matplotlib.dates as mdates
     import matplotlib.pyplot as plt
 
     fig, chart_axes = plt.subplots(figsize=(_CHART_WIDTH_INCHES, _CHART_HEIGHT_TREND_INCHES))
-    trend_points = _extract_trend_data_points(audit_rows)
 
     if not trend_points:
         chart_axes.text(
@@ -852,7 +859,9 @@ def _build_html_context(
         charts["category"] = _render_chart_to_base64(_build_category_chart(scan_result))
         charts["severity"] = _render_chart_to_base64(_build_severity_chart(scan_result))
         charts["top_files"] = _render_chart_to_base64(_build_top_files_chart(scan_result))
-        charts["trend"] = _render_chart_to_base64(_build_trend_chart(audit_rows))
+        charts["trend"] = _render_chart_to_base64(
+            _build_trend_chart(_extract_trend_data_points(audit_rows))
+        )
     except Exception as chart_error:  # noqa: BLE001
         _logger.warning("Chart generation failed — report will be text-only: %s", chart_error)
         charts = {}
@@ -1214,7 +1223,9 @@ def generate_pdf_report(
         charts["category"] = _render_chart_to_bytes(_build_category_chart(scan_result))
         charts["severity"] = _render_chart_to_bytes(_build_severity_chart(scan_result))
         charts["top_files"] = _render_chart_to_bytes(_build_top_files_chart(scan_result))
-        charts["trend"] = _render_chart_to_bytes(_build_trend_chart(audit_rows or []))
+        charts["trend"] = _render_chart_to_bytes(
+            _build_trend_chart(_extract_trend_data_points(audit_rows or []))
+        )
     except Exception as chart_error:  # noqa: BLE001
         _logger.warning("Chart generation failed — PDF will be chart-free: %s", chart_error)
 
