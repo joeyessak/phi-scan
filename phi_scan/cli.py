@@ -769,7 +769,8 @@ def _generate_report_bytes(
 
     Args:
         scan_result: The completed scan result.
-        options: Must have output_format in (pdf, html) and a non-None scan_target.
+        options: Must have output_format in (OutputFormat.PDF, OutputFormat.HTML).
+            scan_target defaults to Path(".") when not supplied by the caller.
         audit_rows: Recent audit rows for the trend chart.
 
     Returns:

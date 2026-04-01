@@ -26,6 +26,7 @@ import base64
 import functools
 import io
 import textwrap
+import types
 from collections import Counter
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -58,11 +59,19 @@ _logger = get_logger("report")
 # Layout and colour constants
 # ---------------------------------------------------------------------------
 
-# Risk-level colours (hex, no leading #)
-_COLOUR_CRITICAL: str = "C0392B"
-_COLOUR_HIGH: str = "E67E22"
+# Canonical raw hex values (no leading #) shared between PDF and chart contexts.
+# fpdf2 requires bare hex strings; matplotlib requires the "#" prefix.
+# A single canonical constant is the source of truth so a colour change propagates
+# to both rendering backends automatically.
+_HEX_CRITICAL_RED: str = "C0392B"  # flat red — CRITICAL risk, HIGH severity, active chart bars
+_HEX_HIGH_ORANGE: str = "E67E22"  # warm orange — HIGH risk, MEDIUM severity
+_HEX_LOW_GREEN: str = "27AE60"  # muted green — LOW risk, LOW severity
+
+# Risk-level colours for PDF (fpdf2 format: hex, no leading #)
+_COLOUR_CRITICAL: str = _HEX_CRITICAL_RED
+_COLOUR_HIGH: str = _HEX_HIGH_ORANGE
 _COLOUR_MODERATE: str = "F1C40F"
-_COLOUR_LOW: str = "27AE60"
+_COLOUR_LOW: str = _HEX_LOW_GREEN
 _COLOUR_CLEAN: str = "2ECC71"
 
 # Severity row colours for PDF table fill (light tint variants)
@@ -116,14 +125,15 @@ _TOP_FILES_COUNT: int = 10
 # Chart file-label truncation threshold (chars before "..." prefix is added)
 _MAX_LABEL_CHARS: int = 40
 
-# Chart colours — matplotlib requires the leading "#"; fpdf2 constants above do not
-_CHART_COLOUR_ACTIVE: str = "#C0392B"  # bar/value with findings
-_CHART_COLOUR_INACTIVE: str = "#BDC3C7"  # bar with zero findings
-_CHART_COLOUR_NEUTRAL: str = "#95A5A6"  # severity fallback / unknown
+# Chart colours (matplotlib format: "#RRGGBB"). Shared colours are derived from
+# the canonical hex constants above so PDF and chart renderers stay in sync.
+_CHART_COLOUR_ACTIVE: str = f"#{_HEX_CRITICAL_RED}"  # category bar with findings present
+_CHART_COLOUR_ZERO_FINDINGS_BAR: str = "#BDC3C7"  # category bar with zero findings
+_CHART_COLOUR_UNKNOWN_SEVERITY: str = "#95A5A6"  # severity donut fallback for unrecognised levels
 _CHART_COLOUR_BLUE: str = "#2980B9"  # trend line and top-files bars
-_CHART_COLOUR_SEVERITY_HIGH: str = "#C0392B"
-_CHART_COLOUR_SEVERITY_MEDIUM: str = "#E67E22"
-_CHART_COLOUR_SEVERITY_LOW: str = "#27AE60"
+_CHART_COLOUR_SEVERITY_HIGH: str = f"#{_HEX_CRITICAL_RED}"
+_CHART_COLOUR_SEVERITY_MEDIUM: str = f"#{_HEX_HIGH_ORANGE}"
+_CHART_COLOUR_SEVERITY_LOW: str = f"#{_HEX_LOW_GREEN}"
 _CHART_COLOUR_SEVERITY_INFO: str = "#3498DB"
 
 # Trend-line chart style constants
@@ -221,22 +231,24 @@ def _convert_hex_to_rgb(hex_colour: str) -> tuple[int, int, int]:
 # fpdf2 raises FPDFUnicodeEncodingException for any character outside latin-1 when
 # using the built-in core fonts.  We replace the most common typographic characters
 # before passing text to any fpdf cell/multi_cell call.
-_PDF_CHAR_REPLACEMENTS: dict[str, str] = {
-    "\u2014": "-",  # em dash
-    "\u2013": "-",  # en dash
-    "\u2026": "...",  # ellipsis
-    "\u2022": "-",  # bullet
-    "\u00a7": "SS",  # section sign (§)
-    "\u00a9": "(c)",  # copyright
-    "\u00ae": "(R)",  # registered
-    "\u2019": "'",  # right single quote
-    "\u2018": "'",  # left single quote
-    "\u201c": '"',  # left double quote
-    "\u201d": '"',  # right double quote
-}
+_PDF_CHAR_REPLACEMENTS: types.MappingProxyType[str, str] = types.MappingProxyType(
+    {
+        "\u2014": "-",  # em dash
+        "\u2013": "-",  # en dash
+        "\u2026": "...",  # ellipsis
+        "\u2022": "-",  # bullet
+        "\u00a7": "SS",  # section sign (§)
+        "\u00a9": "(c)",  # copyright
+        "\u00ae": "(R)",  # registered
+        "\u2019": "'",  # right single quote
+        "\u2018": "'",  # left single quote
+        "\u201c": '"',  # left double quote
+        "\u201d": '"',  # right double quote
+    }
+)
 
 
-def _encode_pdf_text_to_latin1(text: str) -> str:
+def _encode_pdf_text_as_latin1(text: str) -> str:
     """Replace Unicode characters with ASCII fallbacks, then encode to latin-1 for fpdf2."""
     for char, replacement in _PDF_CHAR_REPLACEMENTS.items():
         text = text.replace(char, replacement)
@@ -397,12 +409,12 @@ def _prepare_category_chart_data(
         if count > 0
     }
     if not category_counts:
-        return [_CHART_NO_FINDINGS_LABEL], [0], [_CHART_COLOUR_INACTIVE]
+        return [_CHART_NO_FINDINGS_LABEL], [0], [_CHART_COLOUR_ZERO_FINDINGS_BAR]
     sorted_items = sorted(category_counts.items(), key=itemgetter(1), reverse=True)
     labels = [label for label, _ in sorted_items]
     finding_counts = [finding_count for _, finding_count in sorted_items]
     colours = [
-        _CHART_COLOUR_ACTIVE if finding_count > 0 else _CHART_COLOUR_INACTIVE
+        _CHART_COLOUR_ACTIVE if finding_count > 0 else _CHART_COLOUR_ZERO_FINDINGS_BAR
         for finding_count in finding_counts
     ]
     return labels, finding_counts, colours
@@ -443,7 +455,7 @@ def _prepare_severity_chart_data(
     }
     labels = [f"{level.value.title()} ({severity_data[level]})" for level in ordered_levels]
     severity_finding_counts = [severity_data[level] for level in ordered_levels]
-    colours = [level_colours.get(level, _CHART_COLOUR_NEUTRAL) for level in ordered_levels]
+    colours = [level_colours.get(level, _CHART_COLOUR_UNKNOWN_SEVERITY) for level in ordered_levels]
     return labels, severity_finding_counts, colours
 
 
@@ -877,7 +889,7 @@ def _pdf_add_section_heading(pdf: object, title: str) -> None:
     pdf.ln(4)  # type: ignore[attr-defined]
     _pdf_set_font(pdf, style="B", size=_FONT_HEADING)
     pdf.set_text_color(44, 62, 80)  # type: ignore[attr-defined]
-    pdf.cell(0, 8, _encode_pdf_text_to_latin1(title), new_x="LMARGIN", new_y="NEXT")  # type: ignore[attr-defined]
+    pdf.cell(0, 8, _encode_pdf_text_as_latin1(title), new_x="LMARGIN", new_y="NEXT")  # type: ignore[attr-defined]
     pdf.set_fill_color(44, 62, 80)  # type: ignore[attr-defined]
     pdf.cell(0, 0.5, "", new_x="LMARGIN", new_y="NEXT", fill=True)  # type: ignore[attr-defined]
     pdf.ln(3)  # type: ignore[attr-defined]
@@ -907,7 +919,7 @@ def _pdf_write_cover_page(
     pdf.cell(  # type: ignore[attr-defined]
         0,
         6,
-        _encode_pdf_text_to_latin1(f"PhiScan v{__version__}  |  {timestamp}"),
+        _encode_pdf_text_as_latin1(f"PhiScan v{__version__}  |  {timestamp}"),
         align="C",
         new_x="LMARGIN",
         new_y="NEXT",
@@ -918,7 +930,7 @@ def _pdf_write_cover_page(
     pdf.set_text_color(*risk_rgb)  # type: ignore[attr-defined]
     risk_label = f"RISK LEVEL: {scan_result.risk_level.value.upper()}"
     pdf.cell(  # type: ignore[attr-defined]
-        0, 10, _encode_pdf_text_to_latin1(risk_label), align="C", new_x="LMARGIN", new_y="NEXT"
+        0, 10, _encode_pdf_text_as_latin1(risk_label), align="C", new_x="LMARGIN", new_y="NEXT"
     )
 
     pdf.ln(8)  # type: ignore[attr-defined]
@@ -934,9 +946,9 @@ def _pdf_write_cover_page(
     ]
     for label, value in metadata_rows:
         _pdf_set_font(pdf, style="B", size=_FONT_BODY)
-        pdf.cell(55, 7, _encode_pdf_text_to_latin1(label), border="B")  # type: ignore[attr-defined]
+        pdf.cell(55, 7, _encode_pdf_text_as_latin1(label), border="B")  # type: ignore[attr-defined]
         _pdf_set_font(pdf, size=_FONT_BODY)
-        pdf.cell(0, 7, _encode_pdf_text_to_latin1(value), border="B", new_x="LMARGIN", new_y="NEXT")  # type: ignore[attr-defined]
+        pdf.cell(0, 7, _encode_pdf_text_as_latin1(value), border="B", new_x="LMARGIN", new_y="NEXT")  # type: ignore[attr-defined]
 
     pdf.ln(10)  # type: ignore[attr-defined]
     _pdf_set_font(pdf, size=_FONT_SMALL)
@@ -981,7 +993,7 @@ def _pdf_write_summary_page(
     if non_zero_cats:
         for cat_name, count in sorted(non_zero_cats, key=lambda p: p[1], reverse=True):
             _pdf_set_font(pdf, size=_FONT_BODY)
-            pdf.cell(60, 5, _encode_pdf_text_to_latin1(cat_name))  # type: ignore[attr-defined]
+            pdf.cell(60, 5, _encode_pdf_text_as_latin1(cat_name))  # type: ignore[attr-defined]
             _pdf_set_font(pdf, style="B", size=_FONT_BODY)
             pdf.cell(0, 5, str(count), new_x="LMARGIN", new_y="NEXT")  # type: ignore[attr-defined]
     else:
@@ -1055,7 +1067,7 @@ def _pdf_write_findings_table(pdf: object, scan_result: ScanResult) -> None:
             pdf.cell(  # type: ignore[attr-defined]
                 column.width_mm,
                 _PDF_ROW_HEIGHT,
-                _encode_pdf_text_to_latin1(cell_text),
+                _encode_pdf_text_as_latin1(cell_text),
                 border="B",
                 fill=True,
             )
@@ -1077,7 +1089,7 @@ def _pdf_write_remediation_section(pdf: object, scan_result: ScanResult) -> None
         pdf.cell(  # type: ignore[attr-defined]
             0,
             6,
-            _encode_pdf_text_to_latin1(category.value.replace("_", " ").title()),
+            _encode_pdf_text_as_latin1(category.value.replace("_", " ").title()),
             new_x="LMARGIN",
             new_y="NEXT",
         )
@@ -1085,7 +1097,7 @@ def _pdf_write_remediation_section(pdf: object, scan_result: ScanResult) -> None
         pdf.multi_cell(  # type: ignore[attr-defined]
             0,
             5,
-            _encode_pdf_text_to_latin1(
+            _encode_pdf_text_as_latin1(
                 textwrap.fill(HIPAA_REMEDIATION_GUIDANCE[category], width=110)
             ),
         )
@@ -1096,7 +1108,7 @@ def _pdf_write_remediation_section(pdf: object, scan_result: ScanResult) -> None
     pdf.cell(0, 6, "General Remediation Checklist", new_x="LMARGIN", new_y="NEXT")  # type: ignore[attr-defined]
     _pdf_set_font(pdf, size=_FONT_BODY)
     for item in _GENERAL_REMEDIATION_CHECKLIST:
-        pdf.multi_cell(0, 5, _encode_pdf_text_to_latin1(textwrap.fill(f"- {item}", width=110)))  # type: ignore[attr-defined]
+        pdf.multi_cell(0, 5, _encode_pdf_text_as_latin1(textwrap.fill(f"- {item}", width=110)))  # type: ignore[attr-defined]
         pdf.ln(1)  # type: ignore[attr-defined]
 
 
@@ -1123,9 +1135,9 @@ def _pdf_write_appendix(
     ]
     for label, value in appendix_rows:
         _pdf_set_font(pdf, style="B", size=_FONT_BODY)
-        pdf.cell(60, 6, _encode_pdf_text_to_latin1(label))  # type: ignore[attr-defined]
+        pdf.cell(60, 6, _encode_pdf_text_as_latin1(label))  # type: ignore[attr-defined]
         _pdf_set_font(pdf, size=_FONT_BODY)
-        pdf.cell(0, 6, _encode_pdf_text_to_latin1(value), new_x="LMARGIN", new_y="NEXT")  # type: ignore[attr-defined]
+        pdf.cell(0, 6, _encode_pdf_text_as_latin1(value), new_x="LMARGIN", new_y="NEXT")  # type: ignore[attr-defined]
 
     pdf.ln(8)  # type: ignore[attr-defined]
     _pdf_set_font(pdf, size=_FONT_SMALL)
