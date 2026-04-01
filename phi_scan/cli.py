@@ -194,6 +194,10 @@ _REPORT_PATH_BINARY_FORMAT_REQUIRED_ERROR: str = (
     "--output {fmt} requires --report-path <file.{fmt}> "
     "-- binary formats cannot be written to stdout."
 )
+_UNEXPECTED_BINARY_FORMAT_ERROR: str = (
+    "_generate_report_bytes received unexpected output format {format!r} — "
+    "only OutputFormat.PDF and OutputFormat.HTML are supported"
+)
 _TREND_CHART_LOOKBACK_DAYS: int = 30
 _REPORT_PATH_WRITE_ERROR: str = "Failed to write report to {path!r}: {error}"
 _REPORT_PATH_WRITTEN_MESSAGE: str = "Report written to {path}"
@@ -771,6 +775,8 @@ def _generate_report_bytes(
     Returns:
         Raw bytes of the generated report (PDF or UTF-8 HTML).
     """
+    if options.output_format not in {OutputFormat.PDF, OutputFormat.HTML}:
+        raise ValueError(_UNEXPECTED_BINARY_FORMAT_ERROR.format(format=options.output_format))
     if options.output_format == OutputFormat.PDF:
         return generate_pdf_report(scan_result, options.scan_target, audit_rows)
     return generate_html_report(scan_result, options.scan_target, audit_rows)

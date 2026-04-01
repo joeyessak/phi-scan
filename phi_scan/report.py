@@ -198,10 +198,23 @@ class _MatplotlibFigure(Protocol):
 # Colour helpers
 # ---------------------------------------------------------------------------
 
+# Byte slice positions within a 6-character hex colour string (e.g. "C0392B").
+# Each colour channel occupies 2 hex digits (1 byte = 8 bits = 2 hex chars).
+_HEX_RED_START: int = 0
+_HEX_RED_END: int = 2
+_HEX_GREEN_START: int = 2
+_HEX_GREEN_END: int = 4
+_HEX_BLUE_START: int = 4
+_HEX_BLUE_END: int = 6
+
 
 def _convert_hex_to_rgb(hex_colour: str) -> tuple[int, int, int]:
     """Convert a 6-char hex colour string to an (R, G, B) int tuple."""
-    return int(hex_colour[0:2], 16), int(hex_colour[2:4], 16), int(hex_colour[4:6], 16)
+    return (
+        int(hex_colour[_HEX_RED_START:_HEX_RED_END], 16),
+        int(hex_colour[_HEX_GREEN_START:_HEX_GREEN_END], 16),
+        int(hex_colour[_HEX_BLUE_START:_HEX_BLUE_END], 16),
+    )
 
 
 # Map of Unicode characters that Helvetica (latin-1) cannot encode → ASCII fallbacks.
