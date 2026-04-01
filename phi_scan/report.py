@@ -172,6 +172,13 @@ _PDF_PAGE_BREAK_Y_MM: float = _PAGE_HEIGHT_MM - _PDF_FOOTER_HEIGHT_MM
 #   findings_count — INTEGER aggregate count; no PHI
 _AUDIT_ROW_KEY_TIMESTAMP: str = "timestamp"
 _AUDIT_ROW_KEY_FINDINGS_COUNT: str = "findings_count"
+# Frozenset of the only audit row keys permitted to enter the trend chart
+# sanitization boundary. Used at runtime to restrict each row dict to exactly
+# these two keys before any value is extracted — no other column can reach
+# chart rendering regardless of schema changes or unexpected extra fields.
+_AUDIT_ROW_ALLOWED_KEYS: frozenset[str] = frozenset(
+    {_AUDIT_ROW_KEY_TIMESTAMP, _AUDIT_ROW_KEY_FINDINGS_COUNT}
+)
 
 
 # ---------------------------------------------------------------------------
@@ -201,10 +208,10 @@ _PDF_TABLE_COLUMNS: tuple[_PdfTableColumn, ...] = (
 
 @dataclass(frozen=True)
 class _TrendDataPoint:
-    """One sanitized (scan_date, finding_count) pair extracted from a single audit row."""
+    """One sanitized (scan_date, findings_count) pair extracted from a single audit row."""
 
     scan_date: datetime
-    finding_count: int
+    findings_count: int
 
 
 # ---------------------------------------------------------------------------
@@ -406,7 +413,7 @@ def _render_horizontal_bar_figure(spec: _HorizontalBarChartSpec) -> _MatplotlibF
     """Build and return a horizontal bar chart Figure from a spec."""
     import matplotlib.pyplot as plt
 
-    fig, chart_axes = plt.subplots(figsize=(_CHART_WIDTH_INCHES, spec.chart_height_inches))
+    figure, chart_axes = plt.subplots(figsize=(_CHART_WIDTH_INCHES, spec.chart_height_inches))
     bars = chart_axes.barh(spec.labels, spec.values, color=spec.colours)
     chart_axes.bar_label(
         bars, padding=_CHART_BAR_LABEL_PADDING, fontsize=_CHART_BAR_LABEL_FONT_SIZE
@@ -414,9 +421,9 @@ def _render_horizontal_bar_figure(spec: _HorizontalBarChartSpec) -> _MatplotlibF
     chart_axes.set_xlabel(spec.xlabel)
     chart_axes.set_title(spec.title)
     chart_axes.invert_yaxis()
-    fig.tight_layout()
-    plt.close(fig)
-    return fig  # type: ignore[return-value]
+    figure.tight_layout()
+    plt.close(figure)
+    return figure  # type: ignore[return-value]
 
 
 def _prepare_category_chart_data(
@@ -483,7 +490,7 @@ def _build_severity_chart(scan_result: ScanResult) -> _MatplotlibFigure:
     """Donut chart — severity distribution."""
     import matplotlib.pyplot as plt
 
-    fig, chart_axes = plt.subplots(figsize=(_CHART_WIDTH_INCHES, _CHART_HEIGHT_PIE_INCHES))
+    figure, chart_axes = plt.subplots(figsize=(_CHART_WIDTH_INCHES, _CHART_HEIGHT_PIE_INCHES))
     chart_data = _prepare_severity_chart_data(scan_result)
     if chart_data is None:
         chart_axes.text(
@@ -495,9 +502,9 @@ def _build_severity_chart(scan_result: ScanResult) -> _MatplotlibFigure:
             fontsize=_CHART_NO_DATA_FONT_SIZE,
         )
         chart_axes.axis("off")
-        fig.tight_layout()
-        plt.close(fig)
-        return fig  # type: ignore[return-value]
+        figure.tight_layout()
+        plt.close(figure)
+        return figure  # type: ignore[return-value]
     labels, severity_finding_counts, colours = chart_data
     chart_axes.pie(
         severity_finding_counts,
@@ -508,9 +515,9 @@ def _build_severity_chart(scan_result: ScanResult) -> _MatplotlibFigure:
         autopct="%1.0f%%",
     )
     chart_axes.set_title("Severity Distribution")
-    fig.tight_layout()
-    plt.close(fig)
-    return fig  # type: ignore[return-value]
+    figure.tight_layout()
+    plt.close(figure)
+    return figure  # type: ignore[return-value]
 
 
 def _prepare_top_files_chart_data(scan_result: ScanResult) -> tuple[list[str], list[int]]:
@@ -527,7 +534,7 @@ def _build_top_files_chart(scan_result: ScanResult) -> _MatplotlibFigure:
     import matplotlib.pyplot as plt
 
     labels, counts = _prepare_top_files_chart_data(scan_result)
-    fig, chart_axes = plt.subplots(figsize=(_CHART_WIDTH_INCHES, _CHART_HEIGHT_FILES_INCHES))
+    figure, chart_axes = plt.subplots(figsize=(_CHART_WIDTH_INCHES, _CHART_HEIGHT_FILES_INCHES))
     if not labels:
         chart_axes.text(
             0.5,
@@ -538,9 +545,9 @@ def _build_top_files_chart(scan_result: ScanResult) -> _MatplotlibFigure:
             fontsize=_CHART_NO_DATA_FONT_SIZE,
         )
         chart_axes.axis("off")
-        fig.tight_layout()
-        plt.close(fig)
-        return fig  # type: ignore[return-value]
+        figure.tight_layout()
+        plt.close(figure)
+        return figure  # type: ignore[return-value]
     bars = chart_axes.barh(labels, counts, color=_CHART_COLOUR_BLUE)
     chart_axes.bar_label(
         bars, padding=_CHART_BAR_LABEL_PADDING, fontsize=_CHART_BAR_LABEL_FONT_SIZE
@@ -548,9 +555,9 @@ def _build_top_files_chart(scan_result: ScanResult) -> _MatplotlibFigure:
     chart_axes.set_xlabel("Findings Count")
     chart_axes.set_title(f"Top {len(labels)} Files by Finding Count")
     chart_axes.invert_yaxis()
-    fig.tight_layout()
-    plt.close(fig)
-    return fig  # type: ignore[return-value]
+    figure.tight_layout()
+    plt.close(figure)
+    return figure  # type: ignore[return-value]
 
 
 def _extract_trend_data_points(
@@ -558,12 +565,12 @@ def _extract_trend_data_points(
 ) -> tuple[_TrendDataPoint, ...]:
     """Sanitization boundary: extract trend chart data from audit rows.
 
-    Only _AUDIT_ROW_KEY_TIMESTAMP and _AUDIT_ROW_KEY_FINDINGS_COUNT are read;
-    all other audit columns (repository_hash, branch_hash, findings_json, etc.)
-    are intentionally ignored. The audit schema guarantees both consumed columns
-    are PHI-free: timestamp is an ISO 8601 datetime string, findings_count is an
-    integer aggregate. Raw PHI values are never stored in the audit database —
-    all path-based identifiers are SHA-256 digested before insertion.
+    Each raw audit row is first restricted to _AUDIT_ROW_ALLOWED_KEYS via a
+    dict comprehension — this is the runtime enforcement that no other audit
+    column (repository_hash, branch_hash, findings_json, etc.) can reach
+    downstream chart rendering regardless of schema changes or unexpected fields.
+    Only the two PHI-free columns are then extracted from the restricted dict:
+    timestamp (ISO 8601 datetime string) and findings_count (integer aggregate).
 
     Rows with an unparseable timestamp are skipped so one malformed row does not
     suppress the entire trend chart.
@@ -580,14 +587,17 @@ def _extract_trend_data_points(
     )
     points: list[_TrendDataPoint] = []
     for row in sorted_rows:
-        raw_timestamp = row.get(_AUDIT_ROW_KEY_TIMESTAMP, "")
+        safe_row: dict[str, object] = {
+            key: row[key] for key in _AUDIT_ROW_ALLOWED_KEYS if key in row
+        }
+        raw_timestamp = safe_row.get(_AUDIT_ROW_KEY_TIMESTAMP, "")
         try:
             scan_date = datetime.fromisoformat(str(raw_timestamp))
         except (ValueError, TypeError):
             continue
-        raw_count = row.get(_AUDIT_ROW_KEY_FINDINGS_COUNT, 0)
-        finding_count = int(raw_count) if isinstance(raw_count, (int, float, str)) else 0
-        points.append(_TrendDataPoint(scan_date=scan_date, finding_count=finding_count))
+        raw_count = safe_row.get(_AUDIT_ROW_KEY_FINDINGS_COUNT, 0)
+        findings_count = int(raw_count) if isinstance(raw_count, (int, float, str)) else 0
+        points.append(_TrendDataPoint(scan_date=scan_date, findings_count=findings_count))
     return tuple(points)
 
 
@@ -601,7 +611,7 @@ def _build_trend_chart(trend_points: tuple[_TrendDataPoint, ...]) -> _Matplotlib
     import matplotlib.dates as mdates
     import matplotlib.pyplot as plt
 
-    fig, chart_axes = plt.subplots(figsize=(_CHART_WIDTH_INCHES, _CHART_HEIGHT_TREND_INCHES))
+    figure, chart_axes = plt.subplots(figsize=(_CHART_WIDTH_INCHES, _CHART_HEIGHT_TREND_INCHES))
 
     if not trend_points:
         chart_axes.text(
@@ -613,12 +623,12 @@ def _build_trend_chart(trend_points: tuple[_TrendDataPoint, ...]) -> _Matplotlib
             fontsize=_CHART_NO_HISTORY_FONT_SIZE,
         )
         chart_axes.axis("off")
-        fig.tight_layout()
-        plt.close(fig)
-        return fig  # type: ignore[return-value]
+        figure.tight_layout()
+        plt.close(figure)
+        return figure  # type: ignore[return-value]
 
     date_nums = mdates.date2num([p.scan_date for p in trend_points])  # type: ignore[no-untyped-call]
-    counts = [p.finding_count for p in trend_points]
+    counts = [p.findings_count for p in trend_points]
     chart_axes.plot(
         date_nums,
         counts,
@@ -629,13 +639,13 @@ def _build_trend_chart(trend_points: tuple[_TrendDataPoint, ...]) -> _Matplotlib
     chart_axes.fill_between(date_nums, counts, alpha=_CHART_FILL_ALPHA, color=_CHART_COLOUR_BLUE)
     chart_axes.xaxis.set_major_formatter(mdates.DateFormatter("%b %d"))  # type: ignore[no-untyped-call]
     chart_axes.xaxis.set_major_locator(mdates.AutoDateLocator())  # type: ignore[no-untyped-call]
-    fig.autofmt_xdate()
+    figure.autofmt_xdate()
     chart_axes.set_ylabel("Findings")
     chart_axes.set_title("Findings Trend (Audit Log History)")
     chart_axes.grid(axis="y", linestyle="--", alpha=_CHART_GRID_ALPHA)
-    fig.tight_layout()
-    plt.close(fig)
-    return fig  # type: ignore[return-value]
+    figure.tight_layout()
+    plt.close(figure)
+    return figure  # type: ignore[return-value]
 
 
 # ---------------------------------------------------------------------------

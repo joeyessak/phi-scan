@@ -191,7 +191,7 @@ _REPORT_PATH_TABLE_FORMAT_ERROR: str = (
     "Use --output json, sarif, csv, junit, codequality, gitlab-sast, pdf, or html."
 )
 _REPORT_PATH_BINARY_FORMAT_REQUIRED_ERROR: str = (
-    "--output {fmt} requires --report-path <file.{fmt}> "
+    "--output {format} requires --report-path <file.{format}> "
     "-- binary formats cannot be written to stdout."
 )
 _UNEXPECTED_BINARY_FORMAT_ERROR: str = (
@@ -784,7 +784,7 @@ def _generate_report_bytes(
 
 
 def _write_binary_report(scan_result: ScanResult, options: _ScanOutputOptions) -> None:
-    """Validate options, generate report bytes, and write to report_path.
+    """Write the rendered binary report to the path specified in options.
 
     Binary formats cannot be streamed to stdout — a --report-path is required.
     Fetches the last 30 days of audit rows for the trend chart.
@@ -798,7 +798,7 @@ def _write_binary_report(scan_result: ScanResult, options: _ScanOutputOptions) -
     """
     if options.report_path is None:
         typer.echo(
-            _REPORT_PATH_BINARY_FORMAT_REQUIRED_ERROR.format(fmt=options.output_format.value),
+            _REPORT_PATH_BINARY_FORMAT_REQUIRED_ERROR.format(format=options.output_format.value),
             err=True,
         )
         raise typer.Exit(code=EXIT_CODE_ERROR)
