@@ -195,6 +195,7 @@ _SCAN_REPORT_PATH_HELP: str = (
     "Requires a non-table output format."
 )
 _SCAN_NO_CACHE_HELP: str = "Bypass the content-hash scan cache. Forces a full re-scan of all files."
+_FRAMEWORK_FLAG_NAME: str = "--framework"
 _SCAN_FRAMEWORK_HELP: str = (
     "Comma-separated compliance frameworks to annotate findings with "
     "(e.g. gdpr,soc2,hitrust). hipaa is always active. "
@@ -753,6 +754,24 @@ def _resolve_output_format(output_format: str) -> OutputFormat:
     except ValueError as value_error:
         typer.echo(_UNSUPPORTED_OUTPUT_FORMAT_ERROR.format(fmt=output_format), err=True)
         raise typer.Exit(code=EXIT_CODE_ERROR) from value_error
+
+
+def _build_framework_annotations(
+    findings: tuple[ScanFinding, ...],
+    enabled_frameworks: frozenset[ComplianceFramework],
+) -> Mapping[int, tuple[ComplianceControl, ...]] | None:
+    """Return per-finding compliance annotations, or None when no frameworks are enabled.
+
+    Args:
+        findings: Findings from a completed scan.
+        enabled_frameworks: Frameworks selected via --framework; empty means disabled.
+
+    Returns:
+        Mapping of finding index to applicable controls, or None when disabled.
+    """
+    if not enabled_frameworks:
+        return None
+    return annotate_findings(findings, enabled_frameworks)
 
 
 def _resolve_framework_flag(framework_flag_value: str | None) -> frozenset[ComplianceFramework]:
@@ -1337,7 +1356,9 @@ def scan(
     should_use_baseline: Annotated[
         bool, typer.Option("--baseline", help=_SCAN_BASELINE_HELP)
     ] = False,
-    framework: Annotated[str | None, typer.Option("--framework", help=_SCAN_FRAMEWORK_HELP)] = None,
+    framework: Annotated[
+        str | None, typer.Option(_FRAMEWORK_FLAG_NAME, help=_SCAN_FRAMEWORK_HELP)
+    ] = None,
 ) -> None:
     """Scan a directory or file for PHI/PII.
 
@@ -1367,10 +1388,7 @@ def scan(
     # _execute_scan_with_progress will propagate before output_options is configured,
     # which is acceptable — output_options has no effect until _emit_scan_output is called.
     scan_result = _execute_scan_with_progress(scan_targets, scan_config, is_rich_mode)
-    if not enabled_frameworks:
-        framework_annotations = None
-    else:
-        framework_annotations = annotate_findings(scan_result.findings, enabled_frameworks)
+    framework_annotations = _build_framework_annotations(scan_result.findings, enabled_frameworks)
     output_options = _ScanOutputOptions(
         output_format=output_format_enum,
         is_rich_mode=is_rich_mode,

@@ -237,6 +237,10 @@ FRAMEWORK_METADATA: dict[ComplianceFramework, FrameworkMetadata] = {
 
 # HITECH ----------------------------------------------------------------
 
+# Regulatory threshold: breaches affecting this many or more individuals require
+# media notification in addition to individual and HHS notification (45 CFR §164.406).
+_HITECH_BREACH_NOTIFICATION_THRESHOLD: int = 500
+
 _HITECH_BREACH_NOTIFICATION = ComplianceControl(
     framework=ComplianceFramework.HITECH,
     control_id="45 CFR §§164.400–414",
@@ -244,7 +248,8 @@ _HITECH_BREACH_NOTIFICATION = ComplianceControl(
     citation=(
         "HITECH Act 45 CFR §§164.400–414: findings with HIGH confidence represent "
         "'unsecured PHI' and trigger mandatory breach notification to affected individuals, "
-        "HHS, and the media when 500+ individuals are affected."
+        "HHS, and the media when "
+        f"{_HITECH_BREACH_NOTIFICATION_THRESHOLD}+ individuals are affected."
     ),
 )
 
