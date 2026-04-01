@@ -10,7 +10,7 @@ from collections import deque
 from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated, Any
+from typing import TYPE_CHECKING, Annotated, Any, NoReturn
 
 import pathspec
 import typer
@@ -199,7 +199,8 @@ _SCAN_NO_CACHE_HELP: str = "Bypass the content-hash scan cache. Forces a full re
 _FRAMEWORK_FLAG_NAME: str = "--framework"
 _SCAN_FRAMEWORK_HELP: str = (
     "Comma-separated compliance frameworks to annotate findings with "
-    "(e.g. gdpr,soc2,hitrust). hipaa is always active. "
+    f"(e.g. {ComplianceFramework.GDPR},{ComplianceFramework.SOC2},{ComplianceFramework.HITRUST}). "
+    f"{ComplianceFramework.HIPAA} is always active. "
     "Run `phi-scan explain frameworks` for all supported values."
 )
 # The {error} placeholder receives a ValueError from parse_framework_flag, whose
@@ -1003,7 +1004,7 @@ def _emit_scan_output(scan_result: ScanResult, options: _ScanOutputOptions) -> N
 
 def _emit_scan_output_with_baseline(
     scan_result: ScanResult, output_options: _ScanOutputOptions
-) -> None:
+) -> NoReturn:
     """Apply baseline filtering and emit output; exit code reflects new findings only.
 
     Loads the default baseline file. If no baseline exists, warns and falls back
