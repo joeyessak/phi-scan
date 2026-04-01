@@ -783,11 +783,14 @@ def _generate_report_bytes(
     return generate_html_report(scan_result, options.scan_target, audit_rows)
 
 
+def _fetch_report_audit_rows() -> list[dict[str, object]]:
+    """Return recent audit rows for the binary report trend chart."""
+    database_path = Path(DEFAULT_DATABASE_PATH).expanduser()
+    return query_recent_scans(database_path, _TREND_CHART_LOOKBACK_DAYS)
+
+
 def _write_binary_report(scan_result: ScanResult, options: _ScanOutputOptions) -> None:
     """Write the rendered binary report to the path specified in options.
-
-    Binary formats cannot be streamed to stdout — a --report-path is required.
-    Fetches the last 30 days of audit rows for the trend chart.
 
     Args:
         scan_result: The completed scan result.
@@ -802,8 +805,7 @@ def _write_binary_report(scan_result: ScanResult, options: _ScanOutputOptions) -
             err=True,
         )
         raise typer.Exit(code=EXIT_CODE_ERROR)
-    database_path = Path(DEFAULT_DATABASE_PATH).expanduser()
-    audit_rows = query_recent_scans(database_path, _TREND_CHART_LOOKBACK_DAYS)
+    audit_rows = _fetch_report_audit_rows()
     report_bytes = _generate_report_bytes(scan_result, options, audit_rows)
     _write_report_bytes_to_file(report_bytes, options.report_path)
 

@@ -244,6 +244,20 @@ _HEX_GREEN_END: int = 4
 _HEX_BLUE_START: int = 4
 _HEX_BLUE_END: int = 6
 
+# Named RGB tuples for direct fpdf2 set_fill_color / set_text_color calls.
+# fpdf2 core font rendering requires integer (R, G, B) tuples — hex strings cannot be
+# used directly with these methods, so we maintain a parallel set of RGB constants.
+_COLOUR_NAVY_RGB: tuple[int, int, int] = (44, 62, 80)  # dark header and body text
+_COLOUR_WHITE_RGB: tuple[int, int, int] = (255, 255, 255)  # white text on dark fill
+_COLOUR_LIGHT_SILVER_RGB: tuple[int, int, int] = (200, 210, 220)  # cover subtitle text
+_COLOUR_MUTED_GRAY_RGB: tuple[int, int, int] = (127, 140, 141)  # footer and small text
+_COLOUR_CLEAN_GREEN_RGB: tuple[int, int, int] = (39, 174, 96)  # clean / no-findings label
+_COLOUR_DARK_BLUE_RGB: tuple[int, int, int] = (52, 73, 94)  # table header fill
+
+# Y-axis positions on the PDF cover page (millimetres from top of page).
+_PDF_COVER_TITLE_Y_MM: float = 18.0  # vertical position for the report title
+_PDF_COVER_RISK_Y_MM: float = 72.0  # vertical position for the risk-level label
+
 
 def _convert_hex_to_rgb(hex_colour: str) -> tuple[int, int, int]:
     """Convert a 6-char hex colour string to an (R, G, B) int tuple."""
@@ -938,9 +952,9 @@ def _pdf_add_section_heading(pdf: object, title: str) -> None:
     """Write a bold section heading with a dark underline bar."""
     pdf.ln(4)  # type: ignore[attr-defined]
     _pdf_set_font(pdf, style="B", size=_FONT_HEADING)
-    pdf.set_text_color(44, 62, 80)  # type: ignore[attr-defined]
+    pdf.set_text_color(*_COLOUR_NAVY_RGB)  # type: ignore[attr-defined]
     pdf.cell(0, 8, _encode_pdf_text_as_latin1(title), new_x="LMARGIN", new_y="NEXT")  # type: ignore[attr-defined]
-    pdf.set_fill_color(44, 62, 80)  # type: ignore[attr-defined]
+    pdf.set_fill_color(*_COLOUR_NAVY_RGB)  # type: ignore[attr-defined]
     pdf.cell(0, 0.5, "", new_x="LMARGIN", new_y="NEXT", fill=True)  # type: ignore[attr-defined]
     pdf.ln(3)  # type: ignore[attr-defined]
 
@@ -956,16 +970,16 @@ def _pdf_write_cover_page(
     risk_rgb = _convert_hex_to_rgb(risk_hex)
 
     pdf.add_page()  # type: ignore[attr-defined]
-    pdf.set_fill_color(44, 62, 80)  # type: ignore[attr-defined]
+    pdf.set_fill_color(*_COLOUR_NAVY_RGB)  # type: ignore[attr-defined]
     pdf.rect(0, 0, _PAGE_WIDTH_MM, 60, style="F")  # type: ignore[attr-defined]
 
     _pdf_set_font(pdf, style="B", size=_FONT_TITLE)
-    pdf.set_text_color(255, 255, 255)  # type: ignore[attr-defined]
-    pdf.set_y(18)  # type: ignore[attr-defined]
+    pdf.set_text_color(*_COLOUR_WHITE_RGB)  # type: ignore[attr-defined]
+    pdf.set_y(_PDF_COVER_TITLE_Y_MM)  # type: ignore[attr-defined]
     pdf.cell(0, 10, "PHI / PII Scan Report", align="C", new_x="LMARGIN", new_y="NEXT")  # type: ignore[attr-defined]
 
     _pdf_set_font(pdf, size=_FONT_BODY)
-    pdf.set_text_color(200, 210, 220)  # type: ignore[attr-defined]
+    pdf.set_text_color(*_COLOUR_LIGHT_SILVER_RGB)  # type: ignore[attr-defined]
     pdf.cell(  # type: ignore[attr-defined]
         0,
         6,
@@ -975,7 +989,7 @@ def _pdf_write_cover_page(
         new_y="NEXT",
     )
 
-    pdf.set_y(72)  # type: ignore[attr-defined]
+    pdf.set_y(_PDF_COVER_RISK_Y_MM)  # type: ignore[attr-defined]
     _pdf_set_font(pdf, style="B", size=_FONT_HEADING)
     pdf.set_text_color(*risk_rgb)  # type: ignore[attr-defined]
     risk_label = f"RISK LEVEL: {scan_result.risk_level.value.upper()}"
@@ -984,7 +998,7 @@ def _pdf_write_cover_page(
     )
 
     pdf.ln(8)  # type: ignore[attr-defined]
-    pdf.set_text_color(44, 62, 80)  # type: ignore[attr-defined]
+    pdf.set_text_color(*_COLOUR_NAVY_RGB)  # type: ignore[attr-defined]
     metadata_rows: list[tuple[str, str]] = [
         ("Scan Target", str(scan_target)),
         ("Total Findings", str(len(scan_result.findings))),
@@ -1002,7 +1016,7 @@ def _pdf_write_cover_page(
 
     pdf.ln(10)  # type: ignore[attr-defined]
     _pdf_set_font(pdf, size=_FONT_SMALL)
-    pdf.set_text_color(127, 140, 141)  # type: ignore[attr-defined]
+    pdf.set_text_color(*_COLOUR_MUTED_GRAY_RGB)  # type: ignore[attr-defined]
     pdf.multi_cell(  # type: ignore[attr-defined]
         0,
         5,
@@ -1020,7 +1034,7 @@ def _pdf_write_summary_page(
     pdf.add_page()  # type: ignore[attr-defined]
     _pdf_add_section_heading(pdf, "Executive Summary")
 
-    pdf.set_text_color(44, 62, 80)  # type: ignore[attr-defined]
+    pdf.set_text_color(*_COLOUR_NAVY_RGB)  # type: ignore[attr-defined]
     severity_rows: list[tuple[str, int]] = [
         ("HIGH", scan_result.severity_counts.get(SeverityLevel.HIGH, 0)),
         ("MEDIUM", scan_result.severity_counts.get(SeverityLevel.MEDIUM, 0)),
@@ -1070,13 +1084,13 @@ def _pdf_write_findings_table(pdf: object, scan_result: ScanResult) -> None:
 
     if not scan_result.findings:
         _pdf_set_font(pdf, size=_FONT_BODY)
-        pdf.set_text_color(39, 174, 96)  # type: ignore[attr-defined]
+        pdf.set_text_color(*_COLOUR_CLEAN_GREEN_RGB)  # type: ignore[attr-defined]
         pdf.cell(0, 8, "No findings - codebase is clean.", new_x="LMARGIN", new_y="NEXT")  # type: ignore[attr-defined]
         return
 
     def _write_table_header() -> None:
-        pdf.set_fill_color(52, 73, 94)  # type: ignore[attr-defined]
-        pdf.set_text_color(255, 255, 255)  # type: ignore[attr-defined]
+        pdf.set_fill_color(*_COLOUR_DARK_BLUE_RGB)  # type: ignore[attr-defined]
+        pdf.set_text_color(*_COLOUR_WHITE_RGB)  # type: ignore[attr-defined]
         _pdf_set_font(pdf, style="B", size=_FONT_TABLE_HEADER)
         for column in _PDF_TABLE_COLUMNS:
             pdf.cell(column.width_mm, _PDF_HEADER_HEIGHT, column.header, border=1, fill=True)  # type: ignore[attr-defined]
@@ -1091,7 +1105,7 @@ def _pdf_write_findings_table(pdf: object, scan_result: ScanResult) -> None:
 
         row_rgb = _convert_hex_to_rgb(_get_severity_row_colour(finding.severity))
         pdf.set_fill_color(*row_rgb)  # type: ignore[attr-defined]
-        pdf.set_text_color(44, 62, 80)  # type: ignore[attr-defined]
+        pdf.set_text_color(*_COLOUR_NAVY_RGB)  # type: ignore[attr-defined]
         _pdf_set_font(pdf, size=_FONT_TABLE_BODY)
 
         file_str = str(finding.file_path)
@@ -1130,7 +1144,7 @@ def _pdf_write_remediation_section(pdf: object, scan_result: ScanResult) -> None
     _pdf_add_section_heading(pdf, "Remediation Guidance")
 
     present_categories = {f.hipaa_category for f in scan_result.findings}
-    pdf.set_text_color(44, 62, 80)  # type: ignore[attr-defined]
+    pdf.set_text_color(*_COLOUR_NAVY_RGB)  # type: ignore[attr-defined]
 
     for category in PhiCategory:
         if category not in present_categories:
@@ -1172,7 +1186,7 @@ def _pdf_write_appendix(
     pdf.add_page()  # type: ignore[attr-defined]
     _pdf_add_section_heading(pdf, "Appendix - Scan Configuration")
 
-    pdf.set_text_color(44, 62, 80)  # type: ignore[attr-defined]
+    pdf.set_text_color(*_COLOUR_NAVY_RGB)  # type: ignore[attr-defined]
     appendix_rows: list[tuple[str, str]] = [
         ("Scanner Version", f"PhiScan v{__version__}"),
         ("Scan Target", str(scan_target)),
@@ -1191,7 +1205,7 @@ def _pdf_write_appendix(
 
     pdf.ln(8)  # type: ignore[attr-defined]
     _pdf_set_font(pdf, size=_FONT_SMALL)
-    pdf.set_text_color(127, 140, 141)  # type: ignore[attr-defined]
+    pdf.set_text_color(*_COLOUR_MUTED_GRAY_RGB)  # type: ignore[attr-defined]
     pdf.multi_cell(  # type: ignore[attr-defined]
         0,
         5,
