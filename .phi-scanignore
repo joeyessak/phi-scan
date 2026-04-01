@@ -86,9 +86,12 @@ target/
 .terraform/modules/
 .serverless/
 
-# Synthetic PHI fixture corpus — contains intentional PHI-like patterns for
-# detection testing. Excluding prevents false positives when scanning this repo.
-tests/fixtures/phi/
+# Test suite — contains intentional PHI-like patterns (synthetic fixture data,
+# HL7 test messages, regex test constants) required for detection testing.
+# Test files are not production code and are reviewed separately via PR review.
+# tests/fixtures/phi/ is the formal fixture corpus; the broader tests/ exclusion
+# covers synthetic PHI constants embedded directly in test_*.py files.
+tests/
 
 # PhiScan project-level documentation and CI configuration.
 # These files are excluded to suppress false positives when phi-scan scans its

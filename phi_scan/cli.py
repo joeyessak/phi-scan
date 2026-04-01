@@ -756,8 +756,28 @@ def _write_report_bytes_to_file(content: bytes, report_path: Path) -> None:
     typer.echo(_REPORT_PATH_WRITTEN_MESSAGE.format(path=report_path), err=True)
 
 
+def _generate_report_bytes(
+    scan_result: ScanResult,
+    options: _ScanOutputOptions,
+    audit_rows: list[dict[str, object]],
+) -> bytes:
+    """Generate PDF or HTML report bytes from a scan result.
+
+    Args:
+        scan_result: The completed scan result.
+        options: Must have output_format in (pdf, html) and a non-None scan_target.
+        audit_rows: Recent audit rows for the trend chart.
+
+    Returns:
+        Raw bytes of the generated report (PDF or UTF-8 HTML).
+    """
+    if options.output_format == OutputFormat.PDF:
+        return generate_pdf_report(scan_result, options.scan_target, audit_rows)
+    return generate_html_report(scan_result, options.scan_target, audit_rows)
+
+
 def _write_binary_report(scan_result: ScanResult, options: _ScanOutputOptions) -> None:
-    """Generate and write a PDF or HTML enterprise report.
+    """Validate options, generate report bytes, and write to report_path.
 
     Binary formats cannot be streamed to stdout — a --report-path is required.
     Fetches the last 30 days of audit rows for the trend chart.
@@ -777,10 +797,7 @@ def _write_binary_report(scan_result: ScanResult, options: _ScanOutputOptions) -
         raise typer.Exit(code=EXIT_CODE_ERROR)
     database_path = Path(DEFAULT_DATABASE_PATH).expanduser()
     audit_rows = query_recent_scans(database_path, _TREND_CHART_LOOKBACK_DAYS)
-    if options.output_format == OutputFormat.PDF:
-        report_bytes = generate_pdf_report(scan_result, options.scan_target, audit_rows)
-    else:
-        report_bytes = generate_html_report(scan_result, options.scan_target, audit_rows)
+    report_bytes = _generate_report_bytes(scan_result, options, audit_rows)
     _write_report_bytes_to_file(report_bytes, options.report_path)
 
 

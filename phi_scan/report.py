@@ -31,10 +31,11 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from operator import itemgetter
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Protocol
 
 from phi_scan import __version__
 from phi_scan.constants import (
+    CODE_CONTEXT_REDACTED_VALUE,
     HIPAA_REMEDIATION_GUIDANCE,
     SEVERITY_RANK,
     PhiCategory,
@@ -75,7 +76,8 @@ _COLOUR_WHITE: str = "FFFFFF"
 _PAGE_WIDTH_MM: float = 210.0
 _PAGE_HEIGHT_MM: float = 297.0
 _MARGIN_MM: float = 15.0
-_CONTENT_WIDTH_MM: float = _PAGE_WIDTH_MM - 2 * _MARGIN_MM
+_PAGE_SIDE_MARGIN_COUNT: int = 2  # one left margin + one right margin
+_CONTENT_WIDTH_MM: float = _PAGE_WIDTH_MM - _PAGE_SIDE_MARGIN_COUNT * _MARGIN_MM
 
 # PDF font sizes
 _FONT_TITLE: int = 22
@@ -138,31 +140,58 @@ _CHART_PIE_START_ANGLE: int = 90
 _CHART_GRID_ALPHA: float = 0.5
 _CHART_DONUT_WIDTH: float = 0.5
 
-# Marker used by the scanner layer to replace raw PHI values in code context
-_REDACTED_MARKER: str = "[REDACTED]"
-
 # Chart placeholder text for empty-data states
 _CHART_NO_FINDINGS_LABEL: str = "(no findings)"
 _CHART_NO_FINDINGS_TEXT: str = "No findings"
 _CHART_NO_HISTORY_TEXT: str = "No audit history available"
 
-# PDF findings table column widths and headers
-_PDF_COL_WIDTHS: tuple[float, ...] = (8.0, 52.0, 10.0, 28.0, 26.0, 16.0, 14.0, 16.0)
-_PDF_COL_HEADERS: tuple[str, ...] = (
-    "#",
-    "File Path",
-    "Line",
-    "Entity Type",
-    "HIPAA Category",
-    "Severity",
-    "Conf.",
-    "Layer",
-)
 _PDF_ROW_HEIGHT: float = 5.5
 _PDF_HEADER_HEIGHT: float = 7.0
 
 # Page-break threshold for findings table (stop before footer area)
 _PDF_PAGE_BREAK_Y_MM: float = _PAGE_HEIGHT_MM - 25.0
+
+
+# ---------------------------------------------------------------------------
+# PDF table column definitions
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class _PdfTableColumn:
+    """Header label and width in mm for a single PDF findings table column."""
+
+    header: str
+    width_mm: float
+
+
+_PDF_TABLE_COLUMNS: tuple[_PdfTableColumn, ...] = (
+    _PdfTableColumn(header="#", width_mm=8.0),
+    _PdfTableColumn(header="File Path", width_mm=52.0),
+    _PdfTableColumn(header="Line", width_mm=10.0),
+    _PdfTableColumn(header="Entity Type", width_mm=28.0),
+    _PdfTableColumn(header="HIPAA Category", width_mm=26.0),
+    _PdfTableColumn(header="Severity", width_mm=16.0),
+    _PdfTableColumn(header="Conf.", width_mm=14.0),
+    _PdfTableColumn(header="Layer", width_mm=16.0),
+)
+
+
+# ---------------------------------------------------------------------------
+# Matplotlib Protocol — structural interface for chart figure objects
+# ---------------------------------------------------------------------------
+
+
+class _MatplotlibFigure(Protocol):
+    """Structural interface for matplotlib Figure objects used in chart rendering.
+
+    Defines only the savefig method consumed by _render_chart_to_buffer.
+    Avoids a hard type dependency on matplotlib, which is an optional reports
+    dependency — the Protocol is satisfied by any object with a compatible
+    savefig method regardless of import availability at type-check time.
+    """
+
+    def savefig(self, fname: object, **kwargs: object) -> None: ...
 
 
 # ---------------------------------------------------------------------------
@@ -229,9 +258,9 @@ def _truncate_code_context(context: str) -> str:
     """Truncate code context for report rendering, stripping unredacted content.
 
     The scanner layer is expected to substitute detected PHI values with
-    _REDACTED_MARKER before populating ScanFinding.code_context.  When the
+    CODE_CONTEXT_REDACTED_VALUE before populating ScanFinding.code_context.  When the
     marker is absent from a non-empty context, the content may contain raw PHI —
-    the entire context is replaced with _REDACTED_MARKER and a warning is logged
+    the entire context is replaced with CODE_CONTEXT_REDACTED_VALUE and a warning is logged
     so that any scanner redaction regression surfaces immediately without
     allowing PHI to escape into report output.
 
@@ -239,15 +268,15 @@ def _truncate_code_context(context: str) -> str:
         context: Raw code_context field from a ScanFinding.
 
     Returns:
-        Truncated context string, or _REDACTED_MARKER if redaction cannot be confirmed.
+        Truncated context string, or CODE_CONTEXT_REDACTED_VALUE if redaction cannot be confirmed.
     """
-    if context and _REDACTED_MARKER not in context:
+    if context and CODE_CONTEXT_REDACTED_VALUE not in context:
         _logger.warning(
             "code_context passed to report without '%s' marker — "
             "stripping content to prevent PHI leaking into report output",
-            _REDACTED_MARKER,
+            CODE_CONTEXT_REDACTED_VALUE,
         )
-        return _REDACTED_MARKER
+        return CODE_CONTEXT_REDACTED_VALUE
     return context[:_MAX_CONTEXT_CHARS]
 
 
@@ -271,7 +300,7 @@ def _truncate_chart_label(label: str) -> str:
 
 
 @functools.cache
-def _configure_agg_backend() -> None:
+def _configure_matplotlib_backend() -> None:
     """Configure the non-interactive Agg backend — executed exactly once per process.
 
     lru_cache with no arguments makes this a call-once function: the first
@@ -285,7 +314,7 @@ def _configure_agg_backend() -> None:
     matplotlib.use("Agg")
 
 
-def _render_chart_to_buffer(figure: object) -> io.BytesIO:
+def _render_chart_to_buffer(figure: _MatplotlibFigure) -> io.BytesIO:
     """Render a matplotlib Figure into an in-memory PNG buffer.
 
     Args:
@@ -295,12 +324,12 @@ def _render_chart_to_buffer(figure: object) -> io.BytesIO:
         BytesIO buffer positioned at the start of the PNG data.
     """
     buffer = io.BytesIO()
-    figure.savefig(buffer, format="png", bbox_inches="tight", dpi=_CHART_DPI)  # type: ignore[attr-defined]
+    figure.savefig(buffer, format="png", bbox_inches="tight", dpi=_CHART_DPI)
     buffer.seek(0)
     return buffer
 
 
-def _render_chart_to_base64(figure: object) -> str:
+def _render_chart_to_base64(figure: _MatplotlibFigure) -> str:
     """Render a matplotlib Figure to a base64-encoded PNG string."""
     buffer = _render_chart_to_buffer(figure)
     encoded = base64.b64encode(buffer.read()).decode("ascii")
@@ -308,7 +337,7 @@ def _render_chart_to_base64(figure: object) -> str:
     return encoded
 
 
-def _render_chart_to_bytes(figure: object) -> bytes:
+def _render_chart_to_bytes(figure: _MatplotlibFigure) -> bytes:
     """Render a matplotlib Figure to raw PNG bytes."""
     buffer = _render_chart_to_buffer(figure)
     png_bytes = buffer.read()
@@ -328,7 +357,7 @@ class _HorizontalBarChartSpec:
     chart_height_inches: float
 
 
-def _render_horizontal_bar_figure(spec: _HorizontalBarChartSpec) -> object:
+def _render_horizontal_bar_figure(spec: _HorizontalBarChartSpec) -> _MatplotlibFigure:
     """Build and return a horizontal bar chart Figure from a spec."""
     import matplotlib.pyplot as plt
 
@@ -342,7 +371,7 @@ def _render_horizontal_bar_figure(spec: _HorizontalBarChartSpec) -> object:
     chart_axes.invert_yaxis()
     fig.tight_layout()
     plt.close(fig)
-    return fig
+    return fig  # type: ignore[return-value]
 
 
 def _prepare_category_chart_data(
@@ -358,18 +387,21 @@ def _prepare_category_chart_data(
         return [_CHART_NO_FINDINGS_LABEL], [0], [_CHART_COLOUR_INACTIVE]
     sorted_items = sorted(category_counts.items(), key=itemgetter(1), reverse=True)
     labels = [label for label, _ in sorted_items]
-    values = [value for _, value in sorted_items]
-    colours = [_CHART_COLOUR_ACTIVE if v > 0 else _CHART_COLOUR_INACTIVE for v in values]
-    return labels, values, colours
+    finding_counts = [finding_count for _, finding_count in sorted_items]
+    colours = [
+        _CHART_COLOUR_ACTIVE if finding_count > 0 else _CHART_COLOUR_INACTIVE
+        for finding_count in finding_counts
+    ]
+    return labels, finding_counts, colours
 
 
-def _build_category_chart(scan_result: ScanResult) -> object:
+def _build_category_chart(scan_result: ScanResult) -> _MatplotlibFigure:
     """Horizontal bar chart — findings count by HIPAA category, sorted descending."""
-    labels, values, colours = _prepare_category_chart_data(scan_result)
+    labels, finding_counts, colours = _prepare_category_chart_data(scan_result)
     return _render_horizontal_bar_figure(
         _HorizontalBarChartSpec(
             labels=tuple(labels),
-            values=tuple(values),
+            values=tuple(finding_counts),
             colours=tuple(colours),
             title="Findings by HIPAA Category",
             xlabel="Findings Count",
@@ -397,12 +429,12 @@ def _prepare_severity_chart_data(
         SeverityLevel.INFO: _CHART_COLOUR_SEVERITY_INFO,
     }
     labels = [f"{level.value.title()} ({severity_data[level]})" for level in ordered_levels]
-    values = [severity_data[level] for level in ordered_levels]
+    severity_finding_counts = [severity_data[level] for level in ordered_levels]
     colours = [level_colours.get(level, _CHART_COLOUR_NEUTRAL) for level in ordered_levels]
-    return labels, values, colours
+    return labels, severity_finding_counts, colours
 
 
-def _build_severity_chart(scan_result: ScanResult) -> object:
+def _build_severity_chart(scan_result: ScanResult) -> _MatplotlibFigure:
     """Donut chart — severity distribution."""
     import matplotlib.pyplot as plt
 
@@ -420,10 +452,10 @@ def _build_severity_chart(scan_result: ScanResult) -> object:
         chart_axes.axis("off")
         fig.tight_layout()
         plt.close(fig)
-        return fig
-    labels, values, colours = chart_data
+        return fig  # type: ignore[return-value]
+    labels, severity_finding_counts, colours = chart_data
     chart_axes.pie(
-        values,
+        severity_finding_counts,
         labels=labels,
         colors=colours,
         wedgeprops={"width": _CHART_DONUT_WIDTH},
@@ -433,7 +465,7 @@ def _build_severity_chart(scan_result: ScanResult) -> object:
     chart_axes.set_title("Severity Distribution")
     fig.tight_layout()
     plt.close(fig)
-    return fig
+    return fig  # type: ignore[return-value]
 
 
 def _prepare_top_files_chart_data(scan_result: ScanResult) -> tuple[list[str], list[int]]:
@@ -445,7 +477,7 @@ def _prepare_top_files_chart_data(scan_result: ScanResult) -> tuple[list[str], l
     return labels, counts
 
 
-def _build_top_files_chart(scan_result: ScanResult) -> object:
+def _build_top_files_chart(scan_result: ScanResult) -> _MatplotlibFigure:
     """Horizontal bar chart — top N files with most findings."""
     import matplotlib.pyplot as plt
 
@@ -463,7 +495,7 @@ def _build_top_files_chart(scan_result: ScanResult) -> object:
         chart_axes.axis("off")
         fig.tight_layout()
         plt.close(fig)
-        return fig
+        return fig  # type: ignore[return-value]
     bars = chart_axes.barh(labels, counts, color=_CHART_COLOUR_BLUE)
     chart_axes.bar_label(
         bars, padding=_CHART_BAR_LABEL_PADDING, fontsize=_CHART_BAR_LABEL_FONT_SIZE
@@ -473,7 +505,7 @@ def _build_top_files_chart(scan_result: ScanResult) -> object:
     chart_axes.invert_yaxis()
     fig.tight_layout()
     plt.close(fig)
-    return fig
+    return fig  # type: ignore[return-value]
 
 
 def _parse_audit_dates_and_counts(
@@ -501,7 +533,7 @@ def _parse_audit_dates_and_counts(
     return dates, counts
 
 
-def _build_trend_chart(audit_rows: list[dict[str, object]]) -> object:
+def _build_trend_chart(audit_rows: list[dict[str, object]]) -> _MatplotlibFigure:
     """Line chart — findings over time from audit log history."""
     import matplotlib.dates as mdates
     import matplotlib.pyplot as plt
@@ -521,7 +553,7 @@ def _build_trend_chart(audit_rows: list[dict[str, object]]) -> object:
         chart_axes.axis("off")
         fig.tight_layout()
         plt.close(fig)
-        return fig
+        return fig  # type: ignore[return-value]
 
     date_nums = mdates.date2num(dates)  # type: ignore[no-untyped-call]
     chart_axes.plot(
@@ -540,7 +572,7 @@ def _build_trend_chart(audit_rows: list[dict[str, object]]) -> object:
     chart_axes.grid(axis="y", linestyle="--", alpha=_CHART_GRID_ALPHA)
     fig.tight_layout()
     plt.close(fig)
-    return fig
+    return fig  # type: ignore[return-value]
 
 
 # ---------------------------------------------------------------------------
@@ -759,7 +791,7 @@ def _build_html_context(
     }
 
     charts: dict[str, str] = {}
-    _configure_agg_backend()
+    _configure_matplotlib_backend()
     try:
         charts["category"] = _render_chart_to_base64(_build_category_chart(scan_result))
         charts["severity"] = _render_chart_to_base64(_build_severity_chart(scan_result))
@@ -971,8 +1003,8 @@ def _pdf_write_findings_table(pdf: object, scan_result: ScanResult) -> None:
         pdf.set_fill_color(52, 73, 94)  # type: ignore[attr-defined]
         pdf.set_text_color(255, 255, 255)  # type: ignore[attr-defined]
         _pdf_set_font(pdf, style="B", size=_FONT_TABLE_HEADER)
-        for header, width in zip(_PDF_COL_HEADERS, _PDF_COL_WIDTHS):
-            pdf.cell(width, _PDF_HEADER_HEIGHT, header, border=1, fill=True)  # type: ignore[attr-defined]
+        for column in _PDF_TABLE_COLUMNS:
+            pdf.cell(column.width_mm, _PDF_HEADER_HEIGHT, column.header, border=1, fill=True)  # type: ignore[attr-defined]
         pdf.ln()  # type: ignore[attr-defined]
 
     _write_table_header()
@@ -1006,9 +1038,13 @@ def _pdf_write_findings_table(pdf: object, scan_result: ScanResult) -> None:
             f"{finding.confidence:.2f}",
             finding.detection_layer.value,
         )
-        for cell_text, width in zip(row_cells, _PDF_COL_WIDTHS):
+        for cell_text, column in zip(row_cells, _PDF_TABLE_COLUMNS):
             pdf.cell(  # type: ignore[attr-defined]
-                width, _PDF_ROW_HEIGHT, _encode_pdf_text_to_latin1(cell_text), border="B", fill=True
+                column.width_mm,
+                _PDF_ROW_HEIGHT,
+                _encode_pdf_text_to_latin1(cell_text),
+                border="B",
+                fill=True,
             )
         pdf.ln()  # type: ignore[attr-defined]
 
@@ -1117,7 +1153,7 @@ def generate_pdf_report(
     timestamp = datetime.now(tz=UTC).strftime("%Y-%m-%d %H:%M UTC")
 
     charts: dict[str, bytes] = {}
-    _configure_agg_backend()
+    _configure_matplotlib_backend()
     try:
         charts["category"] = _render_chart_to_bytes(_build_category_chart(scan_result))
         charts["severity"] = _render_chart_to_bytes(_build_severity_chart(scan_result))

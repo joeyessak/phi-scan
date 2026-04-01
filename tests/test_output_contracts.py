@@ -136,7 +136,7 @@ _PHI_VIOLATION_FIXTURE_CONTENT: str = 'ssn = "900-00-0001"\n'
 # Sentinel value embedded in code_context to verify that no CI output format
 # serializes the surrounding-source-lines field. The value is deliberately
 # non-PHI and structured to be unmistakable if it ever appears in output.
-_CODE_CONTEXT_SENTINEL: str = "SENTINEL__CODE_CTX__MUST_NOT_APPEAR_IN_CI_OUTPUT"
+_CODE_CONTEXT_SENTINEL: str = "SENTINEL__[REDACTED]__CODE_CTX__MUST_NOT_APPEAR_IN_CI_OUTPUT"
 
 # All CI formatters share the signature (ScanResult) -> str. Parametrized with
 # a human-readable name so pytest failure output identifies the failing format.
