@@ -387,9 +387,7 @@ def _prepare_severity_chart_data(
         SeverityLevel.LOW: _CHART_COLOUR_SEVERITY_LOW,
         SeverityLevel.INFO: _CHART_COLOUR_SEVERITY_INFO,
     }
-    labels = [
-        f"{level.value.title()} ({severity_data[level]})" for level in ordered_levels
-    ]
+    labels = [f"{level.value.title()} ({severity_data[level]})" for level in ordered_levels]
     values = [severity_data[level] for level in ordered_levels]
     colours = [level_colours.get(level, _CHART_COLOUR_NEUTRAL) for level in ordered_levels]
     return labels, values, colours
@@ -404,7 +402,11 @@ def _build_severity_chart(scan_result: ScanResult) -> object:
     chart_data = _prepare_severity_chart_data(scan_result)
     if chart_data is None:
         axis.text(
-            0.5, 0.5, _CHART_NO_FINDINGS_TEXT, ha="center", va="center",
+            0.5,
+            0.5,
+            _CHART_NO_FINDINGS_TEXT,
+            ha="center",
+            va="center",
             fontsize=_CHART_NO_DATA_FONT_SIZE,
         )
         axis.axis("off")
@@ -446,7 +448,11 @@ def _build_top_files_chart(scan_result: ScanResult) -> object:
     fig, axis = plt.subplots(figsize=(_CHART_WIDTH_INCHES, _CHART_HEIGHT_FILES_INCHES))
     if not labels:
         axis.text(
-            0.5, 0.5, _CHART_NO_FINDINGS_TEXT, ha="center", va="center",
+            0.5,
+            0.5,
+            _CHART_NO_FINDINGS_TEXT,
+            ha="center",
+            va="center",
             fontsize=_CHART_NO_DATA_FONT_SIZE,
         )
         axis.axis("off")
@@ -499,14 +505,27 @@ def _build_trend_chart(audit_rows: list[dict[str, object]]) -> object:
     dates, counts = _parse_audit_dates_and_counts(audit_rows) if audit_rows else ([], [])
 
     if not dates:
-        axis.text(0.5, 0.5, _CHART_NO_HISTORY_TEXT, ha="center", va="center", fontsize=_CHART_NO_HISTORY_FONT_SIZE)
+        axis.text(
+            0.5,
+            0.5,
+            _CHART_NO_HISTORY_TEXT,
+            ha="center",
+            va="center",
+            fontsize=_CHART_NO_HISTORY_FONT_SIZE,
+        )
         axis.axis("off")
         fig.tight_layout()
         plt.close(fig)
         return fig
 
     date_nums = mdates.date2num(dates)  # type: ignore[no-untyped-call]
-    axis.plot(date_nums, counts, marker=_CHART_MARKER_STYLE, linewidth=_CHART_LINE_WIDTH, color=_CHART_COLOUR_BLUE)
+    axis.plot(
+        date_nums,
+        counts,
+        marker=_CHART_MARKER_STYLE,
+        linewidth=_CHART_LINE_WIDTH,
+        color=_CHART_COLOUR_BLUE,
+    )
     axis.fill_between(date_nums, counts, alpha=_CHART_FILL_ALPHA, color=_CHART_COLOUR_BLUE)
     axis.xaxis.set_major_formatter(mdates.DateFormatter("%b %d"))  # type: ignore[no-untyped-call]
     axis.xaxis.set_major_locator(mdates.AutoDateLocator())  # type: ignore[no-untyped-call]
@@ -847,7 +866,9 @@ def _pdf_write_cover_page(
     _pdf_set_font(pdf, style="B", size=_FONT_HEADING)
     pdf.set_text_color(*risk_rgb)  # type: ignore[attr-defined]
     risk_label = f"RISK LEVEL: {scan_result.risk_level.value.upper()}"
-    pdf.cell(0, 10, _encode_pdf_text_to_latin1(risk_label), align="C", new_x="LMARGIN", new_y="NEXT")  # type: ignore[attr-defined]
+    pdf.cell(  # type: ignore[attr-defined]
+        0, 10, _encode_pdf_text_to_latin1(risk_label), align="C", new_x="LMARGIN", new_y="NEXT"
+    )
 
     pdf.ln(8)  # type: ignore[attr-defined]
     pdf.set_text_color(44, 62, 80)  # type: ignore[attr-defined]
@@ -980,7 +1001,9 @@ def _pdf_write_findings_table(pdf: object, scan_result: ScanResult) -> None:
             finding.detection_layer.value,
         )
         for cell_text, width in zip(row_cells, _PDF_COL_WIDTHS):
-            pdf.cell(width, _PDF_ROW_HEIGHT, _encode_pdf_text_to_latin1(cell_text), border="B", fill=True)  # type: ignore[attr-defined]
+            pdf.cell(  # type: ignore[attr-defined]
+                width, _PDF_ROW_HEIGHT, _encode_pdf_text_to_latin1(cell_text), border="B", fill=True
+            )
         pdf.ln()  # type: ignore[attr-defined]
 
 
@@ -997,11 +1020,19 @@ def _pdf_write_remediation_section(pdf: object, scan_result: ScanResult) -> None
             continue
         _pdf_set_font(pdf, style="B", size=_FONT_SUBHEADING)
         pdf.cell(  # type: ignore[attr-defined]
-            0, 6, _encode_pdf_text_to_latin1(category.value.replace("_", " ").title()), new_x="LMARGIN", new_y="NEXT"
+            0,
+            6,
+            _encode_pdf_text_to_latin1(category.value.replace("_", " ").title()),
+            new_x="LMARGIN",
+            new_y="NEXT",
         )
         _pdf_set_font(pdf, size=_FONT_BODY)
         pdf.multi_cell(  # type: ignore[attr-defined]
-            0, 5, _encode_pdf_text_to_latin1(textwrap.fill(HIPAA_REMEDIATION_GUIDANCE[category], width=110))
+            0,
+            5,
+            _encode_pdf_text_to_latin1(
+                textwrap.fill(HIPAA_REMEDIATION_GUIDANCE[category], width=110)
+            ),
         )
         pdf.ln(2)  # type: ignore[attr-defined]
 
