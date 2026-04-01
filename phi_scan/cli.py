@@ -34,6 +34,11 @@ from phi_scan.baseline import (
     get_baseline_summary,
     load_baseline,
 )
+from phi_scan.compliance import (
+    ComplianceFramework,
+    annotate_findings,
+    parse_framework_flag,
+)
 from phi_scan.config import create_default_config, load_config
 from phi_scan.constants import (
     BASELINE_DRIFT_WARNING_PERCENT,
@@ -69,7 +74,9 @@ from phi_scan.fixer import (
 from phi_scan.help_text import (
     EXPLAIN_CONFIDENCE_TEXT,
     EXPLAIN_CONFIG_TEXT,
+    EXPLAIN_DEIDENTIFICATION_TEXT,
     EXPLAIN_DETECTION_TEXT,
+    EXPLAIN_FRAMEWORKS_TEXT,
     EXPLAIN_HIPAA_TEXT,
     EXPLAIN_IGNORE_TEXT,
     EXPLAIN_REMEDIATION_TEXT,
@@ -130,6 +137,8 @@ from phi_scan.scanner import (
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+    from phi_scan.compliance import ComplianceControl
+
 __all__ = ["app"]
 
 _logger: logging.Logger = get_logger("cli")
@@ -186,6 +195,12 @@ _SCAN_REPORT_PATH_HELP: str = (
     "Requires a non-table output format."
 )
 _SCAN_NO_CACHE_HELP: str = "Bypass the content-hash scan cache. Forces a full re-scan of all files."
+_SCAN_FRAMEWORK_HELP: str = (
+    "Comma-separated compliance frameworks to annotate findings with "
+    "(e.g. gdpr,soc2,hitrust). hipaa is always active. "
+    "Run `phi-scan explain frameworks` for all supported values."
+)
+_FRAMEWORK_PARSE_ERROR: str = "Invalid --framework value: {error}"
 _REPORT_PATH_TABLE_FORMAT_ERROR: str = (
     "--report-path requires a serialized output format. "
     "Use --output json, sarif, csv, junit, codequality, gitlab-sast, pdf, or html."
@@ -535,6 +550,7 @@ class _ScanOutputOptions:
     is_rich_mode: bool
     report_path: Path | None
     scan_target: Path = field(default_factory=lambda: Path("."))
+    framework_annotations: dict[int, tuple[ComplianceControl, ...]] | None = None
 
 
 def _configure_logging(log_level: str, log_file: Path | None, is_quiet: bool) -> None:
@@ -735,6 +751,25 @@ def _resolve_output_format(output_format: str) -> OutputFormat:
         raise typer.Exit(code=EXIT_CODE_ERROR) from value_error
 
 
+def _resolve_framework_flag(raw: str | None) -> frozenset[ComplianceFramework]:
+    """Parse the --framework flag and exit with an error on unknown framework names.
+
+    Args:
+        raw: Comma-separated framework string from the CLI, or None.
+
+    Returns:
+        frozenset of ComplianceFramework members; empty when raw is None.
+
+    Raises:
+        typer.Exit: If any framework token is not a valid ComplianceFramework value.
+    """
+    try:
+        return parse_framework_flag(raw)
+    except ValueError as value_error:
+        typer.echo(_FRAMEWORK_PARSE_ERROR.format(error=value_error), err=True)
+        raise typer.Exit(code=EXIT_CODE_ERROR) from value_error
+
+
 def _prepare_scan_phase(
     target_options: _ScanTargetOptions,
     is_rich_mode: bool,
@@ -859,8 +894,18 @@ def _generate_report_bytes(
     if options.output_format not in {OutputFormat.PDF, OutputFormat.HTML}:
         raise ValueError(_UNEXPECTED_BINARY_FORMAT_ERROR.format(format=options.output_format))
     if options.output_format == OutputFormat.PDF:
-        return generate_pdf_report(scan_result, options.scan_target, audit_rows)
-    return generate_html_report(scan_result, options.scan_target, audit_rows)
+        return generate_pdf_report(
+            scan_result,
+            options.scan_target,
+            audit_rows,
+            options.framework_annotations,
+        )
+    return generate_html_report(
+        scan_result,
+        options.scan_target,
+        audit_rows,
+        options.framework_annotations,
+    )
 
 
 def _fetch_report_audit_rows() -> list[dict[str, object]]:
@@ -1288,6 +1333,9 @@ def scan(
     should_use_baseline: Annotated[
         bool, typer.Option("--baseline", help=_SCAN_BASELINE_HELP)
     ] = False,
+    framework: Annotated[
+        str | None, typer.Option("--framework", help=_SCAN_FRAMEWORK_HELP)
+    ] = None,
 ) -> None:
     """Scan a directory or file for PHI/PII.
 
@@ -1301,6 +1349,7 @@ def scan(
     effective_log_level = _LOG_LEVEL_DEBUG if is_verbose else log_level
     _configure_logging(effective_log_level, log_file, is_quiet)
     output_format_enum = _resolve_output_format(output_format)
+    enabled_frameworks = _resolve_framework_flag(framework)
     is_rich_mode = not is_quiet and output_format_enum is OutputFormat.TABLE
     with display_status_spinner(_SPINNER_CONFIG_LOAD_MESSAGE, is_active=is_rich_mode):
         scan_config = _load_scan_config(config_path, severity_threshold)
@@ -1310,14 +1359,20 @@ def scan(
     target_options = _ScanTargetOptions(
         scan_root=path, diff_ref=diff_ref, single_file=single_file, config=scan_config
     )
+    scan_targets = _prepare_scan_phase(target_options, is_rich_mode, is_verbose)
+    scan_result = _execute_scan_with_progress(scan_targets, scan_config, is_rich_mode)
+    framework_annotations = (
+        annotate_findings(scan_result.findings, enabled_frameworks)
+        if enabled_frameworks
+        else None
+    )
     output_options = _ScanOutputOptions(
         output_format=output_format_enum,
         is_rich_mode=is_rich_mode,
         report_path=report_path,
         scan_target=path,
+        framework_annotations=framework_annotations,
     )
-    scan_targets = _prepare_scan_phase(target_options, is_rich_mode, is_verbose)
-    scan_result = _execute_scan_with_progress(scan_targets, scan_config, is_rich_mode)
     if is_rich_mode:
         display_phase_audit()
     _emit_verbose_phase(_VERBOSE_PHASE_AUDIT, is_verbose)
@@ -1706,6 +1761,18 @@ def explain_reports() -> None:
 def explain_remediation() -> None:
     """Show the full remediation playbook for all 18 HIPAA categories."""
     _render_explain_topic(EXPLAIN_REMEDIATION_TEXT)
+
+
+@explain_app.command("frameworks")
+def explain_frameworks() -> None:
+    """List all supported compliance frameworks with citations and penalty ranges."""
+    _render_explain_topic(EXPLAIN_FRAMEWORKS_TEXT)
+
+
+@explain_app.command("deidentification")
+def explain_deidentification() -> None:
+    """Explain HIPAA Safe Harbor vs Expert Determination and known detection gaps."""
+    _render_explain_topic(EXPLAIN_DEIDENTIFICATION_TEXT)
 
 
 # ---------------------------------------------------------------------------
