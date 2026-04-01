@@ -25,7 +25,9 @@ from __future__ import annotations
 import base64
 import io
 import textwrap
+from dataclasses import dataclass
 from datetime import UTC, datetime
+from operator import itemgetter
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -136,6 +138,11 @@ _CHART_GRID_ALPHA: float = 0.5
 # Marker used by the scanner layer to replace raw PHI values in code context
 _REDACTED_MARKER: str = "[REDACTED]"
 
+# Chart placeholder text for empty-data states
+_CHART_NO_FINDINGS_LABEL: str = "(no findings)"
+_CHART_NO_FINDINGS_TEXT: str = "No findings"
+_CHART_NO_HISTORY_TEXT: str = "No audit history available"
+
 # PDF findings table column widths and headers
 _PDF_COL_WIDTHS: tuple[float, ...] = (8.0, 52.0, 10.0, 28.0, 26.0, 16.0, 14.0, 16.0)
 _PDF_COL_HEADERS: tuple[str, ...] = (
@@ -184,8 +191,8 @@ _PDF_CHAR_REPLACEMENTS: dict[str, str] = {
 }
 
 
-def _sanitise_pdf_text(text: str) -> str:
-    """Replace non-latin-1 characters with ASCII fallbacks for fpdf2 core fonts."""
+def _encode_pdf_text_to_latin1(text: str) -> str:
+    """Replace Unicode characters with ASCII fallbacks, then encode to latin-1 for fpdf2."""
     for char, replacement in _PDF_CHAR_REPLACEMENTS.items():
         text = text.replace(char, replacement)
     # Final fallback: drop any remaining non-latin-1 characters
@@ -215,20 +222,26 @@ def _get_severity_row_colour(severity: SeverityLevel) -> str:
     return tint_map.get(severity, _COLOUR_WHITE)
 
 
-def _sanitise_code_context(context: str) -> str:
-    """Enforce safe, truncated rendering of code context in reports.
+def _truncate_code_context(context: str) -> str:
+    """Truncate code context for report rendering and warn if PHI may not be redacted.
 
-    code_context must already have PHI values substituted with [REDACTED]
-    by the scanner layer before reaching this function.  This function is a
-    defensive truncation gate: even if upstream context is unexpectedly long,
-    at most _MAX_CONTEXT_CHARS characters are embedded in the report output.
+    The scanner layer is expected to substitute detected PHI values with
+    _REDACTED_MARKER before populating ScanFinding.code_context.  This function
+    logs a warning when the marker is absent from a non-empty context so that
+    any regression in the scanner redaction path surfaces immediately.
 
     Args:
         context: Raw code_context field from a ScanFinding.
 
     Returns:
-        Truncated context string, safe for embedding in HTML or PDF reports.
+        Truncated context string (at most _MAX_CONTEXT_CHARS characters).
     """
+    if context and _REDACTED_MARKER not in context:
+        _logger.warning(
+            "code_context rendered in report without '%s' marker — "
+            "verify that the scanner layer has redacted PHI values",
+            _REDACTED_MARKER,
+        )
     return context[:_MAX_CONTEXT_CHARS]
 
 
@@ -251,22 +264,17 @@ def _truncate_chart_label(label: str) -> str:
     return "..." + label[-(_MAX_LABEL_CHARS - 1) :]
 
 
-def _import_agg_pyplot() -> object:
-    """Import and return matplotlib.pyplot configured for the non-interactive Agg backend.
+def _configure_agg_backend() -> None:
+    """Set the non-interactive Agg backend before any matplotlib.pyplot import.
 
-    Uses the Agg backend so chart generation works in headless CI environments
-    where no display server is attached.  The lazy import here keeps matplotlib
-    out of the module-load critical path for users who do not use report output.
-
-    Returns:
-        The matplotlib.pyplot module, ready to use.
+    Must be called before `import matplotlib.pyplot` inside each chart builder so
+    that chart rendering works in headless CI environments with no display server.
+    The lazy import keeps matplotlib out of the module-load critical path for
+    users who do not use report output.
     """
     import matplotlib
 
     matplotlib.use("Agg")
-    import matplotlib.pyplot as plt
-
-    return plt
 
 
 def _render_chart_to_buffer(figure: object) -> io.BytesIO:
@@ -300,72 +308,113 @@ def _render_chart_to_bytes(figure: object) -> bytes:
     return png_bytes
 
 
-def _build_category_chart(scan_result: ScanResult) -> object:
-    """Horizontal bar chart — findings count by HIPAA category, sorted descending."""
-    plt = _import_agg_pyplot()
+@dataclass(frozen=True)
+class _HorizontalBarChartSpec:
+    """Specification for rendering a horizontal bar chart figure."""
 
-    category_counts = {
-        cat.value.replace("_", " ").title(): count
-        for cat, count in scan_result.category_counts.items()
-        if count > 0
-    }
-    if not category_counts:
-        category_counts = {"(no findings)": 0}
+    labels: list[str]
+    values: list[int]
+    colours: list[str]
+    title: str
+    xlabel: str
+    height: float
 
-    sorted_items = sorted(
-        category_counts.items(), key=lambda category_count_tuple: category_count_tuple[1], reverse=True
-    )
-    labels = [category_label for category_label, _ in sorted_items]
-    values = [category_value for _, category_value in sorted_items]
 
-    fig, axis = plt.subplots(figsize=(_CHART_WIDTH_INCHES, _CHART_HEIGHT_CATEGORY_INCHES))
-    colours = [_CHART_COLOUR_ACTIVE if finding_count > 0 else _CHART_COLOUR_INACTIVE for finding_count in values]
-    bars = axis.barh(labels, values, color=colours)
+def _render_horizontal_bar_figure(spec: _HorizontalBarChartSpec) -> object:
+    """Build and return a horizontal bar chart Figure from a spec."""
+    _configure_agg_backend()
+    import matplotlib.pyplot as plt
+
+    fig, axis = plt.subplots(figsize=(_CHART_WIDTH_INCHES, spec.height))
+    bars = axis.barh(spec.labels, spec.values, color=spec.colours)
     axis.bar_label(bars, padding=_CHART_BAR_LABEL_PADDING, fontsize=_CHART_BAR_LABEL_FONT_SIZE)
-    axis.set_xlabel("Findings Count")
-    axis.set_title("Findings by HIPAA Category")
+    axis.set_xlabel(spec.xlabel)
+    axis.set_title(spec.title)
     axis.invert_yaxis()
     fig.tight_layout()
     plt.close(fig)
     return fig
 
 
-def _build_severity_chart(scan_result: ScanResult) -> object:
-    """Donut chart — severity distribution."""
-    plt = _import_agg_pyplot()
+def _prepare_category_chart_data(
+    scan_result: ScanResult,
+) -> tuple[list[str], list[int], list[str]]:
+    """Return (labels, values, colours) for the HIPAA category bar chart."""
+    category_counts = {
+        cat.value.replace("_", " ").title(): count
+        for cat, count in scan_result.category_counts.items()
+        if count > 0
+    }
+    if not category_counts:
+        return [_CHART_NO_FINDINGS_LABEL], [0], [_CHART_COLOUR_INACTIVE]
+    sorted_items = sorted(category_counts.items(), key=itemgetter(1), reverse=True)
+    labels = [label for label, _ in sorted_items]
+    values = [value for _, value in sorted_items]
+    colours = [_CHART_COLOUR_ACTIVE if v > 0 else _CHART_COLOUR_INACTIVE for v in values]
+    return labels, values, colours
 
+
+def _build_category_chart(scan_result: ScanResult) -> object:
+    """Horizontal bar chart — findings count by HIPAA category, sorted descending."""
+    labels, values, colours = _prepare_category_chart_data(scan_result)
+    return _render_horizontal_bar_figure(
+        _HorizontalBarChartSpec(
+            labels=labels,
+            values=values,
+            colours=colours,
+            title="Findings by HIPAA Category",
+            xlabel="Findings Count",
+            height=_CHART_HEIGHT_CATEGORY_INCHES,
+        )
+    )
+
+
+def _prepare_severity_chart_data(
+    scan_result: ScanResult,
+) -> tuple[list[str], list[int], list[str]] | None:
+    """Return (labels, values, colours) for the severity donut, or None if no findings."""
     severity_data = {
         level: count for level, count in scan_result.severity_counts.items() if count > 0
     }
-
-    fig, axis = plt.subplots(figsize=(_CHART_WIDTH_INCHES, _CHART_HEIGHT_PIE_INCHES))
-
     if not severity_data:
-        axis.text(0.5, 0.5, "No findings", ha="center", va="center", fontsize=_CHART_NO_DATA_FONT_SIZE)
-        axis.axis("off")
-        fig.tight_layout()
-        plt.close(fig)
-        return fig
-
+        return None
     ordered_levels = sorted(
         severity_data.keys(), key=lambda severity_level: SEVERITY_RANK[severity_level], reverse=True
     )
-    pie_labels = [
-        f"{severity_level.value.title()} ({severity_data[severity_level]})"
-        for severity_level in ordered_levels
-    ]
-    pie_values = [severity_data[severity_level] for severity_level in ordered_levels]
     level_colours: dict[SeverityLevel, str] = {
         SeverityLevel.HIGH: _CHART_COLOUR_SEVERITY_HIGH,
         SeverityLevel.MEDIUM: _CHART_COLOUR_SEVERITY_MEDIUM,
         SeverityLevel.LOW: _CHART_COLOUR_SEVERITY_LOW,
         SeverityLevel.INFO: _CHART_COLOUR_SEVERITY_INFO,
     }
-    colours = [level_colours.get(severity_level, _CHART_COLOUR_NEUTRAL) for severity_level in ordered_levels]
+    labels = [
+        f"{level.value.title()} ({severity_data[level]})" for level in ordered_levels
+    ]
+    values = [severity_data[level] for level in ordered_levels]
+    colours = [level_colours.get(level, _CHART_COLOUR_NEUTRAL) for level in ordered_levels]
+    return labels, values, colours
 
+
+def _build_severity_chart(scan_result: ScanResult) -> object:
+    """Donut chart — severity distribution."""
+    _configure_agg_backend()
+    import matplotlib.pyplot as plt
+
+    fig, axis = plt.subplots(figsize=(_CHART_WIDTH_INCHES, _CHART_HEIGHT_PIE_INCHES))
+    chart_data = _prepare_severity_chart_data(scan_result)
+    if chart_data is None:
+        axis.text(
+            0.5, 0.5, _CHART_NO_FINDINGS_TEXT, ha="center", va="center",
+            fontsize=_CHART_NO_DATA_FONT_SIZE,
+        )
+        axis.axis("off")
+        fig.tight_layout()
+        plt.close(fig)
+        return fig
+    labels, values, colours = chart_data
     axis.pie(
-        pie_values,
-        labels=pie_labels,
+        values,
+        labels=labels,
         colors=colours,
         wedgeprops={"width": 0.5},
         startangle=_CHART_PIE_START_ANGLE,
@@ -377,31 +426,37 @@ def _build_severity_chart(scan_result: ScanResult) -> object:
     return fig
 
 
-def _build_top_files_chart(scan_result: ScanResult) -> object:
-    """Horizontal bar chart — top N files with most findings."""
+def _prepare_top_files_chart_data(scan_result: ScanResult) -> tuple[list[str], list[int]]:
+    """Return (display_labels, counts) for the top-N files bar chart."""
     from collections import Counter
-
-    plt = _import_agg_pyplot()
-
-    fig, axis = plt.subplots(figsize=(_CHART_WIDTH_INCHES, _CHART_HEIGHT_FILES_INCHES))
 
     file_counts: Counter[str] = Counter(str(finding.file_path) for finding in scan_result.findings)
     top_files = file_counts.most_common(_TOP_FILES_COUNT)
+    labels = [_truncate_chart_label(file_path) for file_path, _ in top_files]
+    counts = [count for _, count in top_files]
+    return labels, counts
 
-    if not top_files:
-        axis.text(0.5, 0.5, "No findings", ha="center", va="center", fontsize=_CHART_NO_DATA_FONT_SIZE)
+
+def _build_top_files_chart(scan_result: ScanResult) -> object:
+    """Horizontal bar chart — top N files with most findings."""
+    _configure_agg_backend()
+    import matplotlib.pyplot as plt
+
+    labels, counts = _prepare_top_files_chart_data(scan_result)
+    fig, axis = plt.subplots(figsize=(_CHART_WIDTH_INCHES, _CHART_HEIGHT_FILES_INCHES))
+    if not labels:
+        axis.text(
+            0.5, 0.5, _CHART_NO_FINDINGS_TEXT, ha="center", va="center",
+            fontsize=_CHART_NO_DATA_FONT_SIZE,
+        )
         axis.axis("off")
         fig.tight_layout()
         plt.close(fig)
         return fig
-
-    display_labels = [_truncate_chart_label(file_path) for file_path, _ in top_files]
-    counts = [count for _, count in top_files]
-
-    bars = axis.barh(display_labels, counts, color=_CHART_COLOUR_BLUE)
+    bars = axis.barh(labels, counts, color=_CHART_COLOUR_BLUE)
     axis.bar_label(bars, padding=_CHART_BAR_LABEL_PADDING, fontsize=_CHART_BAR_LABEL_FONT_SIZE)
     axis.set_xlabel("Findings Count")
-    axis.set_title(f"Top {len(top_files)} Files by Finding Count")
+    axis.set_title(f"Top {len(labels)} Files by Finding Count")
     axis.invert_yaxis()
     fig.tight_layout()
     plt.close(fig)
@@ -437,13 +492,14 @@ def _build_trend_chart(audit_rows: list[dict[str, object]]) -> object:
     """Line chart — findings over time from audit log history."""
     import matplotlib.dates as mdates
 
-    plt = _import_agg_pyplot()
+    _configure_agg_backend()
+    import matplotlib.pyplot as plt
 
     fig, axis = plt.subplots(figsize=(_CHART_WIDTH_INCHES, _CHART_HEIGHT_TREND_INCHES))
     dates, counts = _parse_audit_dates_and_counts(audit_rows) if audit_rows else ([], [])
 
     if not dates:
-        axis.text(0.5, 0.5, "No audit history available", ha="center", va="center", fontsize=_CHART_NO_HISTORY_FONT_SIZE)
+        axis.text(0.5, 0.5, _CHART_NO_HISTORY_TEXT, ha="center", va="center", fontsize=_CHART_NO_HISTORY_FONT_SIZE)
         axis.axis("off")
         fig.tight_layout()
         plt.close(fig)
@@ -604,7 +660,7 @@ _HTML_TEMPLATE: str = """\
           {% if f.code_context %}
           <details>
             <summary>context</summary>
-            <pre>{{ sanitise_code_context(f.code_context) }}</pre>
+            <pre>{{ truncate_code_context(f.code_context) }}</pre>
           </details>
           {% endif %}
         </td>
@@ -728,9 +784,9 @@ def generate_html_report(
     from jinja2 import Environment, Undefined
 
     env = Environment(undefined=Undefined, autoescape=True)  # noqa: S701
-    # Expose the PHI context sanitiser as a template global so the template
+    # Expose the context truncation guard as a template global so the template
     # cannot accidentally render raw code_context without going through the guard.
-    env.globals["sanitise_code_context"] = _sanitise_code_context
+    env.globals["truncate_code_context"] = _truncate_code_context
     template = env.from_string(_HTML_TEMPLATE)
     context = _build_html_context(scan_result, scan_target, audit_rows or [])
     return template.render(**context).encode("utf-8")
@@ -751,7 +807,7 @@ def _pdf_add_section_heading(pdf: object, title: str) -> None:
     pdf.ln(4)  # type: ignore[attr-defined]
     _pdf_set_font(pdf, style="B", size=_FONT_HEADING)
     pdf.set_text_color(44, 62, 80)  # type: ignore[attr-defined]
-    pdf.cell(0, 8, _sanitise_pdf_text(title), new_x="LMARGIN", new_y="NEXT")  # type: ignore[attr-defined]
+    pdf.cell(0, 8, _encode_pdf_text_to_latin1(title), new_x="LMARGIN", new_y="NEXT")  # type: ignore[attr-defined]
     pdf.set_fill_color(44, 62, 80)  # type: ignore[attr-defined]
     pdf.cell(0, 0.5, "", new_x="LMARGIN", new_y="NEXT", fill=True)  # type: ignore[attr-defined]
     pdf.ln(3)  # type: ignore[attr-defined]
@@ -781,7 +837,7 @@ def _pdf_write_cover_page(
     pdf.cell(  # type: ignore[attr-defined]
         0,
         6,
-        _sanitise_pdf_text(f"PhiScan v{__version__}  |  {timestamp}"),
+        _encode_pdf_text_to_latin1(f"PhiScan v{__version__}  |  {timestamp}"),
         align="C",
         new_x="LMARGIN",
         new_y="NEXT",
@@ -791,7 +847,7 @@ def _pdf_write_cover_page(
     _pdf_set_font(pdf, style="B", size=_FONT_HEADING)
     pdf.set_text_color(*risk_rgb)  # type: ignore[attr-defined]
     risk_label = f"RISK LEVEL: {scan_result.risk_level.value.upper()}"
-    pdf.cell(0, 10, _sanitise_pdf_text(risk_label), align="C", new_x="LMARGIN", new_y="NEXT")  # type: ignore[attr-defined]
+    pdf.cell(0, 10, _encode_pdf_text_to_latin1(risk_label), align="C", new_x="LMARGIN", new_y="NEXT")  # type: ignore[attr-defined]
 
     pdf.ln(8)  # type: ignore[attr-defined]
     pdf.set_text_color(44, 62, 80)  # type: ignore[attr-defined]
@@ -806,9 +862,9 @@ def _pdf_write_cover_page(
     ]
     for label, value in metadata_rows:
         _pdf_set_font(pdf, style="B", size=_FONT_BODY)
-        pdf.cell(55, 7, _sanitise_pdf_text(label), border="B")  # type: ignore[attr-defined]
+        pdf.cell(55, 7, _encode_pdf_text_to_latin1(label), border="B")  # type: ignore[attr-defined]
         _pdf_set_font(pdf, size=_FONT_BODY)
-        pdf.cell(0, 7, _sanitise_pdf_text(value), border="B", new_x="LMARGIN", new_y="NEXT")  # type: ignore[attr-defined]
+        pdf.cell(0, 7, _encode_pdf_text_to_latin1(value), border="B", new_x="LMARGIN", new_y="NEXT")  # type: ignore[attr-defined]
 
     pdf.ln(10)  # type: ignore[attr-defined]
     _pdf_set_font(pdf, size=_FONT_SMALL)
@@ -853,7 +909,7 @@ def _pdf_write_summary_page(
     if non_zero_cats:
         for cat_name, count in sorted(non_zero_cats, key=lambda p: p[1], reverse=True):
             _pdf_set_font(pdf, size=_FONT_BODY)
-            pdf.cell(60, 5, _sanitise_pdf_text(cat_name))  # type: ignore[attr-defined]
+            pdf.cell(60, 5, _encode_pdf_text_to_latin1(cat_name))  # type: ignore[attr-defined]
             _pdf_set_font(pdf, style="B", size=_FONT_BODY)
             pdf.cell(0, 5, str(count), new_x="LMARGIN", new_y="NEXT")  # type: ignore[attr-defined]
     else:
@@ -924,7 +980,7 @@ def _pdf_write_findings_table(pdf: object, scan_result: ScanResult) -> None:
             finding.detection_layer.value,
         )
         for cell_text, width in zip(row_cells, _PDF_COL_WIDTHS):
-            pdf.cell(width, _PDF_ROW_HEIGHT, _sanitise_pdf_text(cell_text), border="B", fill=True)  # type: ignore[attr-defined]
+            pdf.cell(width, _PDF_ROW_HEIGHT, _encode_pdf_text_to_latin1(cell_text), border="B", fill=True)  # type: ignore[attr-defined]
         pdf.ln()  # type: ignore[attr-defined]
 
 
@@ -941,11 +997,11 @@ def _pdf_write_remediation_section(pdf: object, scan_result: ScanResult) -> None
             continue
         _pdf_set_font(pdf, style="B", size=_FONT_SUBHEADING)
         pdf.cell(  # type: ignore[attr-defined]
-            0, 6, _sanitise_pdf_text(category.value.replace("_", " ").title()), new_x="LMARGIN", new_y="NEXT"
+            0, 6, _encode_pdf_text_to_latin1(category.value.replace("_", " ").title()), new_x="LMARGIN", new_y="NEXT"
         )
         _pdf_set_font(pdf, size=_FONT_BODY)
         pdf.multi_cell(  # type: ignore[attr-defined]
-            0, 5, _sanitise_pdf_text(textwrap.fill(HIPAA_REMEDIATION_GUIDANCE[category], width=110))
+            0, 5, _encode_pdf_text_to_latin1(textwrap.fill(HIPAA_REMEDIATION_GUIDANCE[category], width=110))
         )
         pdf.ln(2)  # type: ignore[attr-defined]
 
@@ -954,7 +1010,7 @@ def _pdf_write_remediation_section(pdf: object, scan_result: ScanResult) -> None
     pdf.cell(0, 6, "General Remediation Checklist", new_x="LMARGIN", new_y="NEXT")  # type: ignore[attr-defined]
     _pdf_set_font(pdf, size=_FONT_BODY)
     for item in _GENERAL_REMEDIATION_CHECKLIST:
-        pdf.multi_cell(0, 5, _sanitise_pdf_text(textwrap.fill(f"- {item}", width=110)))  # type: ignore[attr-defined]
+        pdf.multi_cell(0, 5, _encode_pdf_text_to_latin1(textwrap.fill(f"- {item}", width=110)))  # type: ignore[attr-defined]
         pdf.ln(1)  # type: ignore[attr-defined]
 
 
@@ -981,9 +1037,9 @@ def _pdf_write_appendix(
     ]
     for label, value in appendix_rows:
         _pdf_set_font(pdf, style="B", size=_FONT_BODY)
-        pdf.cell(60, 6, _sanitise_pdf_text(label))  # type: ignore[attr-defined]
+        pdf.cell(60, 6, _encode_pdf_text_to_latin1(label))  # type: ignore[attr-defined]
         _pdf_set_font(pdf, size=_FONT_BODY)
-        pdf.cell(0, 6, _sanitise_pdf_text(value), new_x="LMARGIN", new_y="NEXT")  # type: ignore[attr-defined]
+        pdf.cell(0, 6, _encode_pdf_text_to_latin1(value), new_x="LMARGIN", new_y="NEXT")  # type: ignore[attr-defined]
 
     pdf.ln(8)  # type: ignore[attr-defined]
     _pdf_set_font(pdf, size=_FONT_SMALL)
