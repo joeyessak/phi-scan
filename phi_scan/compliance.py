@@ -90,7 +90,7 @@ class FrameworkMetadata:
 # Framework metadata (used by `phi-scan explain frameworks`)
 # ---------------------------------------------------------------------------
 
-FRAMEWORK_METADATA: dict[ComplianceFramework, FrameworkMetadata] = {
+FRAMEWORK_METADATA: Mapping[ComplianceFramework, FrameworkMetadata] = {
     ComplianceFramework.HIPAA: FrameworkMetadata(
         display_name="HIPAA",
         enforcement_body="HHS Office for Civil Rights (OCR)",
@@ -608,7 +608,7 @@ def _hipaa(item: str, control_name: str) -> ComplianceControl:
 # HIPAA first, then HITECH, SOC2, HITRUST, NIST, GDPR, then state/special laws.
 # Categories not present have no applicable controls (empty tuple by default).
 
-CATEGORY_CONTROLS: dict[PhiCategory, tuple[ComplianceControl, ...]] = {
+CATEGORY_CONTROLS: Mapping[PhiCategory, tuple[ComplianceControl, ...]] = {
     PhiCategory.NAME: (
         _hipaa("A", "Names"),
         *_UNIVERSAL_SECONDARY,
@@ -767,6 +767,14 @@ CATEGORY_CONTROLS: dict[PhiCategory, tuple[ComplianceControl, ...]] = {
         _MRPA_HEALTH_INFORMATION,
     ),
 }
+
+# Module-level integrity guard: every ComplianceFramework member must have a
+# FRAMEWORK_METADATA entry. Fails loudly at import time if a new framework is
+# added without updating the metadata table.
+assert frozenset(FRAMEWORK_METADATA) == frozenset(ComplianceFramework), (
+    "FRAMEWORK_METADATA is missing entries for: "
+    f"{frozenset(ComplianceFramework) - frozenset(FRAMEWORK_METADATA)}"
+)
 
 # ---------------------------------------------------------------------------
 # Public functions
