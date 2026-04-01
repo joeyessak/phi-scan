@@ -817,11 +817,11 @@ def annotate_findings(
         Mapping of 0-based finding index → tuple of applicable ComplianceControl.
     """
     effective = enabled_frameworks | _HIPAA_SINGLETON
-    result: dict[int, tuple[ComplianceControl, ...]] = {}
+    annotations: dict[int, tuple[ComplianceControl, ...]] = {}
     for idx, finding in enumerate(findings):
         all_controls = CATEGORY_CONTROLS.get(finding.hipaa_category, ())
-        result[idx] = _filter_controls_for_frameworks(all_controls, effective)
-    return result
+        annotations[idx] = _filter_controls_for_frameworks(all_controls, effective)
+    return annotations
 
 
 def parse_framework_flag(framework_flag_value: str | None) -> frozenset[ComplianceFramework]:
