@@ -8,7 +8,7 @@ Design constraints:
   - ComplianceControl is frozen so instances are shared safely across findings.
   - CATEGORY_CONTROLS is a module-level constant built once at import time.
   - annotate_findings is a pure function — no I/O, no mutation.
-  - parse_framework_flag raises ValueError (not typer.BadParameter) so this module
+  - parse_framework_flag raises InvalidFrameworkError (not typer.BadParameter) so this module
     stays framework-agnostic; the CLI layer converts the error to typer.BadParameter.
 """
 
@@ -356,7 +356,7 @@ _NIST_SYSTEM_INTEGRITY_POLICY = ComplianceControl(
         "process failure in information integrity controls."
     ),
 )
-_NIST_PII_QUALITY_MANAGEMENT = ComplianceControl(
+_NIST_PERSONALLY_IDENTIFIABLE_INFORMATION_QUALITY_MANAGEMENT = ComplianceControl(
     framework=ComplianceFramework.NIST,
     control_id="PM-22",
     control_name="Personally Identifiable Information Quality Management",
@@ -566,7 +566,7 @@ _HITRUST_ALL = (_HITRUST_07A, _HITRUST_09S, _HITRUST_01V, _HITRUST_09AB)
 _NIST_ALL = (
     _NIST_PROTECTION_INFORMATION_AT_REST,
     _NIST_SYSTEM_INTEGRITY_POLICY,
-    _NIST_PII_QUALITY_MANAGEMENT,
+    _NIST_PERSONALLY_IDENTIFIABLE_INFORMATION_QUALITY_MANAGEMENT,
     _NIST_AUTHORITY_TO_PROCESS_PII,
     _NIST_PURPOSES_OF_PII_PROCESSING,
     _NIST_IDENTIFY_PII,

@@ -551,8 +551,8 @@ class _ScanTargetOptions:
 class _ScanOutputOptions:
     """Options controlling how scan results are rendered or serialized.
 
-    Groups output-related flags so downstream helpers (_emit_scan_output,
-    _run_post_scan_phases) stay within the three-argument limit.
+    Groups output-rendering flags passed to _emit_scan_output and its helpers.
+    Execution-phase flags (verbosity, baseline mode) live in _ScanPhaseOptions.
     """
 
     output_format: OutputFormat
@@ -560,6 +560,16 @@ class _ScanOutputOptions:
     report_path: Path | None
     scan_target: Path = field(default_factory=lambda: Path("."))
     framework_annotations: Mapping[int, tuple[ComplianceControl, ...]] | None = None
+
+
+@dataclass(frozen=True)
+class _ScanPhaseOptions:
+    """Execution-phase flags controlling phase headers and data selection.
+
+    Kept separate from _ScanOutputOptions because these flags control when and
+    how scan phases execute, not how results are rendered.
+    """
+
     is_verbose: bool = False
     should_use_baseline: bool = False
 
@@ -760,24 +770,6 @@ def _resolve_output_format(output_format: str) -> OutputFormat:
     except ValueError as value_error:
         typer.echo(_UNSUPPORTED_OUTPUT_FORMAT_ERROR.format(fmt=output_format), err=True)
         raise typer.Exit(code=EXIT_CODE_ERROR) from value_error
-
-
-def _build_framework_annotations(
-    findings: tuple[ScanFinding, ...],
-    enabled_frameworks: frozenset[ComplianceFramework],
-) -> Mapping[int, tuple[ComplianceControl, ...]] | None:
-    """Return per-finding compliance annotations, or None when no frameworks are enabled.
-
-    Args:
-        findings: Findings from a completed scan.
-        enabled_frameworks: Frameworks selected via --framework; empty means disabled.
-
-    Returns:
-        Mapping of finding index to applicable controls, or None when disabled.
-    """
-    if not enabled_frameworks:
-        return None
-    return annotate_findings(findings, enabled_frameworks)
 
 
 def _resolve_framework_flag(framework_flag_value: str | None) -> frozenset[ComplianceFramework]:
@@ -1337,17 +1329,19 @@ def _write_audit_phase(
     scan_result: ScanResult,
     scan_config: ScanConfig,
     output_options: _ScanOutputOptions,
+    phase_options: _ScanPhaseOptions,
 ) -> None:
     """Display the audit phase header and write the scan result to the audit database.
 
     Args:
         scan_result: Completed scan result from _execute_scan_with_progress.
         scan_config: Loaded scan configuration (supplies the audit DB path).
-        output_options: Controls rich-mode display and verbose emission.
+        output_options: Controls rich-mode display.
+        phase_options: Controls verbose emission.
     """
     if output_options.is_rich_mode:
         display_phase_audit()
-    _emit_verbose_phase(_VERBOSE_PHASE_AUDIT, output_options.is_verbose)
+    _emit_verbose_phase(_VERBOSE_PHASE_AUDIT, phase_options.is_verbose)
     with display_status_spinner(
         _SPINNER_AUDIT_WRITE_MESSAGE, is_active=output_options.is_rich_mode
     ):
@@ -1357,6 +1351,7 @@ def _write_audit_phase(
 def _emit_report_phase(
     scan_result: ScanResult,
     output_options: _ScanOutputOptions,
+    phase_options: _ScanPhaseOptions,
 ) -> NoReturn:
     """Display the report phase header and emit scan output; always raises typer.Exit.
 
@@ -1366,14 +1361,14 @@ def _emit_report_phase(
 
     Args:
         scan_result: Completed scan result from _execute_scan_with_progress.
-        output_options: Controls output format, rich mode, verbose, and baseline.
+        output_options: Controls output format, rich mode, and report path.
+        phase_options: Controls verbose emission and baseline mode.
     """
     if output_options.is_rich_mode:
         display_phase_report()
-    _emit_verbose_phase(_VERBOSE_PHASE_REPORT, output_options.is_verbose)
-    if output_options.should_use_baseline:
+    _emit_verbose_phase(_VERBOSE_PHASE_REPORT, phase_options.is_verbose)
+    if phase_options.should_use_baseline:
         _emit_scan_output_with_baseline(scan_result, output_options)
-        # _emit_scan_output_with_baseline always raises typer.Exit before returning.
     else:
         _emit_scan_output(scan_result, output_options)
         raise typer.Exit(code=EXIT_CODE_CLEAN if scan_result.is_clean else EXIT_CODE_VIOLATION)
@@ -1440,18 +1435,22 @@ def scan(
     # _execute_scan_with_progress will propagate before output_options is configured,
     # which is acceptable — output_options has no effect until _emit_scan_output is called.
     scan_result = _execute_scan_with_progress(scan_targets, scan_config, is_rich_mode)
-    framework_annotations = _build_framework_annotations(scan_result.findings, enabled_frameworks)
+    framework_annotations = (
+        annotate_findings(scan_result.findings, enabled_frameworks) if enabled_frameworks else None
+    )
     output_options = _ScanOutputOptions(
         output_format=output_format_enum,
         is_rich_mode=is_rich_mode,
         report_path=report_path,
         scan_target=path,
         framework_annotations=framework_annotations,
+    )
+    phase_options = _ScanPhaseOptions(
         is_verbose=is_verbose,
         should_use_baseline=should_use_baseline,
     )
-    _write_audit_phase(scan_result, scan_config, output_options)
-    _emit_report_phase(scan_result, output_options)
+    _write_audit_phase(scan_result, scan_config, output_options, phase_options)
+    _emit_report_phase(scan_result, output_options, phase_options)
 
 
 @app.command()
