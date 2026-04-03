@@ -365,7 +365,10 @@ def insert_scan_event(
         AuditLogError: If the database cannot be written to.
     """
     delivered_channels: list[str] = notifications_sent or []
-    scan_event_row = _assemble_scan_event_row(database_path, scan_result, delivered_channels)
+    encrypted_findings = _serialize_and_encrypt(
+        _serialize_findings(scan_result.findings), database_path.parent
+    )
+    scan_event_row = _build_scan_event_row(scan_result, delivered_channels, encrypted_findings)
     connection = _open_database(database_path)
     try:
         cursor = connection.execute(_INSERT_SCAN_EVENT_SQL, scan_event_row)
@@ -528,25 +531,25 @@ def verify_audit_chain(database_path: Path) -> ChainVerifyResult:
 
     prev_hash = AUDIT_GENESIS_CHAIN_HASH
     skipped_rows = 0
-    chain_intact = True
+    is_chain_intact = True
     for audit_row in audit_rows:
-        audit_row_dict = dict(audit_row)
-        row_id = audit_row_dict["id"]
-        stored_hash: str = audit_row_dict.get("row_chain_hash", "")
+        row_fields = dict(audit_row)
+        row_id = row_fields["id"]
+        stored_hash: str = row_fields.get("row_chain_hash", "")
         if not stored_hash:
             # Row has no chain hash — either pre-dates hash-chain support or was
             # cleared by an attacker. Log at WARNING and mark chain as not fully intact.
             _logger.warning(_CHAIN_ROW_SKIPPED_WARNING.format(row_id=row_id))
             skipped_rows += 1
-            chain_intact = False
+            is_chain_intact = False
             continue
-        row_content_string = _row_content_for_hashing(audit_row_dict)
+        row_content_string = _row_content_for_hashing(row_fields)
         recomputed = _hmac_sha256(audit_key, prev_hash + row_content_string)
         if not hmac.compare_digest(stored_hash, recomputed):
             _logger.error(_CHAIN_TAMPER_ERROR.format(row_id=row_id))
             return ChainVerifyResult(is_intact=False, key_present=True, skipped_rows=skipped_rows)
         prev_hash = stored_hash
-    return ChainVerifyResult(is_intact=chain_intact, key_present=True, skipped_rows=skipped_rows)
+    return ChainVerifyResult(is_intact=is_chain_intact, key_present=True, skipped_rows=skipped_rows)
 
 
 def purge_expired_audit_rows(database_path: Path) -> int:
@@ -599,29 +602,21 @@ def generate_audit_key(database_path: Path) -> Path:
         AuditLogError: If the key file already exists or cannot be written.
     """
     key_path = _audit_key_path(database_path.parent)
-    if key_path.exists():
-        raise AuditLogError(_KEY_FILE_EXISTS_ERROR.format(key_path=str(key_path)))
     try:
         key_path.parent.mkdir(parents=True, exist_ok=True)
         key_bytes = os.urandom(_AES_GCM_KEY_BYTES)
-        # Atomic write: open the temp file with O_CREAT | O_EXCL so the file
-        # is created with mode 0o600 in a single syscall — no chmod-after-open
-        # window. Write key bytes directly to the fd, close it, then rename
-        # the temp file into the final path for atomicity.
-        tmp_path = key_path.with_suffix(".tmp")
-        fd = os.open(str(tmp_path), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        # O_CREAT | O_EXCL atomically creates key_path only if it does not already
+        # exist — raises EEXIST if present, eliminating the TOCTOU window that
+        # key_path.exists() + open() would create. Mode 0o600 sets owner-only
+        # permissions at file creation, not in a separate chmod call.
+        fd = os.open(str(key_path), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
         try:
             os.write(fd, key_bytes)
         finally:
             os.close(fd)
-        try:
-            tmp_path.rename(key_path)
-        except OSError:
-            # Rename failed (e.g. cross-device move) — erase the temp file so
-            # 256-bit key material does not remain on disk unprotected.
-            tmp_path.unlink(missing_ok=True)
-            raise
     except OSError as io_error:
+        if io_error.errno == errno.EEXIST:
+            raise AuditLogError(_KEY_FILE_EXISTS_ERROR.format(key_path=str(key_path))) from io_error
         raise AuditLogError(
             _KEY_WRITE_ERROR.format(key_path=str(key_path), io_error=io_error)
         ) from io_error
@@ -696,8 +691,11 @@ def _reject_symlink_database_path(database_path: Path) -> None:
             raise AuditLogError(
                 _SYMLINK_DATABASE_PATH_ERROR.format(path=database_path)
             ) from os_error
-        # ENOENT = new database (will be created by sqlite3.connect) — not a symlink.
-        # All other errors are not symlink-related; sqlite3.connect will surface them.
+        if os_error.errno != errno.ENOENT:
+            # Unexpected OS error (e.g. EACCES, EPERM) — re-raise as AuditLogError
+            # so callers receive a structured error rather than a bare OSError.
+            raise AuditLogError(_DATABASE_ERROR.format(detail=os_error)) from os_error
+        # ENOENT is intentionally ignored — new databases are created by sqlite3.connect.
 
 
 def _ensure_database_parent_exists(database_path: Path) -> None:
@@ -908,21 +906,24 @@ def _collect_committer_identity() -> tuple[str, str]:
     )
 
 
-def _assemble_scan_event_row(
-    database_path: Path,
+def _build_scan_event_row(
     scan_result: ScanResult,
     notifications_sent: list[str],
+    encrypted_findings_json: str,
 ) -> tuple[str | int | float, ...]:
-    """Build the 17-tuple for INSERT into scan_events.
+    """Build the 17-tuple for INSERT into scan_events from already-encrypted findings.
 
-    Delegates identity collection and encryption to focused helpers.
-    The row_chain_hash column is seeded with _CHAIN_HASH_PLACEHOLDER and
-    replaced by the actual HMAC in a subsequent UPDATE.
+    Delegates identity collection to focused helpers. Encryption is the
+    caller's responsibility so this function has a single concern: assembling
+    scan metadata into the INSERT tuple. The row_chain_hash column is seeded
+    with _CHAIN_HASH_PLACEHOLDER and replaced by the actual HMAC in a
+    subsequent UPDATE.
 
     Args:
-        database_path: Locates the audit key for findings encryption.
         scan_result: Completed scan result.
         notifications_sent: Notification channels that were delivered.
+        encrypted_findings_json: AES-256-GCM encrypted findings JSON string,
+            already produced by _serialize_and_encrypt.
 
     Returns:
         17-tuple matching the INSERT column order (id is auto-assigned;
@@ -930,9 +931,6 @@ def _assemble_scan_event_row(
     """
     repository_hash, branch_hash = _collect_repository_identity()
     committer_name_hash, committer_email_hash = _collect_committer_identity()
-    findings_json = _serialize_and_encrypt(
-        _serialize_findings(scan_result.findings), database_path.parent
-    )
     action_taken = ACTION_TAKEN_PASS if scan_result.is_clean else ACTION_TAKEN_FAIL
     return (
         _get_current_timestamp(),
@@ -941,7 +939,7 @@ def _assemble_scan_event_row(
         branch_hash,
         scan_result.files_scanned,
         len(scan_result.findings),
-        findings_json,
+        encrypted_findings_json,
         _BOOLEAN_TRUE if scan_result.is_clean else _BOOLEAN_FALSE,
         scan_result.scan_duration,
         _EVENT_TYPE_SCAN,
@@ -1204,7 +1202,7 @@ def _compute_row_chain_hash(
     prev_hash = _get_previous_chain_hash(connection, new_row_id)
     # Reconstruct a row dict from the tuple for _row_content_for_hashing.
     # Column order must match _INSERT_SCAN_EVENT_SQL (excluding id which is auto).
-    scan_event_row_dict: dict[str, Any] = {
+    row_fields: dict[str, Any] = {
         "id": new_row_id,
         "timestamp": row_tuple[0],
         "scanner_version": row_tuple[1],
@@ -1223,5 +1221,5 @@ def _compute_row_chain_hash(
         "action_taken": row_tuple[14],
         "notifications_sent": row_tuple[15],
     }
-    row_content_string = _row_content_for_hashing(scan_event_row_dict)
+    row_content_string = _row_content_for_hashing(row_fields)
     return _hmac_sha256(key, prev_hash + row_content_string)
