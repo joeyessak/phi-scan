@@ -31,7 +31,7 @@ from phi_scan.constants import (
 from phi_scan.detection_coordinator import detect_phi_in_text_content
 from phi_scan.hashing import severity_from_confidence
 from phi_scan.models import ScanConfig, ScanFinding
-from phi_scan.nlp_detector import _NLP_AVAILABLE as _IS_NLP_AVAILABLE
+from phi_scan.nlp_detector import _IS_NLP_AVAILABLE
 from phi_scan.scanner import collect_scan_targets, execute_scan, scan_file
 
 # ---------------------------------------------------------------------------

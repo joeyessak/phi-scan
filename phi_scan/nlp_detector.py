@@ -46,30 +46,45 @@ _logger: logging.Logger = logging.getLogger(__name__)
 # Optional dependency detection
 # ---------------------------------------------------------------------------
 
-# Defined before the try block so it can be used in the model availability
-# probe without referencing a name that may not yet exist.
+# Defined before the availability check so the probe function can reference it
+# without a forward reference.
 _SPACY_MODEL_NAME: str = "en_core_web_lg"
 
+
+def _check_spacy_model_is_installed(model_name: str) -> None:
+    """Raise MissingOptionalDependencyError when the named spaCy model is absent.
+
+    Importing spacy locally keeps the module namespace clean and confines
+    the dependency to this probe function. Presidio crashes with SystemExit
+    (not ImportError) when the model is absent — it attempts a pip download
+    that fails in venvs without pip. This check intercepts that case before
+    the Presidio engine is ever constructed.
+
+    Args:
+        model_name: spaCy model package name to verify (e.g. 'en_core_web_lg').
+
+    Raises:
+        MissingOptionalDependencyError: When the model package is not installed.
+        ImportError: When spaCy itself is not installed.
+    """
+    import spacy  # type: ignore[import-not-found]
+
+    if not spacy.util.is_package(model_name):
+        raise MissingOptionalDependencyError(
+            f"spaCy model '{model_name}' is not installed — run 'phi-scan setup' to download it"
+        )
+
+
 try:
-    import spacy as _spacy_probe  # type: ignore[import-not-found]
     from presidio_analyzer import AnalyzerEngine  # type: ignore[import-not-found]
     from presidio_analyzer.nlp_engine import (  # type: ignore[import-not-found]
         NlpEngineProvider,
     )
 
-    # Presidio crashes with SystemExit (not ImportError) when the spaCy model
-    # is absent — it attempts a pip download which fails in venvs without pip.
-    # Check model presence here so we can set _NLP_AVAILABLE = False cleanly.
-    if not _spacy_probe.util.is_package(_SPACY_MODEL_NAME):
-        raise MissingOptionalDependencyError(
-            f"spaCy model '{_SPACY_MODEL_NAME}' is not installed — "
-            "run 'phi-scan setup' to download it"
-        )
-    del _spacy_probe
-
-    _NLP_AVAILABLE: bool = True
+    _check_spacy_model_is_installed(_SPACY_MODEL_NAME)
+    _IS_NLP_AVAILABLE: bool = True
 except (ImportError, MissingOptionalDependencyError):
-    _NLP_AVAILABLE = False
+    _IS_NLP_AVAILABLE = False
 
 # ---------------------------------------------------------------------------
 # Module-level constants
@@ -331,7 +346,7 @@ def detect_phi_with_nlp(file_content: str, file_path: Path) -> list[ScanFinding]
         List of ScanFinding objects, one per entity detected by Presidio.
         Returns an empty list if the NLP layer is unavailable.
     """
-    if not _NLP_AVAILABLE:
+    if not _IS_NLP_AVAILABLE:
         _emit_nlp_unavailable_warning()
         return []
     analyzer = _create_analyzer_engine()
