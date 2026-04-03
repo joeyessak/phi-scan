@@ -5,8 +5,9 @@ Verifies that:
   - Schema v2 columns are created on fresh database
   - Migration from v1 to v2 adds the required new columns
   - insert_scan_event records event_type, pipeline, action_taken, notifications_sent
-  - verify_audit_chain returns True for an intact log
-  - verify_audit_chain returns False when a row is manually tampered
+  - verify_audit_chain returns ChainVerifyResult(is_intact=True, key_present=True) for an intact log
+  - verify_audit_chain returns ChainVerifyResult(is_intact=False, key_present=True) when tampered
+  - verify_audit_chain returns ChainVerifyResult(key_present=False) when audit key is absent
   - purge_expired_audit_rows deletes only rows outside the retention window
   - purge_expired_audit_rows never deletes rows within the 6-year window
   - generate_audit_key creates a 32-byte key file with mode 0o600
@@ -23,6 +24,7 @@ from types import MappingProxyType
 import pytest
 
 from phi_scan.audit import (
+    ChainVerifyResult,
     _decrypt_findings_json,
     _encrypt_findings_json,
     _hmac_sha256,
@@ -315,34 +317,42 @@ def test_insert_scan_event_default_notifications_sent_is_empty_list(tmp_path: Pa
 # ---------------------------------------------------------------------------
 
 
-def test_verify_audit_chain_returns_true_for_empty_db(tmp_path: Path) -> None:
-    """verify_audit_chain must return True for a database with no rows."""
+def test_verify_audit_chain_returns_intact_for_empty_db(tmp_path: Path) -> None:
+    """verify_audit_chain must report is_intact=True with key_present=False for empty db."""
     db_path = tmp_path / "audit.db"
     create_audit_schema(db_path)
-    assert verify_audit_chain(db_path) is True
+    result = verify_audit_chain(db_path)
+    assert isinstance(result, ChainVerifyResult)
+    assert result.is_intact is True
+    assert result.key_present is False
 
 
-def test_verify_audit_chain_returns_true_without_key(tmp_path: Path) -> None:
-    """verify_audit_chain must return True when the audit key is absent (chain skipped)."""
+def test_verify_audit_chain_reports_key_absent_without_key(tmp_path: Path) -> None:
+    """verify_audit_chain must return key_present=False when the audit key is absent."""
     db_path = tmp_path / "audit.db"
     create_audit_schema(db_path)
     insert_scan_event(db_path, _make_clean_result())
     # No key file exists in tmp_path — chain verification is skipped.
     result = verify_audit_chain(db_path)
-    assert result is True
+    assert isinstance(result, ChainVerifyResult)
+    assert result.key_present is False
+    assert result.is_intact is True  # True but unverified — key was absent
 
 
-def test_verify_audit_chain_returns_true_with_key(tmp_path: Path) -> None:
-    """verify_audit_chain must return True for a freshly written row when key exists."""
+def test_verify_audit_chain_returns_intact_with_key(tmp_path: Path) -> None:
+    """verify_audit_chain must return is_intact=True for a freshly written row when key exists."""
     db_path = tmp_path / "audit.db"
     create_audit_schema(db_path)
     generate_audit_key(db_path)
     insert_scan_event(db_path, _make_clean_result())
-    assert verify_audit_chain(db_path) is True
+    result = verify_audit_chain(db_path)
+    assert isinstance(result, ChainVerifyResult)
+    assert result.key_present is True
+    assert result.is_intact is True
 
 
 def test_verify_audit_chain_detects_tampering(tmp_path: Path) -> None:
-    """verify_audit_chain must return False when a row's hash does not match."""
+    """verify_audit_chain must return is_intact=False when a row's hash does not match."""
     db_path = tmp_path / "audit.db"
     create_audit_schema(db_path)
     generate_audit_key(db_path)
@@ -354,7 +364,10 @@ def test_verify_audit_chain_detects_tampering(tmp_path: Path) -> None:
         conn.commit()
     finally:
         conn.close()
-    assert verify_audit_chain(db_path) is False
+    result = verify_audit_chain(db_path)
+    assert isinstance(result, ChainVerifyResult)
+    assert result.key_present is True
+    assert result.is_intact is False
 
 
 def test_hmac_sha256_returns_64_hex_chars() -> None:

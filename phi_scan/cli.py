@@ -20,6 +20,7 @@ from watchdog.observers import Observer
 
 from phi_scan import __version__
 from phi_scan.audit import (
+    ChainVerifyResult,
     create_audit_schema,
     get_last_scan,
     insert_scan_event,
@@ -402,6 +403,10 @@ _AUDIT_CHAIN_PASS_MESSAGE: str = "Audit chain integrity: PASS — all row hashes
 _AUDIT_CHAIN_FAIL_MESSAGE: str = (
     "Audit chain integrity: FAIL — one or more rows failed hash verification. "
     "The audit log may have been tampered with."
+)
+_AUDIT_CHAIN_SKIP_MESSAGE: str = (
+    "Audit chain verification skipped — no audit key found. "
+    "Run 'phi-scan setup' to generate the key."
 )
 _AUDIT_CHAIN_VERIFY_FLAG: str = "--verify"
 _SPINNER_NOTIFY_MESSAGE: str = "Sending notifications…"
@@ -1589,8 +1594,10 @@ def display_history(
     database_path = Path(DEFAULT_DATABASE_PATH).expanduser()
     create_audit_schema(database_path)
     if should_verify:
-        chain_ok = verify_audit_chain(database_path)
-        if chain_ok:
+        verify_result: ChainVerifyResult = verify_audit_chain(database_path)
+        if not verify_result.key_present:
+            typer.echo(_AUDIT_CHAIN_SKIP_MESSAGE, err=True)
+        elif verify_result.is_intact:
             typer.echo(_AUDIT_CHAIN_PASS_MESSAGE)
         else:
             typer.echo(_AUDIT_CHAIN_FAIL_MESSAGE, err=True)

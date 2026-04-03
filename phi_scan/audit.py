@@ -40,7 +40,7 @@ import os
 import sqlite3
 import subprocess
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 
 from phi_scan import __version__
 from phi_scan.constants import (
@@ -57,6 +57,7 @@ from phi_scan.logging_config import get_logger
 from phi_scan.models import ScanFinding, ScanResult
 
 __all__ = [
+    "ChainVerifyResult",
     "create_audit_schema",
     "generate_audit_key",
     "get_last_scan",
@@ -67,6 +68,19 @@ __all__ = [
     "query_recent_scans",
     "verify_audit_chain",
 ]
+
+class ChainVerifyResult(NamedTuple):
+    """Result of verify_audit_chain, distinguishing verified-clean from unverifiable.
+
+    Attributes:
+        is_intact: True if all recomputed hashes match stored hashes, False if tampered.
+        key_present: True if the audit key was found and verification was performed.
+            False means the key was absent and the chain was not actually verified.
+    """
+
+    is_intact: bool
+    key_present: bool
+
 
 _logger: logging.Logger = get_logger("audit")
 
@@ -99,6 +113,12 @@ _ENCRYPTION_KEY_MISSING_WARNING: str = (
     "Audit encryption key not found at %r — findings_json stored as plaintext. "
     "Run 'phi-scan setup' to generate the audit key."
 )
+_KEY_FILE_EXISTS_ERROR: str = (
+    "Audit key already exists at {key_path!r} — "
+    "refusing to overwrite. Delete the file manually to regenerate."
+)
+_KEY_WRITE_ERROR: str = "Cannot write audit key to {key_path!r}: {io_error}"
+_KEY_READ_ERROR: str = "Cannot read audit key from {key_path!r}: {io_error}"
 
 # ---------------------------------------------------------------------------
 # Implementation constants
@@ -113,6 +133,7 @@ _UNKNOWN_BRANCH: str = "unknown"
 _BOOLEAN_TRUE: int = 1
 _BOOLEAN_FALSE: int = 0
 _EVENT_TYPE_SCAN: str = "scan"
+_CHAIN_HASH_PLACEHOLDER: str = ""
 _PRAGMA_WAL_MODE: str = "PRAGMA journal_mode=WAL"
 _LAST_SCAN_LIMIT: int = 1
 _GIT_SUBPROCESS_TIMEOUT_SECONDS: int = 5
@@ -238,20 +259,29 @@ _CREATE_SCAN_EVENTS_TIMESTAMP_INDEX_SQL: str = (
     f"CREATE INDEX IF NOT EXISTS idx_scan_events_timestamp ON {_SCAN_EVENTS_TABLE} (timestamp DESC)"
 )
 
-# Migration map: from_version → SQL to advance the schema by one version.
+# Migration map: from_version → list of SQL statements to advance the schema by one version.
+# Each statement is a separate string to avoid fragile semicolon-splitting.
 # v1 → v2: add 8 new columns using ALTER TABLE (SQLite supports ADD COLUMN).
-_MIGRATION_V1_TO_V2: str = f"""
-    ALTER TABLE {_SCAN_EVENTS_TABLE} ADD COLUMN event_type TEXT NOT NULL DEFAULT 'scan';
-    ALTER TABLE {_SCAN_EVENTS_TABLE} ADD COLUMN committer_name_hash TEXT NOT NULL DEFAULT '';
-    ALTER TABLE {_SCAN_EVENTS_TABLE} ADD COLUMN committer_email_hash TEXT NOT NULL DEFAULT '';
-    ALTER TABLE {_SCAN_EVENTS_TABLE} ADD COLUMN pr_number TEXT NOT NULL DEFAULT '';
-    ALTER TABLE {_SCAN_EVENTS_TABLE} ADD COLUMN pipeline TEXT NOT NULL DEFAULT '';
-    ALTER TABLE {_SCAN_EVENTS_TABLE} ADD COLUMN action_taken TEXT NOT NULL DEFAULT '';
-    ALTER TABLE {_SCAN_EVENTS_TABLE} ADD COLUMN notifications_sent TEXT NOT NULL DEFAULT '[]';
-    ALTER TABLE {_SCAN_EVENTS_TABLE} ADD COLUMN row_chain_hash TEXT NOT NULL DEFAULT ''
-"""
+_MIGRATION_V1_TO_V2: list[str] = [
+    f"ALTER TABLE {_SCAN_EVENTS_TABLE}"
+    f" ADD COLUMN event_type TEXT NOT NULL DEFAULT '{_EVENT_TYPE_SCAN}'",
+    f"ALTER TABLE {_SCAN_EVENTS_TABLE}"
+    " ADD COLUMN committer_name_hash TEXT NOT NULL DEFAULT ''",
+    f"ALTER TABLE {_SCAN_EVENTS_TABLE}"
+    " ADD COLUMN committer_email_hash TEXT NOT NULL DEFAULT ''",
+    f"ALTER TABLE {_SCAN_EVENTS_TABLE}"
+    " ADD COLUMN pr_number TEXT NOT NULL DEFAULT ''",
+    f"ALTER TABLE {_SCAN_EVENTS_TABLE}"
+    " ADD COLUMN pipeline TEXT NOT NULL DEFAULT ''",
+    f"ALTER TABLE {_SCAN_EVENTS_TABLE}"
+    " ADD COLUMN action_taken TEXT NOT NULL DEFAULT ''",
+    f"ALTER TABLE {_SCAN_EVENTS_TABLE}"
+    " ADD COLUMN notifications_sent TEXT NOT NULL DEFAULT '[]'",
+    f"ALTER TABLE {_SCAN_EVENTS_TABLE}"
+    f" ADD COLUMN row_chain_hash TEXT NOT NULL DEFAULT '{_CHAIN_HASH_PLACEHOLDER}'",
+]
 
-_MIGRATIONS: dict[int, str] = {
+_MIGRATIONS: dict[int, list[str]] = {
     1: _MIGRATION_V1_TO_V2,
 }
 
@@ -448,27 +478,32 @@ def migrate_schema(database_path: Path, from_version: int, to_version: int) -> N
         connection.close()
 
 
-def verify_audit_chain(database_path: Path) -> bool:
-    """Recompute the HMAC-SHA256 hash chain and return True if the log is intact.
+def verify_audit_chain(database_path: Path) -> ChainVerifyResult:
+    """Recompute the HMAC-SHA256 hash chain and return a ChainVerifyResult.
 
     Reads all rows in insertion order and recomputes each row's chain hash
-    from the previous hash and the row's content fields. Returns False and
-    logs a tamper warning if any row diverges. Returns True without error if
-    the audit key is absent — chain verification requires the key.
+    from the previous hash and the row's content fields.
+
+    When the audit key is absent the chain cannot be verified — the result
+    has ``key_present=False`` so callers can distinguish this from a verified-
+    clean result. Callers should treat ``key_present=False`` as unverified, not
+    as a passing audit.
 
     Args:
         database_path: Path to the SQLite audit database file.
 
     Returns:
-        True if the chain is intact (or if the key is absent), False if
-        any row's stored hash does not match the recomputed value.
+        ChainVerifyResult with is_intact=True/False and key_present=True/False.
+        key_present=False means the audit key was absent and no verification
+        was performed (is_intact is True in this case but carries no guarantee).
 
     Raises:
-        AuditLogError: If the database cannot be read.
+        AuditLogError: If the database cannot be read or the key exists but
+            cannot be loaded.
     """
     audit_key = _load_audit_key(database_path.parent)
     if audit_key is None:
-        return True
+        return ChainVerifyResult(is_intact=True, key_present=False)
     connection = _open_database(database_path)
     try:
         cursor = connection.execute(_SELECT_ALL_ROWS_ORDERED_SQL)
@@ -490,9 +525,9 @@ def verify_audit_chain(database_path: Path) -> bool:
         recomputed = _hmac_sha256(audit_key, prev_hash + content)
         if not hmac.compare_digest(stored_hash, recomputed):
             _logger.error(_CHAIN_TAMPER_ERROR.format(row_id=row_id))
-            return False
+            return ChainVerifyResult(is_intact=False, key_present=True)
         prev_hash = stored_hash
-    return True
+    return ChainVerifyResult(is_intact=True, key_present=True)
 
 
 def purge_expired_audit_rows(database_path: Path) -> int:
@@ -547,8 +582,7 @@ def generate_audit_key(database_path: Path) -> Path:
     key_path = _audit_key_path(database_path.parent)
     if key_path.exists():
         raise AuditLogError(
-            f"Audit key already exists at {str(key_path)!r} — "
-            "refusing to overwrite. Delete the file manually to regenerate."
+            _KEY_FILE_EXISTS_ERROR.format(key_path=str(key_path))
         )
     try:
         key_path.parent.mkdir(parents=True, exist_ok=True)
@@ -557,7 +591,7 @@ def generate_audit_key(database_path: Path) -> Path:
         key_path.chmod(0o600)
     except OSError as io_error:
         raise AuditLogError(
-            f"Cannot write audit key to {str(key_path)!r}: {io_error}"
+            _KEY_WRITE_ERROR.format(key_path=str(key_path), io_error=io_error)
         ) from io_error
     return key_path
 
@@ -593,14 +627,9 @@ def _apply_migration_steps(
                     to_version=current_version + 1,
                 )
             )
-        migration_sql = _MIGRATIONS[current_version]
-        # WARNING: statements are split on ";". Future migration authors must not
-        # include semicolons inside SQL string literals or DEFAULT clause values,
-        # as that would cause incorrect splitting.
-        for statement in migration_sql.strip().split(";"):
-            statement = statement.strip()
-            if statement:
-                connection.execute(statement)
+        migration_statements = _MIGRATIONS[current_version]
+        for statement in migration_statements:
+            connection.execute(statement)
         next_version = str(current_version + 1)
         connection.execute(_UPSERT_SCHEMA_VERSION_SQL, (_SCHEMA_VERSION_KEY, next_version))
         current_version += 1
@@ -752,9 +781,9 @@ def _detect_pr_number() -> str:
         _ENV_PR_NUMBER_GITLAB,
         _ENV_PR_NUMBER_BITBUCKET,
     ):
-        value = os.environ.get(env_var, "")
-        if value:
-            return value
+        pr_number_string = os.environ.get(env_var, "")
+        if pr_number_string:
+            return pr_number_string
     return ""
 
 
@@ -812,7 +841,7 @@ def _assemble_scan_event_row(
         _detect_pipeline(),
         action_taken,
         json.dumps(notifications_sent),
-        "",  # row_chain_hash placeholder — updated after INSERT
+        _CHAIN_HASH_PLACEHOLDER,  # row_chain_hash — updated via UPDATE after INSERT
     )
 
 
@@ -829,13 +858,21 @@ def _audit_key_path(key_dir: Path) -> Path:
 def _load_audit_key(key_dir: Path) -> bytes | None:
     """Load the AES-256-GCM audit key from the key file.
 
-    Returns None and logs a one-time warning if the key file does not exist.
+    Returns None if the key file does not exist (encryption not configured).
+    Raises AuditLogError if the file exists but cannot be read — silent
+    degradation to plaintext after key setup would be a security failure.
+
+    Security note: TOCTOU race between exists() and read_bytes() mirrors the
+    symlink race in _open_database. A future fix would use O_NOFOLLOW.
 
     Args:
         key_dir: Directory that contains the audit.key file.
 
     Returns:
         32-byte key bytes, or None if the key file is absent.
+
+    Raises:
+        AuditLogError: If the key file exists but cannot be read.
     """
     key_path = _audit_key_path(key_dir)
     if not key_path.exists():
@@ -843,8 +880,9 @@ def _load_audit_key(key_dir: Path) -> bytes | None:
     try:
         return key_path.read_bytes()
     except OSError as io_error:
-        _logger.warning("Cannot read audit key from %r: %s", str(key_path), io_error)
-        return None
+        raise AuditLogError(
+            _KEY_READ_ERROR.format(key_path=str(key_path), io_error=io_error)
+        ) from io_error
 
 
 def _encrypt_findings_json(plaintext: str, key: bytes) -> str:

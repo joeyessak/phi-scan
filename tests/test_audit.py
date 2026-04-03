@@ -72,7 +72,7 @@ _SCHEMA_VERSION_TO: int = 2
 # that migrate_schema raises SchemaMigrationError when the step is absent.
 _SCHEMA_VERSION_NO_MIGRATION_FROM: int = 2
 _SCHEMA_VERSION_NO_MIGRATION_TO: int = 3
-_SAMPLE_MIGRATION_SQL: str = "ALTER TABLE scan_events ADD COLUMN extra TEXT"
+_SAMPLE_MIGRATION_SQL: list[str] = ["ALTER TABLE scan_events ADD COLUMN extra TEXT"]
 _RECENT_SCANS_DAYS: int = 7
 _ZERO_DAYS: int = 0
 _EMPTY_TABLE_ROW_COUNT: int = 0
