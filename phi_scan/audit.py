@@ -859,7 +859,7 @@ def _encrypt_findings_json(plaintext: str, key: bytes) -> str:
     """
     import base64
 
-    from cryptography.hazmat.primitives.ciphers.aead import AESGCM  # type: ignore[import-not-found]
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
     nonce = os.urandom(_AES_GCM_NONCE_BYTES)
     aesgcm = AESGCM(key)
@@ -882,8 +882,8 @@ def _decrypt_findings_json(encrypted: str, key: bytes) -> str:
     """
     import base64
 
-    from cryptography.exceptions import InvalidTag  # type: ignore[import-not-found]
-    from cryptography.hazmat.primitives.ciphers.aead import AESGCM  # type: ignore[import-not-found]
+    from cryptography.exceptions import InvalidTag
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
 
     raw = base64.b64decode(encrypted[len(AUDIT_ENCRYPTION_PREFIX) :])
     nonce = raw[:_AES_GCM_NONCE_END]
