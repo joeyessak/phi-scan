@@ -24,6 +24,7 @@ from phi_scan.audit import (
     get_last_scan,
     insert_scan_event,
     query_recent_scans,
+    verify_audit_chain,
 )
 from phi_scan.baseline import (
     BaselineSnapshot,
@@ -63,6 +64,7 @@ from phi_scan.exceptions import (
     BaselineError,
     ConfigurationError,
     MissingOptionalDependencyError,
+    NotificationError,
 )
 from phi_scan.fixer import (
     FixMode,
@@ -87,6 +89,7 @@ from phi_scan.help_text import (
 )
 from phi_scan.logging_config import get_logger, replace_logger_handlers
 from phi_scan.models import ScanConfig, ScanFinding, ScanResult
+from phi_scan.notifier import send_email_notification, send_webhook_notification
 from phi_scan.output import (
     WATCH_RESULT_CLEAN_TEXT,
     WATCH_RESULT_VIOLATION_FORMAT,
@@ -249,6 +252,10 @@ _WATCH_PATH_OUTSIDE_ROOT_DISPLAY: str = "[outside watch root]"
 # ---------------------------------------------------------------------------
 
 _HISTORY_LAST_HELP: str = "Show scans from the last N days (e.g. 30d)."
+_HISTORY_VERIFY_HELP: str = (
+    "Recompute HMAC-SHA256 hash chain and report PASS or FAIL. "
+    "Exits with code 1 if the chain is broken (tamper detected)."
+)
 _DEFAULT_HISTORY_PERIOD: str = "30d"
 _DAYS_PERIOD_SUFFIX: str = "d"
 _HISTORY_PERIOD_FORMAT_ERROR: str = (
@@ -389,6 +396,15 @@ _CONFIG_LOAD_FAILURE_WARNING: str = (
     "Config file {path!r} exists but could not be loaded — using defaults: {error}"
 )
 _AUDIT_WRITE_FAILURE_WARNING: str = "Audit log write failed — scan result not persisted: {error}"
+_NOTIFICATION_EMAIL_FAILURE_WARNING: str = "Email notification failed: {error}"
+_NOTIFICATION_WEBHOOK_FAILURE_WARNING: str = "Webhook notification failed: {error}"
+_AUDIT_CHAIN_PASS_MESSAGE: str = "Audit chain integrity: PASS — all row hashes verified."
+_AUDIT_CHAIN_FAIL_MESSAGE: str = (
+    "Audit chain integrity: FAIL — one or more rows failed hash verification. "
+    "The audit log may have been tampered with."
+)
+_AUDIT_CHAIN_VERIFY_FLAG: str = "--verify"
+_SPINNER_NOTIFY_MESSAGE: str = "Sending notifications…"
 _IMPLEMENTED_FORMAT_NAMES: str = ", ".join(sorted(fmt.value for fmt in IMPLEMENTED_OUTPUT_FORMATS))
 _UNSUPPORTED_OUTPUT_FORMAT_ERROR: str = (
     "Output format {fmt!r} is not yet implemented. "
@@ -734,7 +750,11 @@ def _execute_scan_with_progress(
     return build_scan_result(tuple(all_findings), len(scan_targets), scan_duration)
 
 
-def _write_audit_record(scan_result: ScanResult, database_path: Path) -> None:
+def _write_audit_record(
+    scan_result: ScanResult,
+    database_path: Path,
+    notifications_sent: list[str] | None = None,
+) -> None:
     """Persist the scan result to the SQLite audit log.
 
     Audit failures are logged as warnings and do not abort the scan.
@@ -744,13 +764,56 @@ def _write_audit_record(scan_result: ScanResult, database_path: Path) -> None:
     Args:
         scan_result: The completed scan result to persist.
         database_path: Path to the SQLite audit database (may include ~).
+        notifications_sent: Channel names delivered before this write.
     """
     resolved_path = database_path.expanduser()
     try:
         create_audit_schema(resolved_path)
-        insert_scan_event(resolved_path, scan_result)
+        insert_scan_event(resolved_path, scan_result, notifications_sent)
     except AuditLogError as audit_error:
         _logger.warning(_AUDIT_WRITE_FAILURE_WARNING.format(error=audit_error))
+
+
+def _dispatch_notifications(
+    scan_result: ScanResult,
+    scan_config: ScanConfig,
+    report_path: Path | None = None,
+) -> list[str]:
+    """Send email and/or webhook notifications if configured and triggered.
+
+    Best-effort: failures are logged as warnings and do not abort the scan.
+
+    Args:
+        scan_result: Completed scan result to notify about.
+        scan_config: Loaded config containing notification_config.
+        report_path: Optional path to attach to the email.
+
+    Returns:
+        List of channel name strings that were successfully delivered,
+        e.g. ["email", "webhook-slack"].
+    """
+    config = scan_config.notification_config
+    should_notify = not config.notify_on_violation_only or not scan_result.is_clean
+    if not should_notify:
+        return []
+    from phi_scan.audit import _get_current_branch, _get_current_repository_path
+
+    repo = _get_current_repository_path()
+    branch = _get_current_branch()
+    sent_channels: list[str] = []
+    if config.is_email_enabled:
+        try:
+            send_email_notification(config, scan_result, repo, branch, __version__, report_path)
+            sent_channels.append("email")
+        except NotificationError as email_error:
+            _logger.warning(_NOTIFICATION_EMAIL_FAILURE_WARNING.format(error=email_error))
+    if config.is_webhook_enabled:
+        try:
+            send_webhook_notification(config, scan_result, repo, branch, __version__)
+            sent_channels.append(f"webhook-{config.webhook_type.value}")
+        except NotificationError as webhook_error:
+            _logger.warning(_NOTIFICATION_WEBHOOK_FAILURE_WARNING.format(error=webhook_error))
+    return sent_channels
 
 
 def _resolve_output_format(output_format: str) -> OutputFormat:
@@ -1340,17 +1403,24 @@ def _persist_audit_record(
     scan_config: ScanConfig,
     output_options: _ScanOutputOptions,
 ) -> None:
-    """Persist the scan result to the audit database with progress feedback.
+    """Dispatch notifications then persist the scan result with audit metadata.
+
+    Notifications are sent first (best-effort) so the channel list can be
+    recorded in the audit row for compliance reporting.
 
     Args:
         scan_result: Completed scan result from _execute_scan_with_progress.
-        scan_config: Loaded scan configuration (supplies the audit DB path).
-        output_options: Controls Rich spinner activation.
+        scan_config: Loaded scan configuration (audit DB path + notifications).
+        output_options: Controls Rich spinner activation and report path.
     """
+    with display_status_spinner(_SPINNER_NOTIFY_MESSAGE, is_active=output_options.is_rich_mode):
+        sent_channels = _dispatch_notifications(
+            scan_result, scan_config, output_options.report_path
+        )
     with display_status_spinner(
         _SPINNER_AUDIT_WRITE_MESSAGE, is_active=output_options.is_rich_mode
     ):
-        _write_audit_record(scan_result, scan_config.database_path)
+        _write_audit_record(scan_result, scan_config.database_path, sent_channels)
 
 
 def _display_report_phase_header(
@@ -1510,11 +1580,21 @@ def display_last_scan() -> None:
 @app.command("history")
 def display_history(
     last: Annotated[str, typer.Option("--last", help=_HISTORY_LAST_HELP)] = _DEFAULT_HISTORY_PERIOD,
+    should_verify: Annotated[
+        bool, typer.Option(_AUDIT_CHAIN_VERIFY_FLAG, help=_HISTORY_VERIFY_HELP)
+    ] = False,
 ) -> None:
     """Query the audit log for recent scan history."""
     lookback_days = _parse_lookback_days(last)
     database_path = Path(DEFAULT_DATABASE_PATH).expanduser()
     create_audit_schema(database_path)
+    if should_verify:
+        chain_ok = verify_audit_chain(database_path)
+        if chain_ok:
+            typer.echo(_AUDIT_CHAIN_PASS_MESSAGE)
+        else:
+            typer.echo(_AUDIT_CHAIN_FAIL_MESSAGE, err=True)
+            raise typer.Exit(code=EXIT_CODE_VIOLATION)
     scan_events = query_recent_scans(database_path, lookback_days)
     _display_scan_history(scan_events)
 

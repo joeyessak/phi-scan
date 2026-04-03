@@ -14,6 +14,7 @@ __all__ = [
     "ConfigurationError",
     "FileReadError",
     "MissingOptionalDependencyError",
+    "NotificationError",
     "PhiDetectionError",
     "PhiScanError",
     "PhiScanLoggingError",
@@ -123,6 +124,20 @@ class PhiScanLoggingError(PhiScanError):
     Args:
         message: Description of the unsafe configuration including the path
             and the reason it was rejected.
+    """
+
+
+class NotificationError(PhiScanError):
+    """Raised when an email or webhook notification cannot be delivered.
+
+    Notification failures are always best-effort — a ``NotificationError``
+    must never prevent a scan result from being reported or an audit record
+    from being written. Callers must catch this and log a warning rather than
+    re-raising.
+
+    Args:
+        message: Description of the delivery failure including the channel
+            (email/webhook), the destination, and the underlying cause.
     """
 
 

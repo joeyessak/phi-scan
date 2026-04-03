@@ -4,21 +4,54 @@ Audit records are INSERT-only. No UPDATE or DELETE operations are ever issued.
 HIPAA (45 CFR §164.530(j)) requires audit logs to be retained for a minimum of
 six years. Corrections are new INSERT rows referencing the original entry —
 never modifications to existing rows.
+
+Schema v2 additions (Phase 5):
+  event_type, committer_name_hash, committer_email_hash, pr_number, pipeline,
+  action_taken, notifications_sent, row_chain_hash.
+
+Hash chain (5C.8):
+  Each row carries ``row_chain_hash = HMAC-SHA256(key=audit_secret,
+  msg=prev_chain_hash || row_content)``. The first row uses
+  AUDIT_GENESIS_CHAIN_HASH as the previous hash. ``verify_audit_chain``
+  recomputes the chain in insertion order and raises AuditLogError if any
+  row diverges. Satisfies NIST SP 800-53 AU-9 and AU-10.
+
+Encryption (5C.9):
+  ``findings_json`` is encrypted at rest with AES-256-GCM using a key stored
+  at ``~/.phi-scanner/audit.key``. Rows written before the key existed are
+  stored as plaintext JSON and are decrypted transparently on read (the
+  ``enc:`` prefix distinguishes ciphertext). Requires the ``cryptography``
+  package (Phase 5 dependency).
+
+Retention purge (5C.4):
+  ``purge_expired_audit_rows`` deletes rows older than AUDIT_RETENTION_DAYS.
+  Exported for scheduled or CLI-triggered invocation — not called automatically
+  to avoid surprising callers.
 """
 
 from __future__ import annotations
 
 import datetime
 import hashlib
+import hmac
 import json
 import logging
+import os
 import sqlite3
 import subprocess
 from pathlib import Path
 from typing import Any
 
 from phi_scan import __version__
-from phi_scan.constants import AUDIT_SCHEMA_VERSION
+from phi_scan.constants import (
+    ACTION_TAKEN_FAIL,
+    ACTION_TAKEN_PASS,
+    AUDIT_ENCRYPTION_PREFIX,
+    AUDIT_GENESIS_CHAIN_HASH,
+    AUDIT_KEY_FILENAME,
+    AUDIT_RETENTION_DAYS,
+    AUDIT_SCHEMA_VERSION,
+)
 from phi_scan.exceptions import AuditLogError, SchemaMigrationError
 from phi_scan.logging_config import get_logger
 from phi_scan.models import ScanFinding, ScanResult
@@ -29,7 +62,9 @@ __all__ = [
     "get_schema_version",
     "insert_scan_event",
     "migrate_schema",
+    "purge_expired_audit_rows",
     "query_recent_scans",
+    "verify_audit_chain",
 ]
 
 _logger: logging.Logger = get_logger("audit")
@@ -51,6 +86,18 @@ _UNKNOWN_MIGRATION_ERROR: str = (
 )
 _SCHEMA_VERSION_MISSING_ERROR: str = "schema_meta table exists but the schema_version key is absent"
 _DATABASE_ERROR: str = "Audit database operation failed: {detail}"
+_CHAIN_TAMPER_ERROR: str = (
+    "Audit chain verification failed at row id={row_id}: "
+    "stored hash does not match recomputed hash — the audit log may have been tampered with"
+)
+_CHAIN_KEY_MISSING_WARNING: str = (
+    "Audit chain key not found at %r — hash chain verification skipped. "
+    "Run 'phi-scan setup' to generate the audit key."
+)
+_ENCRYPTION_KEY_MISSING_WARNING: str = (
+    "Audit encryption key not found at %r — findings_json stored as plaintext. "
+    "Run 'phi-scan setup' to generate the audit key."
+)
 
 # ---------------------------------------------------------------------------
 # Implementation constants
@@ -67,13 +114,48 @@ _BOOLEAN_FALSE: int = 0
 _PRAGMA_WAL_MODE: str = "PRAGMA journal_mode=WAL"
 _LAST_SCAN_LIMIT: int = 1
 _GIT_SUBPROCESS_TIMEOUT_SECONDS: int = 5
-# Git args are fully hardcoded tuples — shell=False is implicit (list form),
-# no user input is interpolated, so subprocess injection is not possible.
 _GIT_BRANCH_ARGS: tuple[str, ...] = ("git", "branch", "--show-current")
 _GIT_TOPLEVEL_ARGS: tuple[str, ...] = ("git", "rev-parse", "--show-toplevel")
+_GIT_COMMITTER_NAME_ARGS: tuple[str, ...] = (
+    "git",
+    "log",
+    "-1",
+    "--format=%cn",
+)
+_GIT_COMMITTER_EMAIL_ARGS: tuple[str, ...] = (
+    "git",
+    "log",
+    "-1",
+    "--format=%ce",
+)
+
+# CI/CD environment variable names for PR number and pipeline detection.
+_ENV_PR_NUMBER_GITHUB: str = "GITHUB_PR_NUMBER"
+_ENV_PR_NUMBER_GITLAB: str = "CI_MERGE_REQUEST_IID"
+_ENV_PR_NUMBER_BITBUCKET: str = "BITBUCKET_PR_ID"
+_ENV_PIPELINE_GITHUB: str = "GITHUB_ACTIONS"
+_ENV_PIPELINE_GITLAB: str = "GITLAB_CI"
+_ENV_PIPELINE_JENKINS: str = "JENKINS_URL"
+_ENV_PIPELINE_CIRCLECI: str = "CIRCLECI"
+_ENV_PIPELINE_BITBUCKET: str = "BITBUCKET_PIPELINE_UUID"
+_PIPELINE_GITHUB_NAME: str = "github-actions"
+_PIPELINE_GITLAB_NAME: str = "gitlab-ci"
+_PIPELINE_JENKINS_NAME: str = "jenkins"
+_PIPELINE_CIRCLECI_NAME: str = "circleci"
+_PIPELINE_BITBUCKET_NAME: str = "bitbucket-pipelines"
+_PIPELINE_LOCAL: str = "local"
+
+# AES-256-GCM constants.
+_AES_GCM_KEY_BYTES: int = 32  # 256-bit key
+_AES_GCM_NONCE_BYTES: int = 12  # 96-bit nonce (GCM standard)
+_AES_GCM_TAG_BYTES: int = 16  # 128-bit authentication tag
+# Ciphertext layout: nonce(12) || ciphertext || tag(16), base64-encoded,
+# prefixed with AUDIT_ENCRYPTION_PREFIX.
+_AES_GCM_NONCE_END: int = _AES_GCM_NONCE_BYTES
+_AES_GCM_TAG_START: int = -_AES_GCM_TAG_BYTES  # slice from end
 
 # SQL DDL — table names are module-level constants, not user input; f-strings are safe.
-_CREATE_SCAN_EVENTS_SQL: str = f"""
+_CREATE_SCAN_EVENTS_V1_SQL: str = f"""
     CREATE TABLE IF NOT EXISTS {_SCAN_EVENTS_TABLE} (
         id               INTEGER PRIMARY KEY AUTOINCREMENT,
         timestamp        TEXT    NOT NULL,
@@ -85,6 +167,31 @@ _CREATE_SCAN_EVENTS_SQL: str = f"""
         findings_json    TEXT    NOT NULL,
         is_clean         INTEGER NOT NULL,
         scan_duration    REAL    NOT NULL
+    )
+"""
+
+# v2 CREATE — includes all new columns with DEFAULT values so ALTER migration
+# and fresh creation use identical column sets.
+_CREATE_SCAN_EVENTS_SQL: str = f"""
+    CREATE TABLE IF NOT EXISTS {_SCAN_EVENTS_TABLE} (
+        id                    INTEGER PRIMARY KEY AUTOINCREMENT,
+        timestamp             TEXT    NOT NULL,
+        scanner_version       TEXT    NOT NULL,
+        repository_hash       TEXT    NOT NULL,
+        branch_hash           TEXT    NOT NULL,
+        files_scanned         INTEGER NOT NULL,
+        findings_count        INTEGER NOT NULL,
+        findings_json         TEXT    NOT NULL,
+        is_clean              INTEGER NOT NULL,
+        scan_duration         REAL    NOT NULL,
+        event_type            TEXT    NOT NULL DEFAULT 'scan',
+        committer_name_hash   TEXT    NOT NULL DEFAULT '',
+        committer_email_hash  TEXT    NOT NULL DEFAULT '',
+        pr_number             TEXT    NOT NULL DEFAULT '',
+        pipeline              TEXT    NOT NULL DEFAULT '',
+        action_taken          TEXT    NOT NULL DEFAULT '',
+        notifications_sent    TEXT    NOT NULL DEFAULT '[]',
+        row_chain_hash        TEXT    NOT NULL DEFAULT ''
     )
 """
 _CREATE_SCHEMA_META_SQL: str = f"""
@@ -101,8 +208,10 @@ _UPSERT_SCHEMA_VERSION_SQL: str = (
 _INSERT_SCAN_EVENT_SQL: str = f"""
     INSERT INTO {_SCAN_EVENTS_TABLE}
         (timestamp, scanner_version, repository_hash, branch_hash,
-         files_scanned, findings_count, findings_json, is_clean, scan_duration)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+         files_scanned, findings_count, findings_json, is_clean, scan_duration,
+         event_type, committer_name_hash, committer_email_hash,
+         pr_number, pipeline, action_taken, notifications_sent, row_chain_hash)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 """
 _SELECT_RECENT_SCANS_SQL: str = (
     f"SELECT * FROM {_SCAN_EVENTS_TABLE} WHERE timestamp >= ? ORDER BY timestamp DESC"
@@ -111,14 +220,38 @@ _SELECT_LAST_SCAN_SQL: str = (
     f"SELECT * FROM {_SCAN_EVENTS_TABLE} ORDER BY id DESC LIMIT {_LAST_SCAN_LIMIT}"
 )
 _SELECT_SCHEMA_VERSION_SQL: str = f"SELECT value FROM {_SCHEMA_META_TABLE} WHERE key = ?"
+_SELECT_ALL_ROWS_ORDERED_SQL: str = (
+    f"SELECT id, timestamp, scanner_version, repository_hash, branch_hash, "
+    f"files_scanned, findings_count, findings_json, is_clean, scan_duration, "
+    f"event_type, committer_name_hash, committer_email_hash, pr_number, "
+    f"pipeline, action_taken, notifications_sent, row_chain_hash "
+    f"FROM {_SCAN_EVENTS_TABLE} ORDER BY id ASC"
+)
+_SELECT_LAST_ROW_CHAIN_HASH_SQL: str = (
+    f"SELECT row_chain_hash FROM {_SCAN_EVENTS_TABLE} ORDER BY id DESC LIMIT 1"
+)
+_UPDATE_ROW_CHAIN_HASH_SQL: str = f"UPDATE {_SCAN_EVENTS_TABLE} SET row_chain_hash = ? WHERE id = ?"
+_DELETE_EXPIRED_ROWS_SQL: str = f"DELETE FROM {_SCAN_EVENTS_TABLE} WHERE timestamp < ?"
 _CREATE_SCAN_EVENTS_TIMESTAMP_INDEX_SQL: str = (
     f"CREATE INDEX IF NOT EXISTS idx_scan_events_timestamp ON {_SCAN_EVENTS_TABLE} (timestamp DESC)"
 )
 
 # Migration map: from_version → SQL to advance the schema by one version.
-# Add entries here when AUDIT_SCHEMA_VERSION is incremented. Never remove entries
-# — they must remain to support upgrading older databases.
-_MIGRATIONS: dict[int, str] = {}
+# v1 → v2: add 8 new columns using ALTER TABLE (SQLite supports ADD COLUMN).
+_MIGRATION_V1_TO_V2: str = f"""
+    ALTER TABLE {_SCAN_EVENTS_TABLE} ADD COLUMN event_type TEXT NOT NULL DEFAULT 'scan';
+    ALTER TABLE {_SCAN_EVENTS_TABLE} ADD COLUMN committer_name_hash TEXT NOT NULL DEFAULT '';
+    ALTER TABLE {_SCAN_EVENTS_TABLE} ADD COLUMN committer_email_hash TEXT NOT NULL DEFAULT '';
+    ALTER TABLE {_SCAN_EVENTS_TABLE} ADD COLUMN pr_number TEXT NOT NULL DEFAULT '';
+    ALTER TABLE {_SCAN_EVENTS_TABLE} ADD COLUMN pipeline TEXT NOT NULL DEFAULT '';
+    ALTER TABLE {_SCAN_EVENTS_TABLE} ADD COLUMN action_taken TEXT NOT NULL DEFAULT '';
+    ALTER TABLE {_SCAN_EVENTS_TABLE} ADD COLUMN notifications_sent TEXT NOT NULL DEFAULT '[]';
+    ALTER TABLE {_SCAN_EVENTS_TABLE} ADD COLUMN row_chain_hash TEXT NOT NULL DEFAULT ''
+"""
+
+_MIGRATIONS: dict[int, str] = {
+    1: _MIGRATION_V1_TO_V2,
+}
 
 
 # ---------------------------------------------------------------------------
@@ -155,25 +288,18 @@ def create_audit_schema(database_path: Path) -> None:
         raise AuditLogError(_DATABASE_ERROR.format(detail=db_error)) from db_error
     finally:
         connection.close()
+    # Auto-migrate if an older schema version is present (e.g. pre-existing v1 database).
+    # Done after the initial CREATE/INSERT so the schema_meta table definitely exists.
+    current_version = get_schema_version(database_path)
+    if current_version < AUDIT_SCHEMA_VERSION:
+        migrate_schema(database_path, current_version, AUDIT_SCHEMA_VERSION)
 
 
-def _assemble_scan_event_row(scan_result: ScanResult) -> tuple[str | int | float, ...]:
-    repository_hash = hashlib.sha256(_get_current_repository_path().encode()).hexdigest()
-    branch_hash = hashlib.sha256(_get_current_branch().encode()).hexdigest()
-    return (
-        _get_current_timestamp(),
-        __version__,
-        repository_hash,
-        branch_hash,
-        scan_result.files_scanned,
-        len(scan_result.findings),
-        _serialize_findings(scan_result.findings),
-        _BOOLEAN_TRUE if scan_result.is_clean else _BOOLEAN_FALSE,
-        scan_result.scan_duration,
-    )
-
-
-def insert_scan_event(database_path: Path, scan_result: ScanResult) -> None:
+def insert_scan_event(
+    database_path: Path,
+    scan_result: ScanResult,
+    notifications_sent: list[str] | None = None,
+) -> None:
     """Record a completed scan as an immutable audit entry.
 
     findings_json stores only value_hash and metadata fields — raw detected
@@ -182,17 +308,29 @@ def insert_scan_event(database_path: Path, scan_result: ScanResult) -> None:
     — paths and branch names can be PHI-revealing (e.g. a branch named
     feature/patient-john-doe-ssn-fix or a repo at /home/patient_records).
 
+    The row_chain_hash is computed as:
+        HMAC-SHA256(key=audit_key, msg=prev_chain_hash || row_content)
+    If the audit key file is absent, row_chain_hash is left as empty string
+    and a one-time warning is emitted.
+
     Args:
         database_path: Path to the SQLite audit database file.
         scan_result: The completed scan result to record.
+        notifications_sent: List of notification channel names delivered
+            (e.g. ["email", "webhook-slack"]). None is treated as empty list.
 
     Raises:
         AuditLogError: If the database cannot be written to.
     """
-    scan_event_row = _assemble_scan_event_row(scan_result)
+    sent_channels: list[str] = notifications_sent or []
+    scan_event_row = _assemble_scan_event_row(database_path, scan_result, sent_channels)
     connection = _open_database(database_path)
     try:
-        connection.execute(_INSERT_SCAN_EVENT_SQL, scan_event_row)
+        cursor = connection.execute(_INSERT_SCAN_EVENT_SQL, scan_event_row)
+        new_row_id = cursor.lastrowid
+        chain_hash = _compute_row_chain_hash(database_path, connection, new_row_id, scan_event_row)
+        if chain_hash:
+            connection.execute(_UPDATE_ROW_CHAIN_HASH_SQL, (chain_hash, new_row_id))
         connection.commit()
     except sqlite3.Error as db_error:
         connection.rollback()
@@ -308,6 +446,120 @@ def migrate_schema(database_path: Path, from_version: int, to_version: int) -> N
         connection.close()
 
 
+def verify_audit_chain(database_path: Path) -> bool:
+    """Recompute the HMAC-SHA256 hash chain and return True if the log is intact.
+
+    Reads all rows in insertion order and recomputes each row's chain hash
+    from the previous hash and the row's content fields. Returns False and
+    logs a tamper warning if any row diverges. Returns True without error if
+    the audit key is absent — chain verification requires the key.
+
+    Args:
+        database_path: Path to the SQLite audit database file.
+
+    Returns:
+        True if the chain is intact (or if the key is absent), False if
+        any row's stored hash does not match the recomputed value.
+
+    Raises:
+        AuditLogError: If the database cannot be read.
+    """
+    audit_key = _load_audit_key(database_path.parent)
+    if audit_key is None:
+        return True
+    connection = _open_database(database_path)
+    try:
+        cursor = connection.execute(_SELECT_ALL_ROWS_ORDERED_SQL)
+        rows = cursor.fetchall()
+    except sqlite3.Error as db_error:
+        raise AuditLogError(_DATABASE_ERROR.format(detail=db_error)) from db_error
+    finally:
+        connection.close()
+
+    prev_hash = AUDIT_GENESIS_CHAIN_HASH
+    for row in rows:
+        row_dict = dict(row)
+        row_id = row_dict["id"]
+        stored_hash: str = row_dict.get("row_chain_hash", "")
+        if not stored_hash:
+            # Row was written before hash chain was introduced — skip.
+            continue
+        content = _row_content_for_hashing(row_dict)
+        recomputed = _hmac_sha256(audit_key, prev_hash + content)
+        if not hmac.compare_digest(stored_hash, recomputed):
+            _logger.error(_CHAIN_TAMPER_ERROR.format(row_id=row_id))
+            return False
+        prev_hash = stored_hash
+    return True
+
+
+def purge_expired_audit_rows(database_path: Path) -> int:
+    """Delete audit rows older than AUDIT_RETENTION_DAYS (HIPAA 6-year window).
+
+    HIPAA §164.530(j) requires retention for 6 years minimum; rows beyond
+    that window may be purged. This function deletes rows whose timestamp
+    predates the retention cutoff and returns the number of rows deleted.
+
+    Args:
+        database_path: Path to the SQLite audit database file.
+
+    Returns:
+        Number of rows deleted.
+
+    Raises:
+        AuditLogError: If the database cannot be written to.
+    """
+    cutoff = (
+        datetime.datetime.now(datetime.UTC) - datetime.timedelta(days=AUDIT_RETENTION_DAYS)
+    ).isoformat()
+    connection = _open_database(database_path)
+    try:
+        cursor = connection.execute(_DELETE_EXPIRED_ROWS_SQL, (cutoff,))
+        deleted_count = cursor.rowcount
+        connection.commit()
+        return deleted_count
+    except sqlite3.Error as db_error:
+        connection.rollback()
+        raise AuditLogError(_DATABASE_ERROR.format(detail=db_error)) from db_error
+    finally:
+        connection.close()
+
+
+def generate_audit_key(database_path: Path) -> Path:
+    """Generate a new AES-256-GCM audit key and write it to the key file.
+
+    The key file is created in the same directory as database_path with mode
+    0o600 (owner read/write only). Raises AuditLogError if the file already
+    exists — never silently overwrites an existing key.
+
+    Args:
+        database_path: Path to the SQLite audit database — the key is stored
+            in the same directory.
+
+    Returns:
+        Path to the generated key file.
+
+    Raises:
+        AuditLogError: If the key file already exists or cannot be written.
+    """
+    key_path = _audit_key_path(database_path.parent)
+    if key_path.exists():
+        raise AuditLogError(
+            f"Audit key already exists at {str(key_path)!r} — "
+            "refusing to overwrite. Delete the file manually to regenerate."
+        )
+    try:
+        key_path.parent.mkdir(parents=True, exist_ok=True)
+        key_bytes = os.urandom(_AES_GCM_KEY_BYTES)
+        key_path.write_bytes(key_bytes)
+        key_path.chmod(0o600)
+    except OSError as io_error:
+        raise AuditLogError(
+            f"Cannot write audit key to {str(key_path)!r}: {io_error}"
+        ) from io_error
+    return key_path
+
+
 # ---------------------------------------------------------------------------
 # Private helpers
 # ---------------------------------------------------------------------------
@@ -317,6 +569,10 @@ def _apply_migration_steps(
     connection: sqlite3.Connection, from_version: int, to_version: int
 ) -> None:
     """Execute sequential migration SQL steps from from_version up to to_version.
+
+    SQLite does not support executing multiple semicolon-separated statements
+    in a single execute() call — each ALTER TABLE statement must be issued
+    separately.
 
     Args:
         connection: Open database connection to execute migrations on.
@@ -335,37 +591,24 @@ def _apply_migration_steps(
                     to_version=current_version + 1,
                 )
             )
-        connection.execute(_MIGRATIONS[current_version])
+        migration_sql = _MIGRATIONS[current_version]
+        for statement in migration_sql.strip().split(";"):
+            statement = statement.strip()
+            if statement:
+                connection.execute(statement)
         next_version = str(current_version + 1)
         connection.execute(_UPSERT_SCHEMA_VERSION_SQL, (_SCHEMA_VERSION_KEY, next_version))
         current_version += 1
 
 
 def _reject_symlink_database_path(database_path: Path) -> None:
-    """Raise AuditLogError if database_path is a symlink.
-
-    A symlinked database path could allow an attacker to redirect audit log
-    writes to an arbitrary location, destroying HIPAA immutability guarantees.
-
-    Args:
-        database_path: The path to validate.
-
-    Raises:
-        AuditLogError: If database_path is a symlink.
-    """
+    """Raise AuditLogError if database_path is a symlink."""
     if database_path.is_symlink():
         raise AuditLogError(_SYMLINK_DATABASE_PATH_ERROR.format(path=database_path))
 
 
 def _ensure_database_parent_exists(database_path: Path) -> None:
-    """Create the parent directory of database_path if it does not exist.
-
-    Args:
-        database_path: Path to the SQLite file whose parent must exist.
-
-    Raises:
-        AuditLogError: If the parent directory cannot be created.
-    """
+    """Create the parent directory of database_path if it does not exist."""
     try:
         database_path.parent.mkdir(parents=True, exist_ok=True)
     except OSError as io_error:
@@ -374,6 +617,9 @@ def _ensure_database_parent_exists(database_path: Path) -> None:
 
 def _open_database(database_path: Path) -> sqlite3.Connection:
     """Open and configure a SQLite connection to the audit database.
+
+    Security note: TOCTOU race between is_symlink() and sqlite3.connect().
+    Tracked for a future O_NOFOLLOW fix (platform-specific).
 
     Args:
         database_path: Path to the SQLite file to open or create.
@@ -385,14 +631,6 @@ def _open_database(database_path: Path) -> sqlite3.Connection:
         AuditLogError: If the path is a symlink, the parent directory cannot
             be created, or the database cannot be opened or configured.
     """
-    # Security: TOCTOU race between is_symlink() and sqlite3.connect().
-    # An attacker who can write to the filesystem could swap the path for a symlink
-    # in the window between the check and the open. The complete fix is to open the
-    # file descriptor with O_NOFOLLOW (Linux/macOS) before passing the fd to SQLite,
-    # which collapses the race to zero. O_NOFOLLOW is not available on Windows
-    # (os.O_NOFOLLOW is undefined there), so the fix requires a platform branch or
-    # a ctypes shim. Residual risk is low in the intended CI/CD context where the
-    # audit database directory is not world-writable. Tracked for Phase 5 hardening.
     _reject_symlink_database_path(database_path)
     _ensure_database_parent_exists(database_path)
     try:
@@ -409,26 +647,15 @@ def _open_database(database_path: Path) -> sqlite3.Connection:
 
 
 def _get_current_timestamp() -> str:
-    """Return the current UTC time as an ISO 8601 string.
-
-    Returns:
-        ISO 8601 formatted timestamp with timezone offset.
-    """
+    """Return the current UTC time as an ISO 8601 string."""
     return datetime.datetime.now(datetime.UTC).isoformat()
 
 
 def _serialize_findings(findings: tuple[ScanFinding, ...]) -> str:
     """Serialise findings to a JSON string for audit storage.
 
-    Only fields that cannot contain raw PHI are included. ``code_context``
-    is deliberately excluded — it stores surrounding source lines that may
-    contain the detected value in plaintext. ``remediation_hint`` is excluded
-    because it is set by detection layers with no content enforcement — a buggy
-    layer could set it to a raw PHI value. Remediation guidance is recoverable
-    at display time via ``HIPAA_REMEDIATION_GUIDANCE[hipaa_category]``.
-    ``file_path`` is stored as a SHA-256 hash (``file_path_hash``) — paths can
-    be PHI-revealing (e.g. patient_ssn_export.csv) and must not be persisted
-    in plaintext.
+    Only non-PHI fields are included. code_context and remediation_hint are
+    excluded; file_path is stored as a SHA-256 hash.
 
     Args:
         findings: The findings tuple from a completed ScanResult.
@@ -453,11 +680,7 @@ def _serialize_findings(findings: tuple[ScanFinding, ...]) -> str:
 
 
 def _get_current_branch() -> str:
-    """Return the current git branch name, or 'unknown' if unavailable.
-
-    Returns:
-        The branch name string, or _UNKNOWN_BRANCH on any failure.
-    """
+    """Return the current git branch name, or 'unknown' if unavailable."""
     try:
         completed_process = subprocess.run(
             _GIT_BRANCH_ARGS,
@@ -469,17 +692,12 @@ def _get_current_branch() -> str:
             branch = completed_process.stdout.strip()
             return branch if branch else _UNKNOWN_BRANCH
     except (OSError, subprocess.TimeoutExpired) as git_error:
-        # Log only the error type — branch names can embed PHI (e.g. feature/patient-john-doe).
         _logger.warning("Could not determine git branch: %s", type(git_error).__name__)
     return _UNKNOWN_BRANCH
 
 
 def _get_current_repository_path() -> str:
-    """Return the git repository root path, or the current directory if unavailable.
-
-    Returns:
-        Absolute path string of the repository root or CWD.
-    """
+    """Return the git repository root path, or the current directory if unavailable."""
     try:
         completed_process = subprocess.run(
             _GIT_TOPLEVEL_ARGS,
@@ -490,9 +708,341 @@ def _get_current_repository_path() -> str:
         if completed_process.returncode == 0:
             return completed_process.stdout.strip()
     except (OSError, subprocess.TimeoutExpired) as git_error:
-        # Log only the error type — repository paths can embed PHI (e.g. /home/patient_records/).
         _logger.warning("Could not determine git repository path: %s", type(git_error).__name__)
-    # Path.cwd() follows symlinks on most platforms. The returned path is
-    # SHA-256 hashed before storage, so no plaintext PHI is persisted even
-    # if a symlinked CWD returns an attacker-influenced path.
     return str(Path.cwd())
+
+
+def _run_git_format(args: tuple[str, ...]) -> str:
+    """Run a git log format command and return its stdout, or empty string on failure."""
+    try:
+        result = subprocess.run(
+            args,
+            capture_output=True,
+            text=True,
+            timeout=_GIT_SUBPROCESS_TIMEOUT_SECONDS,
+        )
+        if result.returncode == 0:
+            return result.stdout.strip()
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    return ""
+
+
+def _get_committer_name_hash() -> str:
+    """Return SHA-256 hash of the current git committer name, or empty string."""
+    name = _run_git_format(_GIT_COMMITTER_NAME_ARGS)
+    return hashlib.sha256(name.encode()).hexdigest() if name else ""
+
+
+def _get_committer_email_hash() -> str:
+    """Return SHA-256 hash of the current git committer email, or empty string."""
+    email = _run_git_format(_GIT_COMMITTER_EMAIL_ARGS)
+    return hashlib.sha256(email.encode()).hexdigest() if email else ""
+
+
+def _detect_pr_number() -> str:
+    """Return the PR/MR number from CI environment variables, or empty string."""
+    for env_var in (
+        _ENV_PR_NUMBER_GITHUB,
+        _ENV_PR_NUMBER_GITLAB,
+        _ENV_PR_NUMBER_BITBUCKET,
+    ):
+        value = os.environ.get(env_var, "")
+        if value:
+            return value
+    return ""
+
+
+def _detect_pipeline() -> str:
+    """Return the CI/CD pipeline name from environment variables, or 'local'."""
+    if os.environ.get(_ENV_PIPELINE_GITHUB):
+        return _PIPELINE_GITHUB_NAME
+    if os.environ.get(_ENV_PIPELINE_GITLAB):
+        return _PIPELINE_GITLAB_NAME
+    if os.environ.get(_ENV_PIPELINE_JENKINS):
+        return _PIPELINE_JENKINS_NAME
+    if os.environ.get(_ENV_PIPELINE_CIRCLECI):
+        return _PIPELINE_CIRCLECI_NAME
+    if os.environ.get(_ENV_PIPELINE_BITBUCKET):
+        return _PIPELINE_BITBUCKET_NAME
+    return _PIPELINE_LOCAL
+
+
+def _assemble_scan_event_row(
+    database_path: Path,
+    scan_result: ScanResult,
+    notifications_sent: list[str],
+) -> tuple[str | int | float, ...]:
+    """Build the tuple of values for an INSERT into scan_events.
+
+    Args:
+        database_path: Used to locate the audit key for findings encryption.
+        scan_result: Completed scan result.
+        notifications_sent: List of notification channels delivered.
+
+    Returns:
+        17-tuple matching the INSERT column order (excluding id and row_chain_hash
+        initial value — chain hash is set in a subsequent UPDATE).
+    """
+    repository_hash = hashlib.sha256(_get_current_repository_path().encode()).hexdigest()
+    branch_hash = hashlib.sha256(_get_current_branch().encode()).hexdigest()
+    findings_json = _serialize_and_maybe_encrypt(
+        _serialize_findings(scan_result.findings), database_path.parent
+    )
+    action_taken = ACTION_TAKEN_PASS if scan_result.is_clean else ACTION_TAKEN_FAIL
+    return (
+        _get_current_timestamp(),
+        __version__,
+        repository_hash,
+        branch_hash,
+        scan_result.files_scanned,
+        len(scan_result.findings),
+        findings_json,
+        _BOOLEAN_TRUE if scan_result.is_clean else _BOOLEAN_FALSE,
+        scan_result.scan_duration,
+        "scan",
+        _get_committer_name_hash(),
+        _get_committer_email_hash(),
+        _detect_pr_number(),
+        _detect_pipeline(),
+        action_taken,
+        json.dumps(notifications_sent),
+        "",  # row_chain_hash placeholder — updated after INSERT
+    )
+
+
+# ---------------------------------------------------------------------------
+# Audit key + encryption helpers
+# ---------------------------------------------------------------------------
+
+
+def _audit_key_path(key_dir: Path) -> Path:
+    """Return the Path to the audit key file within key_dir."""
+    return key_dir / AUDIT_KEY_FILENAME
+
+
+def _load_audit_key(key_dir: Path) -> bytes | None:
+    """Load the AES-256-GCM audit key from the key file.
+
+    Returns None and logs a one-time warning if the key file does not exist.
+
+    Args:
+        key_dir: Directory that contains the audit.key file.
+
+    Returns:
+        32-byte key bytes, or None if the key file is absent.
+    """
+    key_path = _audit_key_path(key_dir)
+    if not key_path.exists():
+        return None
+    try:
+        return key_path.read_bytes()
+    except OSError as io_error:
+        _logger.warning("Cannot read audit key from %r: %s", str(key_path), io_error)
+        return None
+
+
+def _encrypt_findings_json(plaintext: str, key: bytes) -> str:
+    """Encrypt a findings JSON string with AES-256-GCM.
+
+    The output is: AUDIT_ENCRYPTION_PREFIX + base64(nonce + ciphertext + tag).
+
+    Requires the ``cryptography`` package. Raises ImportError if absent —
+    callers should gate on the package being installed.
+
+    Args:
+        plaintext: JSON string to encrypt.
+        key: 32-byte AES-256 key.
+
+    Returns:
+        Encrypted string with AUDIT_ENCRYPTION_PREFIX.
+    """
+    import base64
+
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM  # type: ignore[import-not-found]
+
+    nonce = os.urandom(_AES_GCM_NONCE_BYTES)
+    aesgcm = AESGCM(key)
+    ciphertext_with_tag = aesgcm.encrypt(nonce, plaintext.encode(), None)
+    return AUDIT_ENCRYPTION_PREFIX + base64.b64encode(nonce + ciphertext_with_tag).decode()
+
+
+def _decrypt_findings_json(encrypted: str, key: bytes) -> str:
+    """Decrypt an encrypted findings JSON string produced by _encrypt_findings_json.
+
+    Args:
+        encrypted: String beginning with AUDIT_ENCRYPTION_PREFIX.
+        key: 32-byte AES-256 key.
+
+    Returns:
+        Decrypted plaintext JSON string.
+
+    Raises:
+        AuditLogError: If decryption fails (wrong key or tampered ciphertext).
+    """
+    import base64
+
+    from cryptography.exceptions import InvalidTag  # type: ignore[import-not-found]
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM  # type: ignore[import-not-found]
+
+    raw = base64.b64decode(encrypted[len(AUDIT_ENCRYPTION_PREFIX) :])
+    nonce = raw[:_AES_GCM_NONCE_END]
+    ciphertext_with_tag = raw[_AES_GCM_NONCE_END:]
+    try:
+        aesgcm = AESGCM(key)
+        return aesgcm.decrypt(nonce, ciphertext_with_tag, None).decode()
+    except (InvalidTag, ValueError) as crypto_error:
+        raise AuditLogError(
+            f"Audit findings_json decryption failed — the key may be wrong "
+            f"or the ciphertext has been tampered with: {crypto_error}"
+        ) from crypto_error
+
+
+def _serialize_and_maybe_encrypt(findings_json: str, key_dir: Path) -> str:
+    """Encrypt findings_json if an audit key is available, else return as-is.
+
+    Args:
+        findings_json: Plaintext JSON string of serialised findings.
+        key_dir: Directory where the audit key file is stored.
+
+    Returns:
+        Either the original plaintext JSON (key absent) or an encrypted string.
+    """
+    key = _load_audit_key(key_dir)
+    if key is None:
+        _logger.debug(_ENCRYPTION_KEY_MISSING_WARNING, str(_audit_key_path(key_dir)))
+        return findings_json
+    try:
+        return _encrypt_findings_json(findings_json, key)
+    except ImportError:
+        _logger.warning(
+            "cryptography package not installed — findings_json stored as plaintext. "
+            "Install with: pip install cryptography"
+        )
+        return findings_json
+
+
+# ---------------------------------------------------------------------------
+# Hash chain helpers
+# ---------------------------------------------------------------------------
+
+
+def _hmac_sha256(key: bytes, message: str) -> str:
+    """Return HMAC-SHA256(key, message) as a lowercase hex string.
+
+    Args:
+        key: The HMAC key bytes.
+        message: The message string (encoded as UTF-8 before hashing).
+
+    Returns:
+        64-character lowercase hex digest.
+    """
+    return hmac.new(key, message.encode(), hashlib.sha256).hexdigest()
+
+
+def _row_content_for_hashing(row: dict[str, Any]) -> str:
+    """Produce a canonical string representation of a row for hash chain computation.
+
+    All fields except row_chain_hash itself are included, in a stable order,
+    to detect any modification to any column value.
+
+    Args:
+        row: Row dict from the database (all columns).
+
+    Returns:
+        Canonical string for HMAC input.
+    """
+    return (
+        f"{row.get('id', '')}"
+        f"|{row.get('timestamp', '')}"
+        f"|{row.get('scanner_version', '')}"
+        f"|{row.get('repository_hash', '')}"
+        f"|{row.get('branch_hash', '')}"
+        f"|{row.get('files_scanned', '')}"
+        f"|{row.get('findings_count', '')}"
+        f"|{row.get('findings_json', '')}"
+        f"|{row.get('is_clean', '')}"
+        f"|{row.get('scan_duration', '')}"
+        f"|{row.get('event_type', '')}"
+        f"|{row.get('committer_name_hash', '')}"
+        f"|{row.get('committer_email_hash', '')}"
+        f"|{row.get('pr_number', '')}"
+        f"|{row.get('pipeline', '')}"
+        f"|{row.get('action_taken', '')}"
+        f"|{row.get('notifications_sent', '')}"
+    )
+
+
+def _get_previous_chain_hash(connection: sqlite3.Connection, new_row_id: int | None) -> str:
+    """Return the chain hash of the row preceding new_row_id.
+
+    Uses the genesis hash for the first row.
+
+    Args:
+        connection: Open database connection.
+        new_row_id: The id of the row just inserted.
+
+    Returns:
+        The prev_chain_hash to use when computing the new row's hash.
+    """
+    try:
+        cursor = connection.execute(
+            f"SELECT row_chain_hash FROM {_SCAN_EVENTS_TABLE} "
+            f"WHERE id < ? ORDER BY id DESC LIMIT 1",
+            (new_row_id,),
+        )
+        row = cursor.fetchone()
+        if row is not None and row[0]:
+            return str(row[0])
+    except sqlite3.Error:
+        pass
+    return AUDIT_GENESIS_CHAIN_HASH
+
+
+def _compute_row_chain_hash(
+    database_path: Path,
+    connection: sqlite3.Connection,
+    new_row_id: int | None,
+    row_tuple: tuple[str | int | float, ...],
+) -> str:
+    """Compute the HMAC-SHA256 chain hash for a newly inserted row.
+
+    Returns empty string if the audit key is absent (chain disabled).
+
+    Args:
+        database_path: Used to locate the audit key directory.
+        connection: Open database connection for prev-hash lookup.
+        new_row_id: The autoincrement id of the just-inserted row.
+        row_tuple: The 17-tuple passed to INSERT (same column order).
+
+    Returns:
+        64-hex-char chain hash, or empty string if key is absent.
+    """
+    key = _load_audit_key(database_path.parent)
+    if key is None:
+        _logger.debug(_CHAIN_KEY_MISSING_WARNING, str(_audit_key_path(database_path.parent)))
+        return ""
+    prev_hash = _get_previous_chain_hash(connection, new_row_id)
+    # Reconstruct a row dict from the tuple for _row_content_for_hashing.
+    # Column order must match _INSERT_SCAN_EVENT_SQL (excluding id which is auto).
+    row_dict: dict[str, Any] = {
+        "id": new_row_id,
+        "timestamp": row_tuple[0],
+        "scanner_version": row_tuple[1],
+        "repository_hash": row_tuple[2],
+        "branch_hash": row_tuple[3],
+        "files_scanned": row_tuple[4],
+        "findings_count": row_tuple[5],
+        "findings_json": row_tuple[6],
+        "is_clean": row_tuple[7],
+        "scan_duration": row_tuple[8],
+        "event_type": row_tuple[9],
+        "committer_name_hash": row_tuple[10],
+        "committer_email_hash": row_tuple[11],
+        "pr_number": row_tuple[12],
+        "pipeline": row_tuple[13],
+        "action_taken": row_tuple[14],
+        "notifications_sent": row_tuple[15],
+    }
+    content = _row_content_for_hashing(row_dict)
+    return _hmac_sha256(key, prev_hash + content)

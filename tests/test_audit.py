@@ -68,6 +68,10 @@ _GIT_SUCCESS_RETURN_CODE: int = 0
 _GIT_FAILURE_RETURN_CODE: int = 128
 _SCHEMA_VERSION_FROM: int = 1
 _SCHEMA_VERSION_TO: int = 2
+# Versions for which no migration path exists in _MIGRATIONS — used to verify
+# that migrate_schema raises SchemaMigrationError when the step is absent.
+_SCHEMA_VERSION_NO_MIGRATION_FROM: int = 2
+_SCHEMA_VERSION_NO_MIGRATION_TO: int = 3
 _SAMPLE_MIGRATION_SQL: str = "ALTER TABLE scan_events ADD COLUMN extra TEXT"
 _RECENT_SCANS_DAYS: int = 7
 _ZERO_DAYS: int = 0
@@ -685,9 +689,11 @@ def test_migrate_schema_raises_schema_migration_error_when_migration_missing(
     database_path = tmp_path / "audit.db"
     create_audit_schema(database_path)
 
-    # _MIGRATIONS is empty for schema v1 — no path from 1 to 2 exists
+    # No migration path exists from v2 to v3 in _MIGRATIONS.
     with pytest.raises(SchemaMigrationError):
-        migrate_schema(database_path, _SCHEMA_VERSION_FROM, _SCHEMA_VERSION_TO)
+        migrate_schema(
+            database_path, _SCHEMA_VERSION_NO_MIGRATION_FROM, _SCHEMA_VERSION_NO_MIGRATION_TO
+        )
 
 
 def test_migrate_schema_applies_migration_and_updates_version(tmp_path: Path) -> None:
