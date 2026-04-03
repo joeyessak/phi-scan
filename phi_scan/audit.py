@@ -153,6 +153,9 @@ _BOOLEAN_FALSE: int = 0
 _EVENT_TYPE_SCAN: str = "scan"
 _CHAIN_HASH_PLACEHOLDER: str = ""
 _NOTIFICATIONS_EMPTY_JSON: str = "[]"
+# O_NOFOLLOW is POSIX-only (Linux/macOS). On Windows it does not exist;
+# _reject_symlink_database_path falls back to Path.is_symlink() there.
+_O_NOFOLLOW: int | None = getattr(os, "O_NOFOLLOW", None)
 _PRAGMA_WAL_MODE: str = "PRAGMA journal_mode=WAL"
 _LAST_SCAN_LIMIT: int = 1
 _GIT_SUBPROCESS_TIMEOUT_SECONDS: int = 5
@@ -692,31 +695,41 @@ def _reject_symlink_database_path(database_path: Path) -> None:
     control), silently discarding the audit trail or poisoning a different
     file. Rejecting symlinks forces the path to resolve to a real file.
 
-    Uses ``os.open`` with ``O_NOFOLLOW`` to detect symlinks atomically.
-    ``Path.is_symlink()`` + ``sqlite3.connect()`` has a TOCTOU race window;
-    ``O_NOFOLLOW`` closes it because the kernel rejects the symlink in a
-    single syscall. ``ENOENT`` is not an error — new databases are created
-    by ``sqlite3.connect``.
+    On POSIX (Linux/macOS), uses ``os.open`` with ``O_NOFOLLOW`` to detect
+    symlinks atomically. ``Path.is_symlink()`` + ``sqlite3.connect()`` has a
+    TOCTOU race window; ``O_NOFOLLOW`` closes it because the kernel rejects
+    the symlink in a single syscall (``errno.ELOOP``). ``ENOENT`` is not an
+    error — new databases are created by ``sqlite3.connect``.
+
+    On Windows, ``O_NOFOLLOW`` is not available; the function falls back to
+    ``Path.is_symlink()``. The TOCTOU window remains on Windows but symlink
+    attacks are mitigated by the OS security model.
 
     Args:
         database_path: Resolved path to validate.
 
     Raises:
-        AuditLogError: If database_path is a symbolic link (errno.ELOOP).
+        AuditLogError: If database_path is a symbolic link.
     """
-    try:
-        fd = os.open(str(database_path), os.O_RDONLY | os.O_NOFOLLOW)
-        os.close(fd)
-    except OSError as os_error:
-        if os_error.errno == errno.ELOOP:
-            raise AuditLogError(
-                _SYMLINK_DATABASE_PATH_ERROR.format(path=database_path)
-            ) from os_error
-        if os_error.errno != errno.ENOENT:
-            # Unexpected OS error (e.g. EACCES, EPERM) — re-raise as AuditLogError
-            # so callers receive a structured error rather than a bare OSError.
-            raise AuditLogError(_DATABASE_ERROR.format(detail=os_error)) from os_error
-        # ENOENT is intentionally ignored — new databases are created by sqlite3.connect.
+    if _O_NOFOLLOW is not None:
+        # POSIX: O_NOFOLLOW atomically rejects symlinks in a single syscall.
+        try:
+            fd = os.open(str(database_path), os.O_RDONLY | _O_NOFOLLOW)
+            os.close(fd)
+        except OSError as os_error:
+            if os_error.errno == errno.ELOOP:
+                raise AuditLogError(
+                    _SYMLINK_DATABASE_PATH_ERROR.format(path=database_path)
+                ) from os_error
+            if os_error.errno != errno.ENOENT:
+                # Unexpected OS error (e.g. EACCES, EPERM) — surface as AuditLogError.
+                raise AuditLogError(_DATABASE_ERROR.format(detail=os_error)) from os_error
+            # ENOENT is intentionally ignored — new databases created by sqlite3.connect.
+    else:
+        # Windows fallback: O_NOFOLLOW unavailable; is_symlink() has a small TOCTOU
+        # window but is the best available check on this platform.
+        if database_path.is_symlink():
+            raise AuditLogError(_SYMLINK_DATABASE_PATH_ERROR.format(path=database_path))
 
 
 def _ensure_database_parent_exists(database_path: Path) -> None:
