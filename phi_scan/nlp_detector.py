@@ -52,7 +52,7 @@ _SPACY_MODEL_NAME: str = "en_core_web_lg"
 _PHI_SCAN_SETUP_COMMAND: str = "phi-scan setup"
 
 
-def _check_spacy_model_is_installed(model_name: str) -> None:
+def _verify_spacy_model_installation(model_name: str) -> None:
     """Raise MissingOptionalDependencyError when the named spaCy model is absent.
 
     Importing spacy locally keeps the module namespace clean and confines
@@ -83,7 +83,7 @@ try:
         NlpEngineProvider,
     )
 
-    _check_spacy_model_is_installed(_SPACY_MODEL_NAME)
+    _verify_spacy_model_installation(_SPACY_MODEL_NAME)
     _IS_NLP_AVAILABLE: bool = True
 except MissingOptionalDependencyError as _nlp_model_error:
     # Model is absent — warn at import time so the gap is visible immediately
