@@ -21,7 +21,7 @@ from watchdog.observers import Observer
 from phi_scan import __version__
 from phi_scan.audit import (
     ChainVerifyResult,
-    create_audit_schema,
+    ensure_current_schema,
     get_last_scan,
     insert_scan_event,
     query_recent_scans,
@@ -781,7 +781,7 @@ def _write_audit_record(
     """
     resolved_path = database_path.expanduser()
     try:
-        create_audit_schema(resolved_path)
+        ensure_current_schema(resolved_path)
         insert_scan_event(resolved_path, scan_result, notifications_sent)
     except AuditKeyMissingError:
         _logger.debug(_AUDIT_KEY_MISSING_DEBUG)
@@ -1583,7 +1583,7 @@ def watch(
 def display_last_scan() -> None:
     """Display the most recent scan result from the audit log."""
     database_path = Path(DEFAULT_DATABASE_PATH).expanduser()
-    create_audit_schema(database_path)
+    ensure_current_schema(database_path)
     last_scan_event = get_last_scan(database_path)
     if last_scan_event is None:
         typer.echo(_NO_LAST_SCAN_MESSAGE)
@@ -1602,7 +1602,7 @@ def display_history(
     """Query the audit log for recent scan history."""
     lookback_days = _parse_lookback_days(last)
     database_path = Path(DEFAULT_DATABASE_PATH).expanduser()
-    create_audit_schema(database_path)
+    ensure_current_schema(database_path)
     if should_verify:
         verify_result: ChainVerifyResult = verify_audit_chain(database_path)
         if not verify_result.key_present:

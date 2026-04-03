@@ -61,6 +61,7 @@ from phi_scan.models import ScanFinding, ScanResult
 __all__ = [
     "ChainVerifyResult",
     "create_audit_schema",
+    "ensure_current_schema",
     "generate_audit_key",
     "get_last_scan",
     "get_schema_version",
@@ -336,8 +337,28 @@ def create_audit_schema(database_path: Path) -> None:
         raise AuditLogError(_DATABASE_ERROR.format(detail=db_error)) from db_error
     finally:
         connection.close()
-    # Auto-migrate if an older schema version is present (e.g. pre-existing v1 database).
-    # Done after the initial CREATE/INSERT so the schema_meta table definitely exists.
+
+
+def ensure_current_schema(database_path: Path) -> None:
+    """Create the audit schema and migrate it to the current version if needed.
+
+    This is the preferred entry point for callers that need a ready-to-use
+    database. It calls ``create_audit_schema`` to initialise the tables, then
+    runs any pending migrations so an older on-disk database is brought up to
+    ``AUDIT_SCHEMA_VERSION`` transparently.
+
+    ``create_audit_schema`` has a single responsibility (create), so callers
+    that need only creation (tests, tooling) can call it directly. This
+    function handles the combined create-and-migrate use case.
+
+    Args:
+        database_path: Path to the SQLite audit database file.
+
+    Raises:
+        AuditLogError: If the database cannot be opened or written to.
+        SchemaMigrationError: If a migration step is missing or cannot run.
+    """
+    create_audit_schema(database_path)
     current_version = get_schema_version(database_path)
     if current_version < AUDIT_SCHEMA_VERSION:
         migrate_schema(database_path, current_version, AUDIT_SCHEMA_VERSION)
@@ -380,8 +401,8 @@ def insert_scan_event(
     scan_event_row = _build_scan_event_row(scan_result, delivered_channels, encrypted_findings)
     connection = _open_database(database_path)
     try:
-        cursor = connection.execute(_INSERT_SCAN_EVENT_SQL, scan_event_row)
-        new_row_id = cursor.lastrowid
+        insert_cursor = connection.execute(_INSERT_SCAN_EVENT_SQL, scan_event_row)
+        new_row_id = insert_cursor.lastrowid
         chain_hash = _compute_row_chain_hash(database_path, connection, new_row_id, scan_event_row)
         _attach_chain_hash(connection, new_row_id, chain_hash)
         connection.commit()
@@ -529,11 +550,11 @@ def _verify_chain_rows(audit_rows: list[Any], audit_key: bytes) -> ChainVerifyRe
             is_chain_intact = False
             continue
         row_content_string = _row_content_for_hashing(row_fields)
-        recomputed = _hmac_sha256(audit_key, prev_hash + row_content_string)
-        if not hmac.compare_digest(stored_hash, recomputed):
+        recomputed_chain_hash = _hmac_sha256(audit_key, prev_hash + row_content_string)
+        if not hmac.compare_digest(stored_hash, recomputed_chain_hash):
             _logger.error(_CHAIN_TAMPER_ERROR.format(row_id=row_id))
             return ChainVerifyResult(is_intact=False, key_present=True, skipped_rows=skipped_rows)
-        prev_hash = stored_hash
+        prev_hash = recomputed_chain_hash
     return ChainVerifyResult(is_intact=is_chain_intact, key_present=True, skipped_rows=skipped_rows)
 
 
