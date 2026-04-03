@@ -69,6 +69,7 @@ __all__ = [
     "verify_audit_chain",
 ]
 
+
 class ChainVerifyResult(NamedTuple):
     """Result of verify_audit_chain, distinguishing verified-clean from unverifiable.
 
@@ -265,18 +266,12 @@ _CREATE_SCAN_EVENTS_TIMESTAMP_INDEX_SQL: str = (
 _MIGRATION_V1_TO_V2: list[str] = [
     f"ALTER TABLE {_SCAN_EVENTS_TABLE}"
     f" ADD COLUMN event_type TEXT NOT NULL DEFAULT '{_EVENT_TYPE_SCAN}'",
-    f"ALTER TABLE {_SCAN_EVENTS_TABLE}"
-    " ADD COLUMN committer_name_hash TEXT NOT NULL DEFAULT ''",
-    f"ALTER TABLE {_SCAN_EVENTS_TABLE}"
-    " ADD COLUMN committer_email_hash TEXT NOT NULL DEFAULT ''",
-    f"ALTER TABLE {_SCAN_EVENTS_TABLE}"
-    " ADD COLUMN pr_number TEXT NOT NULL DEFAULT ''",
-    f"ALTER TABLE {_SCAN_EVENTS_TABLE}"
-    " ADD COLUMN pipeline TEXT NOT NULL DEFAULT ''",
-    f"ALTER TABLE {_SCAN_EVENTS_TABLE}"
-    " ADD COLUMN action_taken TEXT NOT NULL DEFAULT ''",
-    f"ALTER TABLE {_SCAN_EVENTS_TABLE}"
-    " ADD COLUMN notifications_sent TEXT NOT NULL DEFAULT '[]'",
+    f"ALTER TABLE {_SCAN_EVENTS_TABLE} ADD COLUMN committer_name_hash TEXT NOT NULL DEFAULT ''",
+    f"ALTER TABLE {_SCAN_EVENTS_TABLE} ADD COLUMN committer_email_hash TEXT NOT NULL DEFAULT ''",
+    f"ALTER TABLE {_SCAN_EVENTS_TABLE} ADD COLUMN pr_number TEXT NOT NULL DEFAULT ''",
+    f"ALTER TABLE {_SCAN_EVENTS_TABLE} ADD COLUMN pipeline TEXT NOT NULL DEFAULT ''",
+    f"ALTER TABLE {_SCAN_EVENTS_TABLE} ADD COLUMN action_taken TEXT NOT NULL DEFAULT ''",
+    f"ALTER TABLE {_SCAN_EVENTS_TABLE} ADD COLUMN notifications_sent TEXT NOT NULL DEFAULT '[]'",
     f"ALTER TABLE {_SCAN_EVENTS_TABLE}"
     f" ADD COLUMN row_chain_hash TEXT NOT NULL DEFAULT '{_CHAIN_HASH_PLACEHOLDER}'",
 ]
@@ -581,9 +576,7 @@ def generate_audit_key(database_path: Path) -> Path:
     """
     key_path = _audit_key_path(database_path.parent)
     if key_path.exists():
-        raise AuditLogError(
-            _KEY_FILE_EXISTS_ERROR.format(key_path=str(key_path))
-        )
+        raise AuditLogError(_KEY_FILE_EXISTS_ERROR.format(key_path=str(key_path)))
     try:
         key_path.parent.mkdir(parents=True, exist_ok=True)
         key_bytes = os.urandom(_AES_GCM_KEY_BYTES)
