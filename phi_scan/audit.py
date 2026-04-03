@@ -58,6 +58,7 @@ from phi_scan.models import ScanFinding, ScanResult
 
 __all__ = [
     "create_audit_schema",
+    "generate_audit_key",
     "get_last_scan",
     "get_schema_version",
     "insert_scan_event",
@@ -111,6 +112,7 @@ _UNKNOWN_REPOSITORY: str = "unknown"
 _UNKNOWN_BRANCH: str = "unknown"
 _BOOLEAN_TRUE: int = 1
 _BOOLEAN_FALSE: int = 0
+_EVENT_TYPE_SCAN: str = "scan"
 _PRAGMA_WAL_MODE: str = "PRAGMA journal_mode=WAL"
 _LAST_SCAN_LIMIT: int = 1
 _GIT_SUBPROCESS_TIMEOUT_SECONDS: int = 5
@@ -592,6 +594,9 @@ def _apply_migration_steps(
                 )
             )
         migration_sql = _MIGRATIONS[current_version]
+        # WARNING: statements are split on ";". Future migration authors must not
+        # include semicolons inside SQL string literals or DEFAULT clause values,
+        # as that would cause incorrect splitting.
         for statement in migration_sql.strip().split(";"):
             statement = statement.strip()
             if statement:
@@ -618,8 +623,8 @@ def _ensure_database_parent_exists(database_path: Path) -> None:
 def _open_database(database_path: Path) -> sqlite3.Connection:
     """Open and configure a SQLite connection to the audit database.
 
-    Security note: TOCTOU race between is_symlink() and sqlite3.connect().
-    Tracked for a future O_NOFOLLOW fix (platform-specific).
+    Security note: TOCTOU race between is_symlink() and sqlite3.connect() remains.
+    A future fix would use O_NOFOLLOW at the OS level (platform-specific).
 
     Args:
         database_path: Path to the SQLite file to open or create.
@@ -712,31 +717,31 @@ def _get_current_repository_path() -> str:
     return str(Path.cwd())
 
 
-def _run_git_format(args: tuple[str, ...]) -> str:
+def _fetch_git_format_output(args: tuple[str, ...]) -> str:
     """Run a git log format command and return its stdout, or empty string on failure."""
     try:
-        result = subprocess.run(
+        completed_process = subprocess.run(
             args,
             capture_output=True,
             text=True,
             timeout=_GIT_SUBPROCESS_TIMEOUT_SECONDS,
         )
-        if result.returncode == 0:
-            return result.stdout.strip()
-    except (OSError, subprocess.TimeoutExpired):
-        pass
+        if completed_process.returncode == 0:
+            return completed_process.stdout.strip()
+    except (OSError, subprocess.TimeoutExpired) as git_error:
+        _logger.warning("Could not run git format command: %s", type(git_error).__name__)
     return ""
 
 
 def _get_committer_name_hash() -> str:
     """Return SHA-256 hash of the current git committer name, or empty string."""
-    name = _run_git_format(_GIT_COMMITTER_NAME_ARGS)
+    name = _fetch_git_format_output(_GIT_COMMITTER_NAME_ARGS)
     return hashlib.sha256(name.encode()).hexdigest() if name else ""
 
 
 def _get_committer_email_hash() -> str:
     """Return SHA-256 hash of the current git committer email, or empty string."""
-    email = _run_git_format(_GIT_COMMITTER_EMAIL_ARGS)
+    email = _fetch_git_format_output(_GIT_COMMITTER_EMAIL_ARGS)
     return hashlib.sha256(email.encode()).hexdigest() if email else ""
 
 
@@ -800,7 +805,7 @@ def _assemble_scan_event_row(
         findings_json,
         _BOOLEAN_TRUE if scan_result.is_clean else _BOOLEAN_FALSE,
         scan_result.scan_duration,
-        "scan",
+        _EVENT_TYPE_SCAN,
         _get_committer_name_hash(),
         _get_committer_email_hash(),
         _detect_pr_number(),
