@@ -116,11 +116,11 @@ _CHAIN_TAMPER_ERROR: str = (
     "stored hash does not match recomputed hash — the audit log may have been tampered with"
 )
 _CHAIN_KEY_MISSING_WARNING: str = (
-    "Audit chain key not found at %r — hash chain verification skipped. "
+    "Audit chain key not found at %s — hash chain verification skipped. "
     "Run 'phi-scan setup' to generate the audit key."
 )
 _ENCRYPTION_KEY_MISSING_ERROR: str = (
-    "Audit encryption key not found at {key_path!r} — refusing to store findings_json "
+    "Audit encryption key not found at {redacted_key_path} — refusing to store findings_json "
     "as plaintext. Run 'phi-scan setup' to generate the audit key."
 )
 _CHAIN_ROW_SKIPPED_WARNING: str = (
@@ -133,11 +133,11 @@ _INSERT_WITHOUT_CHAIN_HASH_WARNING: str = (
     "Run 'phi-scan setup' to enable hash-chain integrity protection."
 )
 _KEY_FILE_EXISTS_ERROR: str = (
-    "Audit key already exists at {key_path!r} — "
+    "Audit key already exists at {redacted_key_path} — "
     "refusing to overwrite. Delete the file manually to regenerate."
 )
-_KEY_WRITE_ERROR: str = "Cannot write audit key to {key_path!r}: {io_error}"
-_KEY_READ_ERROR: str = "Cannot read audit key from {key_path!r}: {io_error}"
+_KEY_WRITE_ERROR: str = "Cannot write audit key to {redacted_key_path}: {io_error}"
+_KEY_READ_ERROR: str = "Cannot read audit key from {redacted_key_path}: {io_error}"
 
 # ---------------------------------------------------------------------------
 # Implementation constants
@@ -664,9 +664,11 @@ def generate_audit_key(database_path: Path) -> Path:
             os.close(fd)
     except OSError as io_error:
         if io_error.errno == errno.EEXIST:
-            raise AuditLogError(_KEY_FILE_EXISTS_ERROR.format(key_path=str(key_path))) from io_error
+            raise AuditLogError(
+                _KEY_FILE_EXISTS_ERROR.format(redacted_key_path=_redact_key_path(key_path))
+            ) from io_error
         raise AuditLogError(
-            _KEY_WRITE_ERROR.format(key_path=str(key_path), io_error=io_error)
+            _KEY_WRITE_ERROR.format(redacted_key_path=_redact_key_path(key_path), io_error=io_error)
         ) from io_error
     return key_path
 
@@ -1026,6 +1028,21 @@ def _audit_key_path(key_dir: Path) -> Path:
     return key_dir / AUDIT_KEY_FILENAME
 
 
+def _redact_key_path(key_path: Path) -> str:
+    """Return a safe representation of key_path that omits the directory.
+
+    The directory component is PHI-revealing when the database is placed in a
+    patient-data path (e.g. /home/patient_records/). Only the filename is
+    included — it is the constant AUDIT_KEY_FILENAME and carries no PHI.
+    Callers use this in exception messages and log strings to stay consistent
+    with the path-hashing policy applied to repository_hash and branch_hash.
+
+    Returns:
+        String of the form ``<redacted>/audit.key`` (filename only).
+    """
+    return f"<redacted>/{key_path.name}"
+
+
 def _load_audit_key(key_dir: Path) -> bytes | None:
     """Load the AES-256-GCM audit key from the key file.
 
@@ -1052,7 +1069,7 @@ def _load_audit_key(key_dir: Path) -> bytes | None:
         return key_path.read_bytes()
     except OSError as io_error:
         raise AuditLogError(
-            _KEY_READ_ERROR.format(key_path=str(key_path), io_error=io_error)
+            _KEY_READ_ERROR.format(redacted_key_path=_redact_key_path(key_path), io_error=io_error)
         ) from io_error
 
 
@@ -1141,7 +1158,9 @@ def _serialize_and_encrypt(findings_json: str, key_dir: Path) -> str:
     key = _load_audit_key(key_dir)
     if key is None:
         raise AuditKeyMissingError(
-            _ENCRYPTION_KEY_MISSING_ERROR.format(key_path=str(_audit_key_path(key_dir)))
+            _ENCRYPTION_KEY_MISSING_ERROR.format(
+                redacted_key_path=_redact_key_path(_audit_key_path(key_dir))
+            )
         )
     return _encrypt_findings_json(findings_json, key)
 
@@ -1268,7 +1287,9 @@ def _compute_row_chain_hash(
     """
     key = _load_audit_key(database_path.parent)
     if key is None:
-        _logger.debug(_CHAIN_KEY_MISSING_WARNING, str(_audit_key_path(database_path.parent)))
+        _logger.debug(
+            _CHAIN_KEY_MISSING_WARNING, _redact_key_path(_audit_key_path(database_path.parent))
+        )
         return ""
     prev_hash = _get_previous_chain_hash(connection, new_row_id)
     # Reconstruct a row dict from the tuple for _row_content_for_hashing.
