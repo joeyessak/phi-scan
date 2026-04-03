@@ -45,6 +45,7 @@ _SAMPLE_LINE_NUMBER: int = 10
 
 _FILES_SCANNED_SINGLE: int = 1
 _FILES_SCANNED_MULTI: int = 5
+_SAMPLE_SCAN_DURATION: float = 0.15
 
 
 # ---------------------------------------------------------------------------
@@ -56,10 +57,11 @@ def _make_finding(
     category: PhiCategory = PhiCategory.SSN,
     severity: SeverityLevel = SeverityLevel.HIGH,
     line_number: int = _SAMPLE_LINE_NUMBER,
-    file_path: Path = _SAMPLE_FILE_PATH,
+    file_path: Path | None = None,
 ) -> ScanFinding:
+    resolved_path = file_path if file_path is not None else _SAMPLE_FILE_PATH
     return ScanFinding(
-        file_path=file_path,
+        file_path=resolved_path,
         line_number=line_number,
         entity_type=_SAMPLE_ENTITY_TYPE,
         hipaa_category=category,
@@ -87,7 +89,7 @@ def _make_scan_result(
         findings=findings,
         files_scanned=files_scanned,
         files_with_findings=min(len(findings), files_scanned),
-        scan_duration=0.15,
+        scan_duration=_SAMPLE_SCAN_DURATION,
         is_clean=not findings,
         risk_level=risk_level if findings else RiskLevel.CLEAN,
         severity_counts=severity_counts,

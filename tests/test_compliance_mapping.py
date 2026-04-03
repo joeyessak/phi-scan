@@ -154,16 +154,20 @@ def test_biometric_finding_maps_to_hipaa_safeharbor_item_p() -> None:
 def test_annotate_findings_hipaa_present_with_empty_enabled_frameworks() -> None:
     """HIPAA controls must be present even when enabled_frameworks is empty."""
     finding = _make_finding(PhiCategory.SSN)
-    result = annotate_findings((finding,), frozenset())
-    hipaa_controls = [c for c in result[0] if c.framework is ComplianceFramework.HIPAA]
+    finding_controls_map = annotate_findings((finding,), frozenset())
+    hipaa_controls = [
+        c for c in finding_controls_map[0] if c.framework is ComplianceFramework.HIPAA
+    ]
     assert hipaa_controls
 
 
 def test_annotate_findings_hipaa_present_with_non_hipaa_framework() -> None:
     """HIPAA controls must be present when only a non-HIPAA framework is enabled."""
     finding = _make_finding(PhiCategory.SSN)
-    result = annotate_findings((finding,), frozenset({ComplianceFramework.GDPR}))
-    hipaa_controls = [c for c in result[0] if c.framework is ComplianceFramework.HIPAA]
+    finding_controls_map = annotate_findings((finding,), frozenset({ComplianceFramework.GDPR}))
+    hipaa_controls = [
+        c for c in finding_controls_map[0] if c.framework is ComplianceFramework.HIPAA
+    ]
     assert hipaa_controls
 
 
@@ -175,16 +179,16 @@ def test_annotate_findings_hipaa_present_with_non_hipaa_framework() -> None:
 def test_ssn_maps_to_soc2_cc6_controls_when_enabled() -> None:
     """SSN finding must include SOC2 CC6-series controls when soc2 is enabled."""
     finding = _make_finding(PhiCategory.SSN)
-    result = annotate_findings((finding,), frozenset({ComplianceFramework.SOC2}))
-    soc2_ids = _extract_framework_control_ids(result[0], ComplianceFramework.SOC2)
+    finding_controls_map = annotate_findings((finding,), frozenset({ComplianceFramework.SOC2}))
+    soc2_ids = _extract_framework_control_ids(finding_controls_map[0], ComplianceFramework.SOC2)
     assert any("CC6" in cid for cid in soc2_ids), f"No SOC2 CC6 control found; got: {soc2_ids}"
 
 
 def test_mrn_maps_to_soc2_cc6_controls_when_enabled() -> None:
     """MRN finding must include SOC2 CC6 controls when soc2 is enabled."""
     finding = _make_finding(PhiCategory.MRN)
-    result = annotate_findings((finding,), frozenset({ComplianceFramework.SOC2}))
-    soc2_ids = _extract_framework_control_ids(result[0], ComplianceFramework.SOC2)
+    finding_controls_map = annotate_findings((finding,), frozenset({ComplianceFramework.SOC2}))
+    soc2_ids = _extract_framework_control_ids(finding_controls_map[0], ComplianceFramework.SOC2)
     assert soc2_ids, "SOC2 controls must be present for MRN when soc2 is enabled"
 
 
@@ -220,8 +224,10 @@ def test_category_controls_soc2_cc6_6_control_id() -> None:
 def test_ssn_maps_to_hitrust_controls_when_enabled() -> None:
     """SSN finding must include HITRUST controls when hitrust is enabled."""
     finding = _make_finding(PhiCategory.SSN)
-    result = annotate_findings((finding,), frozenset({ComplianceFramework.HITRUST}))
-    hitrust_ids = _extract_framework_control_ids(result[0], ComplianceFramework.HITRUST)
+    finding_controls_map = annotate_findings((finding,), frozenset({ComplianceFramework.HITRUST}))
+    hitrust_ids = _extract_framework_control_ids(
+        finding_controls_map[0], ComplianceFramework.HITRUST
+    )
     assert hitrust_ids, "HITRUST controls must be present for SSN when hitrust is enabled"
 
 
@@ -252,8 +258,10 @@ def test_category_controls_hitrust_01v_control_id() -> None:
 def test_mrn_maps_to_hitrust_controls_when_enabled() -> None:
     """MRN finding must include HITRUST controls when hitrust is enabled."""
     finding = _make_finding(PhiCategory.MRN)
-    result = annotate_findings((finding,), frozenset({ComplianceFramework.HITRUST}))
-    hitrust_ids = _extract_framework_control_ids(result[0], ComplianceFramework.HITRUST)
+    finding_controls_map = annotate_findings((finding,), frozenset({ComplianceFramework.HITRUST}))
+    hitrust_ids = _extract_framework_control_ids(
+        finding_controls_map[0], ComplianceFramework.HITRUST
+    )
     assert hitrust_ids, "HITRUST controls must be present for MRN when hitrust is enabled"
 
 
@@ -266,16 +274,16 @@ def test_annotate_findings_each_finding_has_its_own_controls() -> None:
     """Controls at index 0 must correspond to finding 0, index 1 to finding 1."""
     ssn_finding = _make_finding(PhiCategory.SSN, line_number=1)
     biometric_finding = _make_finding(PhiCategory.BIOMETRIC, line_number=2)
-    result = annotate_findings(
+    finding_controls_map = annotate_findings(
         (ssn_finding, biometric_finding),
         frozenset({ComplianceFramework.BIPA}),
     )
     # Index 0 = SSN: must not have BIPA
-    ssn_bipa = [c for c in result[0] if c.framework is ComplianceFramework.BIPA]
+    ssn_bipa = [c for c in finding_controls_map[0] if c.framework is ComplianceFramework.BIPA]
     assert not ssn_bipa, "SSN finding must not carry BIPA controls"
 
     # Index 1 = BIOMETRIC: must have BIPA
-    bio_bipa = [c for c in result[1] if c.framework is ComplianceFramework.BIPA]
+    bio_bipa = [c for c in finding_controls_map[1] if c.framework is ComplianceFramework.BIPA]
     assert bio_bipa, "BIOMETRIC finding must carry BIPA controls when bipa is enabled"
 
 
@@ -284,5 +292,5 @@ def test_annotate_findings_all_indices_covered() -> None:
     findings = tuple(
         _make_finding(PhiCategory.SSN, line_number=i + 1) for i in range(_MULTI_FINDING_COUNT)
     )
-    result = annotate_findings(findings, frozenset({ComplianceFramework.SOC2}))
-    assert set(result.keys()) == set(range(_MULTI_FINDING_COUNT))
+    finding_controls_map = annotate_findings(findings, frozenset({ComplianceFramework.SOC2}))
+    assert set(finding_controls_map.keys()) == set(range(_MULTI_FINDING_COUNT))

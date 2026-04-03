@@ -58,7 +58,10 @@ _SAMPLE_LINE_NUMBER: int = 10
 
 _HTML_CHART_IMG_PREFIX: str = "data:image/png;base64,"
 _MIN_FILES_SCANNED: int = 1
+_NO_FILES_WITH_FINDINGS: int = 0
 _SAMPLE_SCAN_DURATION: float = 0.05
+_EMPTY_BYTE_LENGTH: int = 0
+_SUBSTRING_NOT_FOUND: int = -1
 
 
 # ---------------------------------------------------------------------------
@@ -70,10 +73,11 @@ def _make_finding(
     category: PhiCategory = PhiCategory.SSN,
     severity: SeverityLevel = SeverityLevel.HIGH,
     line_number: int = _SAMPLE_LINE_NUMBER,
-    file_path: Path = _SAMPLE_FILE_PATH,
+    file_path: Path | None = None,
 ) -> ScanFinding:
+    resolved_path = file_path if file_path is not None else _SAMPLE_FILE_PATH
     return ScanFinding(
-        file_path=file_path,
+        file_path=resolved_path,
         line_number=line_number,
         entity_type=_SAMPLE_ENTITY_TYPE,
         hipaa_category=category,
@@ -99,7 +103,7 @@ def _make_scan_result(
     return ScanResult(
         findings=findings,
         files_scanned=max(_MIN_FILES_SCANNED, len(findings)),
-        files_with_findings=_MIN_FILES_SCANNED if findings else 0,
+        files_with_findings=_MIN_FILES_SCANNED if findings else _NO_FILES_WITH_FINDINGS,
         scan_duration=_SAMPLE_SCAN_DURATION,
         is_clean=not findings,
         risk_level=risk_level if findings else RiskLevel.CLEAN,
@@ -245,7 +249,7 @@ def test_render_chart_to_bytes_is_non_empty() -> None:
     scan_result = _make_scan_result()
     figure = _build_category_chart(scan_result)
     png_bytes = _render_chart_to_bytes(figure)
-    assert len(png_bytes) > 0
+    assert len(png_bytes) > _EMPTY_BYTE_LENGTH
 
 
 def test_render_chart_to_bytes_starts_with_png_magic() -> None:
@@ -297,12 +301,12 @@ def test_html_chart_data_uri_contains_valid_base64() -> None:
     scan_result = _make_scan_result()
     html_content = generate_html_report(scan_result, _SAMPLE_SCAN_TARGET).decode("utf-8")
     prefix_pos = html_content.find(_HTML_CHART_IMG_PREFIX)
-    assert prefix_pos != -1
+    assert prefix_pos != _SUBSTRING_NOT_FOUND
     # Extract the base64 string up to the closing quote
     start = prefix_pos + len(_HTML_CHART_IMG_PREFIX)
     end = html_content.index('"', start)
     encoded = html_content[start:end]
-    assert len(encoded) > 0
+    assert len(encoded) > _EMPTY_BYTE_LENGTH
     # Must be valid base64
     decoded = base64.b64decode(encoded)
     assert decoded[: len(_PNG_MAGIC_BYTES)] == _PNG_MAGIC_BYTES
