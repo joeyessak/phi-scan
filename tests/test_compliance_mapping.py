@@ -56,6 +56,8 @@ _SOC2_CONTROL_CC6_7: str = "CC6.7"
 _HITRUST_CONTROL_07A: str = "07.a"
 _HITRUST_CONTROL_01V: str = "01.v"
 
+_MULTI_FINDING_COUNT: int = 5
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -279,6 +281,6 @@ def test_annotate_findings_each_finding_has_its_own_controls() -> None:
 
 def test_annotate_findings_all_indices_covered() -> None:
     """annotate_findings must return an entry for every finding index."""
-    findings = tuple(_make_finding(PhiCategory.SSN, line_number=i + 1) for i in range(5))
+    findings = tuple(_make_finding(PhiCategory.SSN, line_number=i + 1) for i in range(_MULTI_FINDING_COUNT))
     result = annotate_findings(findings, frozenset({ComplianceFramework.SOC2}))
-    assert set(result.keys()) == {0, 1, 2, 3, 4}
+    assert set(result.keys()) == set(range(_MULTI_FINDING_COUNT))

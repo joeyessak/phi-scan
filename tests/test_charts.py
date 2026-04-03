@@ -47,8 +47,8 @@ from phi_scan.report import (
 
 _PNG_MAGIC_BYTES: bytes = b"\x89PNG\r\n\x1a\n"
 _SAMPLE_HASH: str = "9" * 64
-_SAMPLE_FILE_PATH: Path = Path("src/patient_handler.py")
-_ALT_FILE_PATH: Path = Path("src/billing_handler.py")
+_SAMPLE_FILE_PATH: Path = Path("src/patient_service.py")
+_ALT_FILE_PATH: Path = Path("src/billing_service.py")
 _SAMPLE_SCAN_TARGET: Path = Path(".")
 _SAMPLE_ENTITY_TYPE: str = "us_ssn"
 _SAMPLE_CODE_CONTEXT: str = "ssn = '[REDACTED]'"
@@ -57,6 +57,8 @@ _SAMPLE_CONFIDENCE: float = 0.92
 _SAMPLE_LINE_NUMBER: int = 10
 
 _HTML_CHART_IMG_PREFIX: str = "data:image/png;base64,"
+_MIN_FILES_SCANNED: int = 1
+_SAMPLE_SCAN_DURATION: float = 0.05
 
 
 # ---------------------------------------------------------------------------
@@ -96,9 +98,9 @@ def _make_scan_result(
     )
     return ScanResult(
         findings=findings,
-        files_scanned=max(1, len(findings)),
-        files_with_findings=1 if findings else 0,
-        scan_duration=0.05,
+        files_scanned=max(_MIN_FILES_SCANNED, len(findings)),
+        files_with_findings=_MIN_FILES_SCANNED if findings else 0,
+        scan_duration=_SAMPLE_SCAN_DURATION,
         is_clean=not findings,
         risk_level=risk_level if findings else RiskLevel.CLEAN,
         severity_counts=severity_counts,
@@ -251,7 +253,7 @@ def test_render_chart_to_bytes_starts_with_png_magic() -> None:
     scan_result = _make_scan_result()
     figure = _build_category_chart(scan_result)
     png_bytes = _render_chart_to_bytes(figure)
-    assert png_bytes[:8] == _PNG_MAGIC_BYTES
+    assert png_bytes[:len(_PNG_MAGIC_BYTES)] == _PNG_MAGIC_BYTES
 
 
 def test_severity_chart_png_starts_with_png_magic() -> None:
@@ -259,7 +261,7 @@ def test_severity_chart_png_starts_with_png_magic() -> None:
     scan_result = _make_scan_result()
     figure = _build_severity_chart(scan_result)
     png_bytes = _render_chart_to_bytes(figure)
-    assert png_bytes[:8] == _PNG_MAGIC_BYTES
+    assert png_bytes[:len(_PNG_MAGIC_BYTES)] == _PNG_MAGIC_BYTES
 
 
 def test_top_files_chart_png_starts_with_png_magic() -> None:
@@ -267,7 +269,7 @@ def test_top_files_chart_png_starts_with_png_magic() -> None:
     scan_result = _make_scan_result()
     figure = _build_top_files_chart(scan_result)
     png_bytes = _render_chart_to_bytes(figure)
-    assert png_bytes[:8] == _PNG_MAGIC_BYTES
+    assert png_bytes[:len(_PNG_MAGIC_BYTES)] == _PNG_MAGIC_BYTES
 
 
 # ---------------------------------------------------------------------------
@@ -278,29 +280,29 @@ def test_top_files_chart_png_starts_with_png_magic() -> None:
 def test_html_report_embeds_at_least_one_chart_image() -> None:
     """HTML report must embed at least one base64 PNG chart via data URI."""
     scan_result = _make_scan_result()
-    html = generate_html_report(scan_result, _SAMPLE_SCAN_TARGET).decode("utf-8")
-    assert _HTML_CHART_IMG_PREFIX in html
+    html_content = generate_html_report(scan_result, _SAMPLE_SCAN_TARGET).decode("utf-8")
+    assert _HTML_CHART_IMG_PREFIX in html_content
 
 
 def test_html_report_embeds_chart_image_for_dirty_result() -> None:
     """HTML report must embed a chart image when findings are present."""
     findings = (_make_finding(PhiCategory.SSN, SeverityLevel.HIGH),)
     scan_result = _make_scan_result(findings, RiskLevel.HIGH)
-    html = generate_html_report(scan_result, _SAMPLE_SCAN_TARGET).decode("utf-8")
-    assert _HTML_CHART_IMG_PREFIX in html
+    html_content = generate_html_report(scan_result, _SAMPLE_SCAN_TARGET).decode("utf-8")
+    assert _HTML_CHART_IMG_PREFIX in html_content
 
 
 def test_html_chart_data_uri_contains_valid_base64() -> None:
     """The chart data URI in HTML must contain a non-empty base64 payload."""
     scan_result = _make_scan_result()
-    html = generate_html_report(scan_result, _SAMPLE_SCAN_TARGET).decode("utf-8")
-    prefix_pos = html.find(_HTML_CHART_IMG_PREFIX)
+    html_content = generate_html_report(scan_result, _SAMPLE_SCAN_TARGET).decode("utf-8")
+    prefix_pos = html_content.find(_HTML_CHART_IMG_PREFIX)
     assert prefix_pos != -1
     # Extract the base64 string up to the closing quote
     start = prefix_pos + len(_HTML_CHART_IMG_PREFIX)
-    end = html.index('"', start)
-    encoded = html[start:end]
+    end = html_content.index('"', start)
+    encoded = html_content[start:end]
     assert len(encoded) > 0
     # Must be valid base64
     decoded = base64.b64decode(encoded)
-    assert decoded[:8] == _PNG_MAGIC_BYTES
+    assert decoded[:len(_PNG_MAGIC_BYTES)] == _PNG_MAGIC_BYTES

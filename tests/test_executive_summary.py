@@ -135,16 +135,16 @@ def test_pdf_generates_for_result_with_multiple_categories() -> None:
 def test_html_clean_result_displays_clean_risk_level() -> None:
     """HTML report for a clean scan must display 'CLEAN' in the risk badge."""
     result = _make_scan_result()
-    html = generate_html_report(result, _SAMPLE_SCAN_TARGET).decode("utf-8")
-    assert RiskLevel.CLEAN.value.upper() in html
+    html_content = generate_html_report(result, _SAMPLE_SCAN_TARGET).decode("utf-8")
+    assert RiskLevel.CLEAN.value.upper() in html_content
 
 
 def test_html_high_risk_result_displays_high_risk_level() -> None:
     """HTML report for a HIGH risk scan must display 'HIGH' in the output."""
     findings = (_make_finding(PhiCategory.SSN, SeverityLevel.HIGH),)
     result = _make_scan_result(findings, RiskLevel.HIGH)
-    html = generate_html_report(result, _SAMPLE_SCAN_TARGET).decode("utf-8")
-    assert RiskLevel.HIGH.value.upper() in html
+    html_content = generate_html_report(result, _SAMPLE_SCAN_TARGET).decode("utf-8")
+    assert RiskLevel.HIGH.value.upper() in html_content
 
 
 def test_html_critical_risk_result_displays_critical() -> None:
@@ -153,16 +153,16 @@ def test_html_critical_risk_result_displays_critical() -> None:
         _make_finding(PhiCategory.SSN, SeverityLevel.HIGH, line_number=i + 1) for i in range(5)
     )
     result = _make_scan_result(findings, RiskLevel.CRITICAL)
-    html = generate_html_report(result, _SAMPLE_SCAN_TARGET).decode("utf-8")
-    assert RiskLevel.CRITICAL.value.upper() in html
+    html_content = generate_html_report(result, _SAMPLE_SCAN_TARGET).decode("utf-8")
+    assert RiskLevel.CRITICAL.value.upper() in html_content
 
 
 def test_html_moderate_risk_result_displays_moderate() -> None:
     """HTML report for a MODERATE risk scan must display 'MODERATE' in the output."""
     findings = (_make_finding(PhiCategory.EMAIL, SeverityLevel.MEDIUM),)
     result = _make_scan_result(findings, RiskLevel.MODERATE)
-    html = generate_html_report(result, _SAMPLE_SCAN_TARGET).decode("utf-8")
-    assert RiskLevel.MODERATE.value.upper() in html
+    html_content = generate_html_report(result, _SAMPLE_SCAN_TARGET).decode("utf-8")
+    assert RiskLevel.MODERATE.value.upper() in html_content
 
 
 # ---------------------------------------------------------------------------
@@ -173,23 +173,23 @@ def test_html_moderate_risk_result_displays_moderate() -> None:
 def test_html_files_scanned_count_in_output() -> None:
     """HTML must display the correct files_scanned count from the ScanResult."""
     result = _make_scan_result(files_scanned=_FILES_SCANNED_MULTI)
-    html = generate_html_report(result, _SAMPLE_SCAN_TARGET).decode("utf-8")
-    assert str(_FILES_SCANNED_MULTI) in html
+    html_content = generate_html_report(result, _SAMPLE_SCAN_TARGET).decode("utf-8")
+    assert str(_FILES_SCANNED_MULTI) in html_content
 
 
 def test_html_scan_target_string_in_output() -> None:
     """HTML must include the scan_target path string in the report metadata."""
     target = Path("services/billing-api")
     result = _make_scan_result()
-    html = generate_html_report(result, target).decode("utf-8")
-    assert str(target) in html
+    html_content = generate_html_report(result, target).decode("utf-8")
+    assert str(target) in html_content
 
 
 def test_html_total_findings_label_present() -> None:
     """HTML must display a 'Total Findings' label in the summary."""
     result = _make_scan_result()
-    html = generate_html_report(result, _SAMPLE_SCAN_TARGET).decode("utf-8")
-    assert _HTML_TOTAL_FINDINGS_LABEL in html
+    html_content = generate_html_report(result, _SAMPLE_SCAN_TARGET).decode("utf-8")
+    assert _HTML_TOTAL_FINDINGS_LABEL in html_content
 
 
 # ---------------------------------------------------------------------------
@@ -200,9 +200,9 @@ def test_html_total_findings_label_present() -> None:
 def test_html_severity_distribution_zero_for_clean_result() -> None:
     """A clean HTML report must show zero total findings."""
     result = _make_scan_result()
-    html = generate_html_report(result, _SAMPLE_SCAN_TARGET).decode("utf-8")
+    html_content = generate_html_report(result, _SAMPLE_SCAN_TARGET).decode("utf-8")
     # Total findings count in the section header should be 0
-    assert "Findings (0)" in html
+    assert "Findings (0)" in html_content
 
 
 def test_html_severity_distribution_matches_finding_count() -> None:
@@ -211,8 +211,8 @@ def test_html_severity_distribution_matches_finding_count() -> None:
         _make_finding(PhiCategory.SSN, SeverityLevel.HIGH, line_number=i + 1) for i in range(4)
     )
     result = _make_scan_result(findings, RiskLevel.HIGH)
-    html = generate_html_report(result, _SAMPLE_SCAN_TARGET).decode("utf-8")
-    assert "Findings (4)" in html
+    html_content = generate_html_report(result, _SAMPLE_SCAN_TARGET).decode("utf-8")
+    assert "Findings (4)" in html_content
 
 
 # ---------------------------------------------------------------------------
