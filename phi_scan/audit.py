@@ -52,7 +52,7 @@ from phi_scan.constants import (
     AUDIT_RETENTION_DAYS,
     AUDIT_SCHEMA_VERSION,
 )
-from phi_scan.exceptions import AuditLogError, SchemaMigrationError
+from phi_scan.exceptions import AuditKeyMissingError, AuditLogError, SchemaMigrationError
 from phi_scan.logging_config import get_logger
 from phi_scan.models import ScanFinding, ScanResult
 
@@ -75,12 +75,13 @@ class ChainVerifyResult(NamedTuple):
 
     Attributes:
         is_intact: True only when all rows were verified and every hash matched.
-            False if any row failed hash verification OR if any row had an empty
-            row_chain_hash (which an attacker could use to bypass verification).
-        key_present: True if the audit key was found and verification was performed.
-            False means the key was absent and the chain was not actually verified.
+            False if: any row failed hash verification, any row had an empty
+            row_chain_hash, OR the audit key was absent (no verification done).
+            A False result always means the chain cannot be considered clean.
+        key_present: True if the audit key was found and verification was attempted.
+            False means the key was absent; is_intact will also be False.
         skipped_rows: Count of rows with empty row_chain_hash that could not be
-            verified. When this is non-zero, is_intact is always False.
+            verified. When non-zero, is_intact is always False.
     """
 
     is_intact: bool
@@ -115,9 +116,9 @@ _CHAIN_KEY_MISSING_WARNING: str = (
     "Audit chain key not found at %r — hash chain verification skipped. "
     "Run 'phi-scan setup' to generate the audit key."
 )
-_ENCRYPTION_KEY_MISSING_WARNING: str = (
-    "Audit encryption key not found at %r — findings_json stored as plaintext. "
-    "Run 'phi-scan setup' to generate the audit key."
+_ENCRYPTION_KEY_MISSING_ERROR: str = (
+    "Audit encryption key not found at {key_path!r} — refusing to store findings_json "
+    "as plaintext. Run 'phi-scan setup' to generate the audit key."
 )
 _CHAIN_ROW_SKIPPED_WARNING: str = (
     "Audit chain: row id={row_id} has an empty row_chain_hash and was skipped. "
@@ -497,9 +498,10 @@ def verify_audit_chain(database_path: Path) -> ChainVerifyResult:
         database_path: Path to the SQLite audit database file.
 
     Returns:
-        ChainVerifyResult with is_intact=True/False and key_present=True/False.
+        ChainVerifyResult with is_intact and key_present fields.
         key_present=False means the audit key was absent and no verification
-        was performed (is_intact is True in this case but carries no guarantee).
+        was performed; is_intact is False in that case so callers checking
+        only is_intact cannot conclude the chain is clean.
 
     Raises:
         AuditLogError: If the database cannot be read or the key exists but
@@ -507,7 +509,10 @@ def verify_audit_chain(database_path: Path) -> ChainVerifyResult:
     """
     audit_key = _load_audit_key(database_path.parent)
     if audit_key is None:
-        return ChainVerifyResult(is_intact=True, key_present=False)
+        # Key absent means zero verification was performed — is_intact must be
+        # False so callers checking only that field cannot conclude the chain is
+        # clean when it was never checked.
+        return ChainVerifyResult(is_intact=False, key_present=False)
     connection = _open_database(database_path)
     try:
         cursor = connection.execute(_SELECT_ALL_ROWS_ORDERED_SQL)
@@ -520,10 +525,10 @@ def verify_audit_chain(database_path: Path) -> ChainVerifyResult:
     prev_hash = AUDIT_GENESIS_CHAIN_HASH
     skipped_rows = 0
     chain_intact = True
-    for row in rows:
-        row_dict = dict(row)
-        row_id = row_dict["id"]
-        stored_hash: str = row_dict.get("row_chain_hash", "")
+    for audit_row in rows:
+        audit_row_dict = dict(audit_row)
+        row_id = audit_row_dict["id"]
+        stored_hash: str = audit_row_dict.get("row_chain_hash", "")
         if not stored_hash:
             # Row has no chain hash — either pre-dates hash-chain support or was
             # cleared by an attacker. Log at WARNING and mark chain as not fully intact.
@@ -531,7 +536,7 @@ def verify_audit_chain(database_path: Path) -> ChainVerifyResult:
             skipped_rows += 1
             chain_intact = False
             continue
-        content = _row_content_for_hashing(row_dict)
+        content = _row_content_for_hashing(audit_row_dict)
         recomputed = _hmac_sha256(audit_key, prev_hash + content)
         if not hmac.compare_digest(stored_hash, recomputed):
             _logger.error(_CHAIN_TAMPER_ERROR.format(row_id=row_id))
@@ -595,8 +600,14 @@ def generate_audit_key(database_path: Path) -> Path:
     try:
         key_path.parent.mkdir(parents=True, exist_ok=True)
         key_bytes = os.urandom(_AES_GCM_KEY_BYTES)
-        key_path.write_bytes(key_bytes)
-        key_path.chmod(0o600)
+        # Atomic write: create temp file, set permissions before writing the key
+        # so the key is never readable by other users even for an instant, then
+        # rename into place. This prevents a window where key data exists in a
+        # world-readable file before chmod runs.
+        tmp_path = key_path.with_suffix(".tmp")
+        tmp_path.touch(mode=0o600)
+        tmp_path.write_bytes(key_bytes)
+        tmp_path.rename(key_path)
     except OSError as io_error:
         raise AuditLogError(
             _KEY_WRITE_ERROR.format(key_path=str(key_path), io_error=io_error)
@@ -770,16 +781,17 @@ def _fetch_git_format_output(args: tuple[str, ...]) -> str:
     return ""
 
 
-def _get_committer_name_hash() -> str:
-    """Return SHA-256 hash of the current git committer name, or empty string."""
-    name = _fetch_git_format_output(_GIT_COMMITTER_NAME_ARGS)
-    return hashlib.sha256(name.encode()).hexdigest() if name else ""
+def _hash_git_committer_field(args: tuple[str, ...]) -> str:
+    """Return SHA-256 hash of a git log committer field, or empty string if unavailable.
 
+    Args:
+        args: Full argument tuple for the git log command (e.g. _GIT_COMMITTER_NAME_ARGS).
 
-def _get_committer_email_hash() -> str:
-    """Return SHA-256 hash of the current git committer email, or empty string."""
-    email = _fetch_git_format_output(_GIT_COMMITTER_EMAIL_ARGS)
-    return hashlib.sha256(email.encode()).hexdigest() if email else ""
+    Returns:
+        64-char hex digest, or empty string when git is unavailable or returns no output.
+    """
+    field_value = _fetch_git_format_output(args)
+    return hashlib.sha256(field_value.encode()).hexdigest() if field_value else ""
 
 
 def _detect_pr_number() -> str:
@@ -810,25 +822,44 @@ def _detect_pipeline() -> str:
     return _PIPELINE_LOCAL
 
 
+def _collect_repository_identity() -> tuple[str, str]:
+    """Return (repository_hash, branch_hash) as SHA-256 hex digests."""
+    repository_hash = hashlib.sha256(_get_current_repository_path().encode()).hexdigest()
+    branch_hash = hashlib.sha256(_get_current_branch().encode()).hexdigest()
+    return repository_hash, branch_hash
+
+
+def _collect_committer_identity() -> tuple[str, str]:
+    """Return (committer_name_hash, committer_email_hash) as SHA-256 hex digests."""
+    return (
+        _hash_git_committer_field(_GIT_COMMITTER_NAME_ARGS),
+        _hash_git_committer_field(_GIT_COMMITTER_EMAIL_ARGS),
+    )
+
+
 def _assemble_scan_event_row(
     database_path: Path,
     scan_result: ScanResult,
     notifications_sent: list[str],
 ) -> tuple[str | int | float, ...]:
-    """Build the tuple of values for an INSERT into scan_events.
+    """Build the 17-tuple for INSERT into scan_events.
+
+    Delegates identity collection and encryption to focused helpers.
+    The row_chain_hash column is seeded with _CHAIN_HASH_PLACEHOLDER and
+    replaced by the actual HMAC in a subsequent UPDATE.
 
     Args:
-        database_path: Used to locate the audit key for findings encryption.
+        database_path: Locates the audit key for findings encryption.
         scan_result: Completed scan result.
-        notifications_sent: List of notification channels delivered.
+        notifications_sent: Notification channels that were delivered.
 
     Returns:
-        17-tuple matching the INSERT column order (excluding id and row_chain_hash
-        initial value — chain hash is set in a subsequent UPDATE).
+        17-tuple matching the INSERT column order (id is auto-assigned;
+        row_chain_hash is updated after INSERT).
     """
-    repository_hash = hashlib.sha256(_get_current_repository_path().encode()).hexdigest()
-    branch_hash = hashlib.sha256(_get_current_branch().encode()).hexdigest()
-    findings_json = _serialize_and_maybe_encrypt(
+    repository_hash, branch_hash = _collect_repository_identity()
+    committer_name_hash, committer_email_hash = _collect_committer_identity()
+    findings_json = _serialize_and_encrypt(
         _serialize_findings(scan_result.findings), database_path.parent
     )
     action_taken = ACTION_TAKEN_PASS if scan_result.is_clean else ACTION_TAKEN_FAIL
@@ -843,13 +874,13 @@ def _assemble_scan_event_row(
         _BOOLEAN_TRUE if scan_result.is_clean else _BOOLEAN_FALSE,
         scan_result.scan_duration,
         _EVENT_TYPE_SCAN,
-        _get_committer_name_hash(),
-        _get_committer_email_hash(),
+        committer_name_hash,
+        committer_email_hash,
         _detect_pr_number(),
         _detect_pipeline(),
         action_taken,
         json.dumps(notifications_sent),
-        _CHAIN_HASH_PLACEHOLDER,  # row_chain_hash — updated via UPDATE after INSERT
+        _CHAIN_HASH_PLACEHOLDER,  # replaced by HMAC in subsequent UPDATE
     )
 
 
@@ -954,28 +985,30 @@ def _decrypt_findings_json(encrypted: str, key: bytes) -> str:
         ) from crypto_error
 
 
-def _serialize_and_maybe_encrypt(findings_json: str, key_dir: Path) -> str:
-    """Encrypt findings_json if an audit key is available, else return as-is.
+def _serialize_and_encrypt(findings_json: str, key_dir: Path) -> str:
+    """Encrypt findings_json with AES-256-GCM using the audit key in key_dir.
+
+    Hard-fails if the key is absent — plaintext fallback is not permitted because
+    findings_json contains structured audit data (hipaa_category, file_path_hash,
+    rule_id, value_hash) that must be protected at rest.
 
     Args:
         findings_json: Plaintext JSON string of serialised findings.
         key_dir: Directory where the audit key file is stored.
 
     Returns:
-        Either the original plaintext JSON (key absent) or an encrypted string.
+        Encrypted string with AUDIT_ENCRYPTION_PREFIX.
+
+    Raises:
+        AuditKeyMissingError: If the audit key file does not exist.
+        AuditLogError: If the key exists but cannot be read.
     """
     key = _load_audit_key(key_dir)
     if key is None:
-        _logger.debug(_ENCRYPTION_KEY_MISSING_WARNING, str(_audit_key_path(key_dir)))
-        return findings_json
-    try:
-        return _encrypt_findings_json(findings_json, key)
-    except ImportError:
-        _logger.warning(
-            "cryptography package not installed — findings_json stored as plaintext. "
-            "Install with: pip install cryptography"
+        raise AuditKeyMissingError(
+            _ENCRYPTION_KEY_MISSING_ERROR.format(key_path=str(_audit_key_path(key_dir)))
         )
-        return findings_json
+    return _encrypt_findings_json(findings_json, key)
 
 
 # ---------------------------------------------------------------------------
@@ -996,36 +1029,36 @@ def _hmac_sha256(key: bytes, message: str) -> str:
     return hmac.new(key, message.encode(), hashlib.sha256).hexdigest()
 
 
-def _row_content_for_hashing(row: dict[str, Any]) -> str:
+def _row_content_for_hashing(audit_row_dict: dict[str, Any]) -> str:
     """Produce a canonical string representation of a row for hash chain computation.
 
     All fields except row_chain_hash itself are included, in a stable order,
     to detect any modification to any column value.
 
     Args:
-        row: Row dict from the database (all columns).
+        audit_row_dict: Row dict from the database (all columns except row_chain_hash).
 
     Returns:
-        Canonical string for HMAC input.
+        Canonical pipe-delimited string for HMAC input.
     """
     return (
-        f"{row.get('id', '')}"
-        f"|{row.get('timestamp', '')}"
-        f"|{row.get('scanner_version', '')}"
-        f"|{row.get('repository_hash', '')}"
-        f"|{row.get('branch_hash', '')}"
-        f"|{row.get('files_scanned', '')}"
-        f"|{row.get('findings_count', '')}"
-        f"|{row.get('findings_json', '')}"
-        f"|{row.get('is_clean', '')}"
-        f"|{row.get('scan_duration', '')}"
-        f"|{row.get('event_type', '')}"
-        f"|{row.get('committer_name_hash', '')}"
-        f"|{row.get('committer_email_hash', '')}"
-        f"|{row.get('pr_number', '')}"
-        f"|{row.get('pipeline', '')}"
-        f"|{row.get('action_taken', '')}"
-        f"|{row.get('notifications_sent', '')}"
+        f"{audit_row_dict.get('id', '')}"
+        f"|{audit_row_dict.get('timestamp', '')}"
+        f"|{audit_row_dict.get('scanner_version', '')}"
+        f"|{audit_row_dict.get('repository_hash', '')}"
+        f"|{audit_row_dict.get('branch_hash', '')}"
+        f"|{audit_row_dict.get('files_scanned', '')}"
+        f"|{audit_row_dict.get('findings_count', '')}"
+        f"|{audit_row_dict.get('findings_json', '')}"
+        f"|{audit_row_dict.get('is_clean', '')}"
+        f"|{audit_row_dict.get('scan_duration', '')}"
+        f"|{audit_row_dict.get('event_type', '')}"
+        f"|{audit_row_dict.get('committer_name_hash', '')}"
+        f"|{audit_row_dict.get('committer_email_hash', '')}"
+        f"|{audit_row_dict.get('pr_number', '')}"
+        f"|{audit_row_dict.get('pipeline', '')}"
+        f"|{audit_row_dict.get('action_taken', '')}"
+        f"|{audit_row_dict.get('notifications_sent', '')}"
     )
 
 
@@ -1100,7 +1133,7 @@ def _compute_row_chain_hash(
     prev_hash = _get_previous_chain_hash(connection, new_row_id)
     # Reconstruct a row dict from the tuple for _row_content_for_hashing.
     # Column order must match _INSERT_SCAN_EVENT_SQL (excluding id which is auto).
-    row_dict: dict[str, Any] = {
+    scan_event_row_dict: dict[str, Any] = {
         "id": new_row_id,
         "timestamp": row_tuple[0],
         "scanner_version": row_tuple[1],
@@ -1119,5 +1152,5 @@ def _compute_row_chain_hash(
         "action_taken": row_tuple[14],
         "notifications_sent": row_tuple[15],
     }
-    content = _row_content_for_hashing(row_dict)
+    content = _row_content_for_hashing(scan_event_row_dict)
     return _hmac_sha256(key, prev_hash + content)

@@ -9,6 +9,7 @@ narrowly when they need to distinguish error types.
 from __future__ import annotations
 
 __all__ = [
+    "AuditKeyMissingError",
     "AuditLogError",
     "BaselineError",
     "ConfigurationError",
@@ -87,6 +88,19 @@ class AuditLogError(PhiScanError):
     Args:
         message: Description of the failure including the database path
             and the underlying cause.
+    """
+
+
+class AuditKeyMissingError(AuditLogError):
+    """Raised when the audit encryption key file cannot be found.
+
+    This is the expected state for a newly installed instance that has not
+    yet had ``phi-scan setup`` run. Callers can catch this subclass to treat
+    the missing-key case differently from other audit failures (e.g. log at
+    DEBUG rather than WARNING).
+
+    Args:
+        message: Description including the expected key path.
     """
 
 

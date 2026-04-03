@@ -61,6 +61,7 @@ from phi_scan.constants import (
 )
 from phi_scan.diff import get_changed_files_from_diff
 from phi_scan.exceptions import (
+    AuditKeyMissingError,
     AuditLogError,
     BaselineError,
     ConfigurationError,
@@ -397,6 +398,9 @@ _CONFIG_LOAD_FAILURE_WARNING: str = (
     "Config file {path!r} exists but could not be loaded — using defaults: {error}"
 )
 _AUDIT_WRITE_FAILURE_WARNING: str = "Audit log write failed — scan result not persisted: {error}"
+_AUDIT_KEY_MISSING_DEBUG: str = (
+    "Audit log skipped — encryption key not found. Run 'phi-scan setup' to generate it."
+)
 _NOTIFICATION_EMAIL_FAILURE_WARNING: str = "Email notification failed: {error}"
 _NOTIFICATION_WEBHOOK_FAILURE_WARNING: str = "Webhook notification failed: {error}"
 _AUDIT_CHAIN_PASS_MESSAGE: str = "Audit chain integrity: PASS — all row hashes verified."
@@ -779,6 +783,8 @@ def _write_audit_record(
     try:
         create_audit_schema(resolved_path)
         insert_scan_event(resolved_path, scan_result, notifications_sent)
+    except AuditKeyMissingError:
+        _logger.debug(_AUDIT_KEY_MISSING_DEBUG)
     except AuditLogError as audit_error:
         _logger.warning(_AUDIT_WRITE_FAILURE_WARNING.format(error=audit_error))
 

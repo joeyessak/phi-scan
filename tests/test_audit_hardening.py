@@ -180,6 +180,7 @@ def test_create_audit_schema_is_idempotent(tmp_path: Path) -> None:
     """create_audit_schema must not raise or lose data when called twice."""
     db_path = tmp_path / "audit.db"
     create_audit_schema(db_path)
+    generate_audit_key(db_path)
     insert_scan_event(db_path, _make_clean_result())
     create_audit_schema(db_path)
     rows = query_recent_scans(db_path, _RETENTION_WITHIN_WINDOW_DAYS)
@@ -264,6 +265,7 @@ def test_insert_scan_event_populates_event_type(tmp_path: Path) -> None:
     """Inserted row must have event_type = 'scan'."""
     db_path = tmp_path / "audit.db"
     create_audit_schema(db_path)
+    generate_audit_key(db_path)
     insert_scan_event(db_path, _make_clean_result())
     rows = query_recent_scans(db_path, _RETENTION_WITHIN_WINDOW_DAYS)
     assert rows[0]["event_type"] == "scan"
@@ -273,6 +275,7 @@ def test_insert_scan_event_populates_action_taken_pass_for_clean(tmp_path: Path)
     """action_taken must be 'pass' for a clean scan result."""
     db_path = tmp_path / "audit.db"
     create_audit_schema(db_path)
+    generate_audit_key(db_path)
     insert_scan_event(db_path, _make_clean_result())
     rows = query_recent_scans(db_path, _RETENTION_WITHIN_WINDOW_DAYS)
     assert rows[0]["action_taken"] == "pass"
@@ -282,6 +285,7 @@ def test_insert_scan_event_populates_action_taken_fail_for_dirty(tmp_path: Path)
     """action_taken must be 'fail' for a scan result with findings."""
     db_path = tmp_path / "audit.db"
     create_audit_schema(db_path)
+    generate_audit_key(db_path)
     insert_scan_event(db_path, _make_dirty_result())
     rows = query_recent_scans(db_path, _RETENTION_WITHIN_WINDOW_DAYS)
     assert rows[0]["action_taken"] == "fail"
@@ -291,6 +295,7 @@ def test_insert_scan_event_records_notifications_sent(tmp_path: Path) -> None:
     """notifications_sent must be stored as a JSON array of channel names."""
     db_path = tmp_path / "audit.db"
     create_audit_schema(db_path)
+    generate_audit_key(db_path)
     insert_scan_event(db_path, _make_dirty_result(), notifications_sent=["email", "webhook-slack"])
     rows = query_recent_scans(db_path, _RETENTION_WITHIN_WINDOW_DAYS)
     import json
@@ -304,6 +309,7 @@ def test_insert_scan_event_default_notifications_sent_is_empty_list(tmp_path: Pa
     """When no notifications_sent is passed, the column must be an empty JSON array."""
     db_path = tmp_path / "audit.db"
     create_audit_schema(db_path)
+    generate_audit_key(db_path)
     insert_scan_event(db_path, _make_clean_result())
     rows = query_recent_scans(db_path, _RETENTION_WITHIN_WINDOW_DAYS)
     import json
@@ -318,26 +324,30 @@ def test_insert_scan_event_default_notifications_sent_is_empty_list(tmp_path: Pa
 
 
 def test_verify_audit_chain_returns_intact_for_empty_db(tmp_path: Path) -> None:
-    """verify_audit_chain must report is_intact=True with key_present=False for empty db."""
+    """verify_audit_chain must report is_intact=True with key_present=True for empty db."""
     db_path = tmp_path / "audit.db"
     create_audit_schema(db_path)
+    generate_audit_key(db_path)
     result = verify_audit_chain(db_path)
     assert isinstance(result, ChainVerifyResult)
     assert result.is_intact is True
-    assert result.key_present is False
+    assert result.key_present is True
     assert result.skipped_rows == 0
 
 
 def test_verify_audit_chain_reports_key_absent_without_key(tmp_path: Path) -> None:
-    """verify_audit_chain must return key_present=False when the audit key is absent."""
+    """verify_audit_chain must return key_present=False and is_intact=False when key absent."""
     db_path = tmp_path / "audit.db"
     create_audit_schema(db_path)
+    key_path = generate_audit_key(db_path)
     insert_scan_event(db_path, _make_clean_result())
-    # No key file exists in tmp_path — chain verification is skipped.
+    # Remove the key so verify_audit_chain cannot load it.
+    key_path.unlink()
     result = verify_audit_chain(db_path)
     assert isinstance(result, ChainVerifyResult)
     assert result.key_present is False
-    assert result.is_intact is True  # True but unverified — key was absent
+    # is_intact must be False when key is absent — zero verification was performed.
+    assert result.is_intact is False
 
 
 def test_verify_audit_chain_returns_intact_with_key(tmp_path: Path) -> None:
@@ -527,6 +537,7 @@ def test_purge_does_not_delete_recent_rows(tmp_path: Path) -> None:
     """purge_expired_audit_rows must not delete rows written today."""
     db_path = tmp_path / "audit.db"
     create_audit_schema(db_path)
+    generate_audit_key(db_path)
     insert_scan_event(db_path, _make_clean_result())
     deleted = purge_expired_audit_rows(db_path)
     assert deleted == _ZERO_ROWS_DELETED

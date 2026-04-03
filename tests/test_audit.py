@@ -28,6 +28,7 @@ from phi_scan.audit import (
     _reject_symlink_database_path,
     _serialize_findings,
     create_audit_schema,
+    generate_audit_key,
     get_last_scan,
     get_schema_version,
     insert_scan_event,
@@ -153,6 +154,19 @@ def patched_git_info() -> Generator[None, None, None]:
         patch("phi_scan.audit._get_current_branch", return_value=_SAMPLE_GIT_BRANCH),
     ):
         yield
+
+
+@pytest.fixture()
+def database_with_key(tmp_path: Path) -> Path:
+    """Return a tmp audit DB path with schema created and encryption key generated.
+
+    Required for any test that calls insert_scan_event — encryption is now
+    mandatory and insert_scan_event raises AuditLogError without a key.
+    """
+    db_path = tmp_path / _TEST_DB_FILENAME
+    create_audit_schema(db_path)
+    generate_audit_key(db_path)
+    return db_path
 
 
 def _build_subprocess_result(
@@ -349,28 +363,26 @@ def test_create_audit_schema_raises_audit_log_error_for_symlink(
 # ---------------------------------------------------------------------------
 
 
-def test_insert_scan_event_inserts_one_row(tmp_path: Path, patched_git_info: None) -> None:
-    database_path = tmp_path / "audit.db"
-    create_audit_schema(database_path)
+def test_insert_scan_event_inserts_one_row(database_with_key: Path, patched_git_info: None) -> None:
     scan_result = _build_clean_scan_result()
 
-    insert_scan_event(database_path, scan_result)
+    insert_scan_event(database_with_key, scan_result)
 
-    connection = sqlite3.connect(str(database_path))
+    connection = sqlite3.connect(str(database_with_key))
     cursor = connection.execute(_SCAN_EVENTS_COUNT_QUERY)
     scan_event_row_count = cursor.fetchone()[0]
     connection.close()
     assert scan_event_row_count == _SINGLE_INSERTED_ROW_COUNT
 
 
-def test_insert_scan_event_sets_scanner_version(tmp_path: Path, patched_git_info: None) -> None:
-    database_path = tmp_path / "audit.db"
-    create_audit_schema(database_path)
+def test_insert_scan_event_sets_scanner_version(
+    database_with_key: Path, patched_git_info: None
+) -> None:
     scan_result = _build_clean_scan_result()
 
-    insert_scan_event(database_path, scan_result)
+    insert_scan_event(database_with_key, scan_result)
 
-    connection = sqlite3.connect(str(database_path))
+    connection = sqlite3.connect(str(database_with_key))
     cursor = connection.execute(f"SELECT {_SCANNER_VERSION_COLUMN} FROM {_SCAN_EVENTS_TABLE}")
     version = cursor.fetchone()[0]
     connection.close()
@@ -378,15 +390,13 @@ def test_insert_scan_event_sets_scanner_version(tmp_path: Path, patched_git_info
 
 
 def test_insert_scan_event_sets_is_clean_true_for_clean_result(
-    tmp_path: Path, patched_git_info: None
+    database_with_key: Path, patched_git_info: None
 ) -> None:
-    database_path = tmp_path / "audit.db"
-    create_audit_schema(database_path)
     scan_result = _build_clean_scan_result()
 
-    insert_scan_event(database_path, scan_result)
+    insert_scan_event(database_with_key, scan_result)
 
-    connection = sqlite3.connect(str(database_path))
+    connection = sqlite3.connect(str(database_with_key))
     cursor = connection.execute(f"SELECT {_IS_CLEAN_COLUMN} FROM {_SCAN_EVENTS_TABLE}")
     is_clean_value = cursor.fetchone()[0]
     connection.close()
@@ -394,43 +404,41 @@ def test_insert_scan_event_sets_is_clean_true_for_clean_result(
 
 
 def test_insert_scan_event_sets_is_clean_false_for_dirty_result(
-    tmp_path: Path, patched_git_info: None
+    database_with_key: Path, patched_git_info: None
 ) -> None:
-    database_path = tmp_path / "audit.db"
-    create_audit_schema(database_path)
     scan_result = _build_dirty_scan_result(_SAMPLE_FILE_PATH)
 
-    insert_scan_event(database_path, scan_result)
+    insert_scan_event(database_with_key, scan_result)
 
-    connection = sqlite3.connect(str(database_path))
+    connection = sqlite3.connect(str(database_with_key))
     cursor = connection.execute(f"SELECT {_IS_CLEAN_COLUMN} FROM {_SCAN_EVENTS_TABLE}")
     is_clean_value = cursor.fetchone()[0]
     connection.close()
     assert bool(is_clean_value) is False
 
 
-def test_insert_scan_event_stores_findings_count(tmp_path: Path, patched_git_info: None) -> None:
-    database_path = tmp_path / "audit.db"
-    create_audit_schema(database_path)
+def test_insert_scan_event_stores_findings_count(
+    database_with_key: Path, patched_git_info: None
+) -> None:
     scan_result = _build_dirty_scan_result(_SAMPLE_FILE_PATH)
 
-    insert_scan_event(database_path, scan_result)
+    insert_scan_event(database_with_key, scan_result)
 
-    connection = sqlite3.connect(str(database_path))
+    connection = sqlite3.connect(str(database_with_key))
     cursor = connection.execute(f"SELECT {_FINDINGS_COUNT_COLUMN} FROM {_SCAN_EVENTS_TABLE}")
     findings_count = cursor.fetchone()[0]
     connection.close()
     assert findings_count == len(scan_result.findings)
 
 
-def test_insert_scan_event_stores_scan_duration(tmp_path: Path, patched_git_info: None) -> None:
-    database_path = tmp_path / "audit.db"
-    create_audit_schema(database_path)
+def test_insert_scan_event_stores_scan_duration(
+    database_with_key: Path, patched_git_info: None
+) -> None:
     scan_result = _build_clean_scan_result()
 
-    insert_scan_event(database_path, scan_result)
+    insert_scan_event(database_with_key, scan_result)
 
-    connection = sqlite3.connect(str(database_path))
+    connection = sqlite3.connect(str(database_with_key))
     cursor = connection.execute(f"SELECT {_SCAN_DURATION_COLUMN} FROM {_SCAN_EVENTS_TABLE}")
     stored_duration = cursor.fetchone()[0]
     connection.close()
@@ -463,27 +471,23 @@ def test_query_recent_scans_returns_empty_list_when_no_scans(tmp_path: Path) -> 
 
 
 def test_query_recent_scans_returns_scan_within_cutoff(
-    tmp_path: Path, patched_git_info: None
+    database_with_key: Path, patched_git_info: None
 ) -> None:
-    database_path = tmp_path / "audit.db"
-    create_audit_schema(database_path)
     scan_result = _build_clean_scan_result()
 
-    insert_scan_event(database_path, scan_result)
+    insert_scan_event(database_with_key, scan_result)
 
-    rows = query_recent_scans(database_path, _RECENT_SCANS_DAYS)
+    rows = query_recent_scans(database_with_key, _RECENT_SCANS_DAYS)
 
     assert len(rows) == 1
 
 
-def test_query_recent_scans_returns_dicts(tmp_path: Path, patched_git_info: None) -> None:
-    database_path = tmp_path / "audit.db"
-    create_audit_schema(database_path)
+def test_query_recent_scans_returns_dicts(database_with_key: Path, patched_git_info: None) -> None:
     scan_result = _build_clean_scan_result()
 
-    insert_scan_event(database_path, scan_result)
+    insert_scan_event(database_with_key, scan_result)
 
-    rows = query_recent_scans(database_path, _RECENT_SCANS_DAYS)
+    rows = query_recent_scans(database_with_key, _RECENT_SCANS_DAYS)
 
     assert isinstance(rows[0], dict)
 
@@ -522,16 +526,14 @@ def test_query_recent_scans_excludes_events_older_than_cutoff(tmp_path: Path) ->
 
 
 def test_query_recent_scans_returns_rows_ordered_by_timestamp_descending(
-    tmp_path: Path, patched_git_info: None
+    database_with_key: Path, patched_git_info: None
 ) -> None:
-    database_path = tmp_path / "audit.db"
-    create_audit_schema(database_path)
     scan_result = _build_clean_scan_result()
 
-    insert_scan_event(database_path, scan_result)
-    insert_scan_event(database_path, scan_result)
+    insert_scan_event(database_with_key, scan_result)
+    insert_scan_event(database_with_key, scan_result)
 
-    rows = query_recent_scans(database_path, _RECENT_SCANS_DAYS)
+    rows = query_recent_scans(database_with_key, _RECENT_SCANS_DAYS)
 
     timestamps = [row["timestamp"] for row in rows]
     assert timestamps == sorted(timestamps, reverse=True)
@@ -562,29 +564,27 @@ def test_get_last_scan_returns_none_when_no_scans_exist(tmp_path: Path) -> None:
 
 
 def test_get_last_scan_returns_dict_after_scan_inserted(
-    tmp_path: Path, patched_git_info: None
+    database_with_key: Path, patched_git_info: None
 ) -> None:
-    database_path = tmp_path / "audit.db"
-    create_audit_schema(database_path)
     scan_result = _build_clean_scan_result()
 
-    insert_scan_event(database_path, scan_result)
+    insert_scan_event(database_with_key, scan_result)
 
-    last = get_last_scan(database_path)
+    last = get_last_scan(database_with_key)
 
     assert isinstance(last, dict)
 
 
-def test_get_last_scan_returns_most_recent_scan(tmp_path: Path, patched_git_info: None) -> None:
-    database_path = tmp_path / "audit.db"
-    create_audit_schema(database_path)
+def test_get_last_scan_returns_most_recent_scan(
+    database_with_key: Path, patched_git_info: None
+) -> None:
     clean_result = _build_clean_scan_result()
     dirty_result = _build_dirty_scan_result(_SAMPLE_FILE_PATH)
 
-    insert_scan_event(database_path, clean_result)
-    insert_scan_event(database_path, dirty_result)
+    insert_scan_event(database_with_key, clean_result)
+    insert_scan_event(database_with_key, dirty_result)
 
-    last = get_last_scan(database_path)
+    last = get_last_scan(database_with_key)
 
     assert last is not None
     assert bool(last["is_clean"]) is False  # dirty_result was inserted last
@@ -980,21 +980,16 @@ def test_get_current_repository_path_returns_cwd_on_os_error() -> None:
 
 
 def test_insert_scan_event_appends_new_row_instead_of_replacing_existing(
-    tmp_path: Path, patched_git_info: None
+    database_with_key: Path, patched_git_info: None
 ) -> None:
     """Verify audit log immutability — INSERT-only (HIPAA 45 CFR §164.530(j))."""
-    # Arrange
-    database_path = tmp_path / _TEST_DB_FILENAME
-    create_audit_schema(database_path)
     first_scan = _build_clean_scan_result()
     second_scan = _build_clean_scan_result()
 
-    # Act
-    insert_scan_event(database_path, first_scan)
-    insert_scan_event(database_path, second_scan)
+    insert_scan_event(database_with_key, first_scan)
+    insert_scan_event(database_with_key, second_scan)
 
-    # Assert
-    connection = sqlite3.connect(str(database_path))
+    connection = sqlite3.connect(str(database_with_key))
     row = connection.execute(_SCAN_EVENTS_COUNT_QUERY).fetchone()
     connection.close()
     assert row is not None
