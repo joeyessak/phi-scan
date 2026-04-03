@@ -41,6 +41,8 @@ _HTML_RISK_BADGE_CLASS: str = "risk-badge"
 _HTML_FILES_SCANNED_LABEL: str = "Files Scanned"
 _HTML_TOTAL_FINDINGS_LABEL: str = "Total Findings"
 
+_SAMPLE_LINE_NUMBER: int = 10
+
 _FILES_SCANNED_SINGLE: int = 1
 _FILES_SCANNED_MULTI: int = 5
 
@@ -53,7 +55,7 @@ _FILES_SCANNED_MULTI: int = 5
 def _make_finding(
     category: PhiCategory = PhiCategory.SSN,
     severity: SeverityLevel = SeverityLevel.HIGH,
-    line_number: int = 10,
+    line_number: int = _SAMPLE_LINE_NUMBER,
     file_path: Path = _SAMPLE_FILE_PATH,
 ) -> ScanFinding:
     return ScanFinding(

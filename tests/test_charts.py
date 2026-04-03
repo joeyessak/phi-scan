@@ -111,23 +111,23 @@ def _make_scan_result(
 
 def test_build_category_chart_returns_figure_for_clean_result() -> None:
     """_build_category_chart must return a figure for a clean scan result."""
-    result = _make_scan_result()
-    figure = _build_category_chart(result)
+    scan_result = _make_scan_result()
+    figure = _build_category_chart(scan_result)
     assert figure is not None
 
 
 def test_build_category_chart_returns_figure_for_dirty_result() -> None:
     """_build_category_chart must return a figure when findings are present."""
     findings = (_make_finding(PhiCategory.SSN, SeverityLevel.HIGH),)
-    result = _make_scan_result(findings, RiskLevel.HIGH)
-    figure = _build_category_chart(result)
+    scan_result = _make_scan_result(findings, RiskLevel.HIGH)
+    figure = _build_category_chart(scan_result)
     assert figure is not None
 
 
 def test_build_category_chart_has_savefig_method() -> None:
     """The figure returned by _build_category_chart must support savefig."""
-    result = _make_scan_result()
-    figure = _build_category_chart(result)
+    scan_result = _make_scan_result()
+    figure = _build_category_chart(scan_result)
     assert hasattr(figure, "savefig")
 
 
@@ -138,8 +138,8 @@ def test_build_category_chart_has_savefig_method() -> None:
 
 def test_build_severity_chart_returns_figure_for_clean_result() -> None:
     """_build_severity_chart must return a figure for a clean scan result."""
-    result = _make_scan_result()
-    figure = _build_severity_chart(result)
+    scan_result = _make_scan_result()
+    figure = _build_severity_chart(scan_result)
     assert figure is not None
 
 
@@ -149,15 +149,15 @@ def test_build_severity_chart_returns_figure_for_dirty_result() -> None:
         _make_finding(PhiCategory.SSN, SeverityLevel.HIGH, line_number=1),
         _make_finding(PhiCategory.NAME, SeverityLevel.MEDIUM, line_number=2),
     )
-    result = _make_scan_result(findings, RiskLevel.HIGH)
-    figure = _build_severity_chart(result)
+    scan_result = _make_scan_result(findings, RiskLevel.HIGH)
+    figure = _build_severity_chart(scan_result)
     assert figure is not None
 
 
 def test_build_severity_chart_has_savefig_method() -> None:
     """The figure returned by _build_severity_chart must support savefig."""
-    result = _make_scan_result()
-    figure = _build_severity_chart(result)
+    scan_result = _make_scan_result()
+    figure = _build_severity_chart(scan_result)
     assert hasattr(figure, "savefig")
 
 
@@ -168,8 +168,8 @@ def test_build_severity_chart_has_savefig_method() -> None:
 
 def test_build_top_files_chart_returns_figure_for_clean_result() -> None:
     """_build_top_files_chart must return a figure for a clean scan result."""
-    result = _make_scan_result()
-    figure = _build_top_files_chart(result)
+    scan_result = _make_scan_result()
+    figure = _build_top_files_chart(scan_result)
     assert figure is not None
 
 
@@ -183,15 +183,15 @@ def test_build_top_files_chart_returns_figure_for_multi_file_result() -> None:
             PhiCategory.NAME, SeverityLevel.MEDIUM, line_number=2, file_path=_ALT_FILE_PATH
         ),
     )
-    result = _make_scan_result(findings, RiskLevel.HIGH)
-    figure = _build_top_files_chart(result)
+    scan_result = _make_scan_result(findings, RiskLevel.HIGH)
+    figure = _build_top_files_chart(scan_result)
     assert figure is not None
 
 
 def test_build_top_files_chart_has_savefig_method() -> None:
     """The figure returned by _build_top_files_chart must support savefig."""
-    result = _make_scan_result()
-    figure = _build_top_files_chart(result)
+    scan_result = _make_scan_result()
+    figure = _build_top_files_chart(scan_result)
     assert hasattr(figure, "savefig")
 
 
@@ -232,40 +232,40 @@ def test_build_trend_chart_has_savefig_method() -> None:
 
 def test_render_chart_to_bytes_returns_bytes() -> None:
     """_render_chart_to_bytes must return bytes."""
-    result = _make_scan_result()
-    figure = _build_category_chart(result)
+    scan_result = _make_scan_result()
+    figure = _build_category_chart(scan_result)
     png_bytes = _render_chart_to_bytes(figure)
     assert isinstance(png_bytes, bytes)
 
 
 def test_render_chart_to_bytes_is_non_empty() -> None:
     """_render_chart_to_bytes must return non-empty bytes."""
-    result = _make_scan_result()
-    figure = _build_category_chart(result)
+    scan_result = _make_scan_result()
+    figure = _build_category_chart(scan_result)
     png_bytes = _render_chart_to_bytes(figure)
     assert len(png_bytes) > 0
 
 
 def test_render_chart_to_bytes_starts_with_png_magic() -> None:
     """PNG output must begin with the standard PNG magic byte sequence."""
-    result = _make_scan_result()
-    figure = _build_category_chart(result)
+    scan_result = _make_scan_result()
+    figure = _build_category_chart(scan_result)
     png_bytes = _render_chart_to_bytes(figure)
     assert png_bytes[:8] == _PNG_MAGIC_BYTES
 
 
 def test_severity_chart_png_starts_with_png_magic() -> None:
     """Severity chart PNG output must begin with the PNG magic bytes."""
-    result = _make_scan_result()
-    figure = _build_severity_chart(result)
+    scan_result = _make_scan_result()
+    figure = _build_severity_chart(scan_result)
     png_bytes = _render_chart_to_bytes(figure)
     assert png_bytes[:8] == _PNG_MAGIC_BYTES
 
 
 def test_top_files_chart_png_starts_with_png_magic() -> None:
     """Top-files chart PNG output must begin with the PNG magic bytes."""
-    result = _make_scan_result()
-    figure = _build_top_files_chart(result)
+    scan_result = _make_scan_result()
+    figure = _build_top_files_chart(scan_result)
     png_bytes = _render_chart_to_bytes(figure)
     assert png_bytes[:8] == _PNG_MAGIC_BYTES
 
@@ -277,16 +277,16 @@ def test_top_files_chart_png_starts_with_png_magic() -> None:
 
 def test_html_report_embeds_at_least_one_chart_image() -> None:
     """HTML report must embed at least one base64 PNG chart via data URI."""
-    result = _make_scan_result()
-    html = generate_html_report(result, _SAMPLE_SCAN_TARGET).decode("utf-8")
+    scan_result = _make_scan_result()
+    html = generate_html_report(scan_result, _SAMPLE_SCAN_TARGET).decode("utf-8")
     assert _HTML_CHART_IMG_PREFIX in html
 
 
 def test_html_report_embeds_chart_image_for_dirty_result() -> None:
     """HTML report must embed a chart image when findings are present."""
     findings = (_make_finding(PhiCategory.SSN, SeverityLevel.HIGH),)
-    result = _make_scan_result(findings, RiskLevel.HIGH)
-    html = generate_html_report(result, _SAMPLE_SCAN_TARGET).decode("utf-8")
+    scan_result = _make_scan_result(findings, RiskLevel.HIGH)
+    html = generate_html_report(scan_result, _SAMPLE_SCAN_TARGET).decode("utf-8")
     assert _HTML_CHART_IMG_PREFIX in html
 
 
@@ -294,8 +294,8 @@ def test_html_chart_data_uri_contains_valid_base64() -> None:
     """The chart data URI in HTML must contain a non-empty base64 payload."""
     import base64
 
-    result = _make_scan_result()
-    html = generate_html_report(result, _SAMPLE_SCAN_TARGET).decode("utf-8")
+    scan_result = _make_scan_result()
+    html = generate_html_report(scan_result, _SAMPLE_SCAN_TARGET).decode("utf-8")
     prefix_pos = html.find(_HTML_CHART_IMG_PREFIX)
     assert prefix_pos != -1
     # Extract the base64 string up to the closing quote
