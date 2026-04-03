@@ -365,6 +365,9 @@ def insert_scan_event(
         AuditLogError: If the database cannot be written to.
     """
     delivered_channels: list[str] = notifications_sent or []
+    # PHI safety: _serialize_findings() strips raw values (code_context, file paths)
+    # and returns a JSON string containing only hashes and metadata. That string —
+    # never the ScanFinding objects themselves — is passed to _serialize_and_encrypt.
     encrypted_findings = _serialize_and_encrypt(
         _serialize_findings(scan_result.findings), database_path.parent
     )
@@ -490,6 +493,44 @@ def migrate_schema(database_path: Path, from_version: int, to_version: int) -> N
         connection.close()
 
 
+def _verify_chain_rows(audit_rows: list[Any], audit_key: bytes) -> ChainVerifyResult:
+    """Walk audit_rows in insertion order and verify each HMAC chain hash.
+
+    Called by verify_audit_chain after the key and rows have been loaded.
+    Extracted to keep verify_audit_chain under the 30-line function limit.
+
+    Args:
+        audit_rows: Rows from _SELECT_ALL_ROWS_ORDERED_SQL, ordered by id ASC.
+        audit_key: The 32-byte AES-256 audit key used as the HMAC key.
+
+    Returns:
+        ChainVerifyResult with key_present=True (the caller already confirmed
+        the key is present). is_intact is False if any hash mismatches or any
+        row was skipped.
+    """
+    prev_hash = AUDIT_GENESIS_CHAIN_HASH
+    skipped_rows = 0
+    is_chain_intact = True
+    for audit_row in audit_rows:
+        row_fields = dict(audit_row)
+        row_id = row_fields["id"]
+        stored_hash: str = row_fields.get("row_chain_hash", "")
+        if not stored_hash:
+            # Row has no chain hash — either pre-dates hash-chain support or was
+            # cleared by an attacker. Log at WARNING and mark chain as not fully intact.
+            _logger.warning(_CHAIN_ROW_SKIPPED_WARNING.format(row_id=row_id))
+            skipped_rows += 1
+            is_chain_intact = False
+            continue
+        row_content_string = _row_content_for_hashing(row_fields)
+        recomputed = _hmac_sha256(audit_key, prev_hash + row_content_string)
+        if not hmac.compare_digest(stored_hash, recomputed):
+            _logger.error(_CHAIN_TAMPER_ERROR.format(row_id=row_id))
+            return ChainVerifyResult(is_intact=False, key_present=True, skipped_rows=skipped_rows)
+        prev_hash = stored_hash
+    return ChainVerifyResult(is_intact=is_chain_intact, key_present=True, skipped_rows=skipped_rows)
+
+
 def verify_audit_chain(database_path: Path) -> ChainVerifyResult:
     """Recompute the HMAC-SHA256 hash chain and return a ChainVerifyResult.
 
@@ -529,27 +570,7 @@ def verify_audit_chain(database_path: Path) -> ChainVerifyResult:
     finally:
         connection.close()
 
-    prev_hash = AUDIT_GENESIS_CHAIN_HASH
-    skipped_rows = 0
-    is_chain_intact = True
-    for audit_row in audit_rows:
-        row_fields = dict(audit_row)
-        row_id = row_fields["id"]
-        stored_hash: str = row_fields.get("row_chain_hash", "")
-        if not stored_hash:
-            # Row has no chain hash — either pre-dates hash-chain support or was
-            # cleared by an attacker. Log at WARNING and mark chain as not fully intact.
-            _logger.warning(_CHAIN_ROW_SKIPPED_WARNING.format(row_id=row_id))
-            skipped_rows += 1
-            is_chain_intact = False
-            continue
-        row_content_string = _row_content_for_hashing(row_fields)
-        recomputed = _hmac_sha256(audit_key, prev_hash + row_content_string)
-        if not hmac.compare_digest(stored_hash, recomputed):
-            _logger.error(_CHAIN_TAMPER_ERROR.format(row_id=row_id))
-            return ChainVerifyResult(is_intact=False, key_present=True, skipped_rows=skipped_rows)
-        prev_hash = stored_hash
-    return ChainVerifyResult(is_intact=is_chain_intact, key_present=True, skipped_rows=skipped_rows)
+    return _verify_chain_rows(audit_rows, audit_key)
 
 
 def purge_expired_audit_rows(database_path: Path) -> int:
@@ -1057,12 +1078,20 @@ def _decrypt_findings_json(encrypted: str, key: bytes) -> str:
 def _serialize_and_encrypt(findings_json: str, key_dir: Path) -> str:
     """Encrypt findings_json with AES-256-GCM using the audit key in key_dir.
 
+    PHI safety: the ``findings_json`` parameter must be the output of
+    ``_serialize_findings()`` — a JSON string containing only hashes and
+    metadata (file_path_hash, value_hash, hipaa_category, etc.). Raw
+    ``ScanFinding`` objects, ``code_context``, or plaintext file paths must
+    never be passed here. The type annotation ``str`` enforces this at the
+    API boundary; callers must not bypass ``_serialize_findings``.
+
     Hard-fails if the key is absent — plaintext fallback is not permitted because
     findings_json contains structured audit data (hipaa_category, file_path_hash,
     rule_id, value_hash) that must be protected at rest.
 
     Args:
-        findings_json: Plaintext JSON string of serialised findings.
+        findings_json: Plaintext JSON string of serialised findings produced
+            by _serialize_findings() — not raw ScanFinding objects.
         key_dir: Directory where the audit key file is stored.
 
     Returns:
@@ -1098,36 +1127,41 @@ def _hmac_sha256(key: bytes, message: str) -> str:
     return hmac.new(key, message.encode(), hashlib.sha256).hexdigest()
 
 
-def _row_content_for_hashing(audit_row_dict: dict[str, Any]) -> str:
+def _row_content_for_hashing(row_fields: dict[str, Any]) -> str:
     """Produce a canonical string representation of a row for hash chain computation.
 
     All fields except row_chain_hash itself are included, in a stable order,
     to detect any modification to any column value.
 
+    PHI safety: the ``findings_json`` field included here is always the
+    AES-256-GCM ciphertext string written by ``_serialize_and_encrypt`` —
+    never plaintext findings or raw ScanFinding content. The ``enc:`` prefix
+    on all stored findings_json values confirms this at a glance.
+
     Args:
-        audit_row_dict: Row dict from the database (all columns except row_chain_hash).
+        row_fields: Row dict from the database (all columns except row_chain_hash).
 
     Returns:
         Canonical pipe-delimited string for HMAC input.
     """
     return (
-        f"{audit_row_dict.get('id', '')}"
-        f"|{audit_row_dict.get('timestamp', '')}"
-        f"|{audit_row_dict.get('scanner_version', '')}"
-        f"|{audit_row_dict.get('repository_hash', '')}"
-        f"|{audit_row_dict.get('branch_hash', '')}"
-        f"|{audit_row_dict.get('files_scanned', '')}"
-        f"|{audit_row_dict.get('findings_count', '')}"
-        f"|{audit_row_dict.get('findings_json', '')}"
-        f"|{audit_row_dict.get('is_clean', '')}"
-        f"|{audit_row_dict.get('scan_duration', '')}"
-        f"|{audit_row_dict.get('event_type', '')}"
-        f"|{audit_row_dict.get('committer_name_hash', '')}"
-        f"|{audit_row_dict.get('committer_email_hash', '')}"
-        f"|{audit_row_dict.get('pr_number', '')}"
-        f"|{audit_row_dict.get('pipeline', '')}"
-        f"|{audit_row_dict.get('action_taken', '')}"
-        f"|{audit_row_dict.get('notifications_sent', '')}"
+        f"{row_fields.get('id', '')}"
+        f"|{row_fields.get('timestamp', '')}"
+        f"|{row_fields.get('scanner_version', '')}"
+        f"|{row_fields.get('repository_hash', '')}"
+        f"|{row_fields.get('branch_hash', '')}"
+        f"|{row_fields.get('files_scanned', '')}"
+        f"|{row_fields.get('findings_count', '')}"
+        f"|{row_fields.get('findings_json', '')}"
+        f"|{row_fields.get('is_clean', '')}"
+        f"|{row_fields.get('scan_duration', '')}"
+        f"|{row_fields.get('event_type', '')}"
+        f"|{row_fields.get('committer_name_hash', '')}"
+        f"|{row_fields.get('committer_email_hash', '')}"
+        f"|{row_fields.get('pr_number', '')}"
+        f"|{row_fields.get('pipeline', '')}"
+        f"|{row_fields.get('action_taken', '')}"
+        f"|{row_fields.get('notifications_sent', '')}"
     )
 
 
