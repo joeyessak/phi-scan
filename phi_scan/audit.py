@@ -156,6 +156,9 @@ _NOTIFICATIONS_EMPTY_JSON: str = "[]"
 # O_NOFOLLOW is POSIX-only (Linux/macOS). On Windows it does not exist;
 # _reject_symlink_database_path falls back to Path.is_symlink() there.
 _O_NOFOLLOW: int | None = getattr(os, "O_NOFOLLOW", None)
+# O_BINARY is Windows-only. On POSIX it is 0 (no-op). Without it, os.open on
+# Windows opens in text mode and translates \n → \r\n, corrupting binary key data.
+_O_BINARY: int = getattr(os, "O_BINARY", 0)
 _PRAGMA_WAL_MODE: str = "PRAGMA journal_mode=WAL"
 _LAST_SCAN_LIMIT: int = 1
 _GIT_SUBPROCESS_TIMEOUT_SECONDS: int = 5
@@ -633,7 +636,7 @@ def generate_audit_key(database_path: Path) -> Path:
         # exist — raises EEXIST if present, eliminating the TOCTOU window that
         # key_path.exists() + open() would create. Mode 0o600 sets owner-only
         # permissions at file creation, not in a separate chmod call.
-        fd = os.open(str(key_path), os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        fd = os.open(str(key_path), os.O_WRONLY | os.O_CREAT | os.O_EXCL | _O_BINARY, 0o600)
         try:
             os.write(fd, key_bytes)
         finally:
