@@ -46,9 +46,10 @@ _logger: logging.Logger = logging.getLogger(__name__)
 # Optional dependency detection
 # ---------------------------------------------------------------------------
 
-# Defined before the availability check so the probe function can reference it
-# without a forward reference.
+# Defined before the availability check so the probe function and error messages
+# can reference these without forward references.
 _SPACY_MODEL_NAME: str = "en_core_web_lg"
+_PHI_SCAN_SETUP_COMMAND: str = "phi-scan setup"
 
 
 def _check_spacy_model_is_installed(model_name: str) -> None:
@@ -71,7 +72,8 @@ def _check_spacy_model_is_installed(model_name: str) -> None:
 
     if not spacy.util.is_package(model_name):
         raise MissingOptionalDependencyError(
-            f"spaCy model '{model_name}' is not installed — run 'phi-scan setup' to download it"
+            f"spaCy model '{model_name}' is not installed — "
+            f"run '{_PHI_SCAN_SETUP_COMMAND}' to download it"
         )
 
 
@@ -83,7 +85,20 @@ try:
 
     _check_spacy_model_is_installed(_SPACY_MODEL_NAME)
     _IS_NLP_AVAILABLE: bool = True
-except (ImportError, MissingOptionalDependencyError):
+except MissingOptionalDependencyError as _nlp_model_error:
+    # Model is absent — warn at import time so the gap is visible immediately
+    # rather than only surfacing later when detect_phi_with_nlp is first called.
+    warnings.warn(str(_nlp_model_error), UserWarning, stacklevel=2)
+    _IS_NLP_AVAILABLE = False
+except ImportError as _nlp_import_error:
+    # presidio_analyzer or spaCy not installed, or a broken transitive dependency.
+    # Emit a diagnostic so broken environments are distinguishable from a clean
+    # intentional-absent-optional-dep state.
+    warnings.warn(
+        f"NLP layer unavailable due to import error: {_nlp_import_error}",
+        UserWarning,
+        stacklevel=2,
+    )
     _IS_NLP_AVAILABLE = False
 
 # ---------------------------------------------------------------------------
