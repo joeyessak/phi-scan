@@ -1477,7 +1477,6 @@ def _run_ci_integration(
     should_set_status: bool,
     should_upload_sarif: bool,
     is_rich_mode: bool,
-    report_path: Path | None,
 ) -> None:
     """Run all enabled CI/CD platform integrations after a scan completes.
 
@@ -1490,7 +1489,6 @@ def _run_ci_integration(
         should_set_status:    When True, set commit status PASS/FAIL.
         should_upload_sarif:  When True, upload SARIF to GitHub Code Scanning.
         is_rich_mode:         When True, emit Rich-formatted warnings to terminal.
-        report_path:          Path to the SARIF file written by --report-path (for upload).
     """
     if not any([should_post_comment, should_set_status, should_upload_sarif]):
         return
@@ -1539,7 +1537,7 @@ def _run_ci_integration(
 
     if should_upload_sarif:
         _call_ci_integration(
-            lambda: _upload_sarif_from_report_path(scan_result, pr_context, report_path),
+            lambda: upload_sarif_to_github(scan_result, pr_context),
             "SARIF upload",
             is_rich_mode,
         )
@@ -1570,33 +1568,6 @@ def _call_ci_integration(
         _logger.warning("CI integration (%s) failed: %s", label, integration_error)
         if is_rich_mode:
             get_console().print(f"[yellow]Warning:[/yellow] {label} failed — {integration_error}")
-
-
-def _upload_sarif_from_report_path(
-    scan_result: ScanResult,
-    pr_context: Any,
-    report_path: Path | None,
-) -> None:
-    """Read the SARIF file from report_path and upload it to GitHub Code Scanning.
-
-    Args:
-        scan_result:  The completed scan result (used for context only).
-        pr_context:   GitHub PR context.
-        report_path:  Path to the SARIF file on disk.
-
-    Raises:
-        CIIntegrationError: When the file cannot be read or the upload fails.
-    """
-    if report_path is None or not report_path.exists():
-        _logger.debug("SARIF upload: no report file at %s — skipping", report_path)
-        return
-    try:
-        sarif_content = report_path.read_text(encoding="utf-8")
-    except OSError as read_error:
-        raise CIIntegrationError(
-            f"SARIF upload: could not read {report_path}: {read_error.strerror}"
-        ) from read_error
-    upload_sarif_to_github(sarif_content, pr_context)
 
 
 def _display_report_phase_header(
@@ -1724,7 +1695,6 @@ def scan(
         should_set_status,
         should_upload_sarif,
         is_rich_mode,
-        report_path,
     )
     _display_report_phase_header(output_options, phase_options)
     _emit_report_output(scan_result, output_options, phase_options)

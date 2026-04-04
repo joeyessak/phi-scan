@@ -123,10 +123,10 @@ commands:
             if [ -n "$CIRCLE_PULL_REQUEST" ]; then
               DIFF_FLAG="--diff origin/${CIRCLE_BRANCH}"
               if [ "<< parameters.post_comment >>" = "true" ]; then
-                COMMENT_FLAGS="$COMMENT_FLAGS --post-comment"
+                COMMENT_FLAGS="${COMMENT_FLAGS:+$COMMENT_FLAGS }--post-comment"
               fi
               if [ "<< parameters.set_status >>" = "true" ]; then
-                COMMENT_FLAGS="$COMMENT_FLAGS --set-status"
+                COMMENT_FLAGS="${COMMENT_FLAGS:+$COMMENT_FLAGS }--set-status"
               fi
             fi
 
@@ -214,12 +214,12 @@ jobs:
                 command: |
                   python3 -c "
                   import json, sys
-                  # JSON schema keys: 'is_clean' (bool) and 'findings' (list) are
-                  # documented phi-scan output fields — not magic strings.
+                  _KEY_IS_CLEAN = 'is_clean'
+                  _KEY_FINDINGS = 'findings'
                   try:
                       phi_scan_report = json.load(open('<< parameters.output_dir >>/phi-scan.json'))
-                      if not phi_scan_report.get('is_clean', True):
-                          print(f'phi-scan: {len(phi_scan_report.get(\"findings\", []))} PHI/PII violation(s) found.', file=sys.stderr)
+                      if not phi_scan_report.get(_KEY_IS_CLEAN, True):
+                          print(f'phi-scan: {len(phi_scan_report.get(_KEY_FINDINGS, []))} PHI/PII violation(s) found.', file=sys.stderr)
                           sys.exit(1)
                       print('phi-scan: no violations found.')
                   except FileNotFoundError:

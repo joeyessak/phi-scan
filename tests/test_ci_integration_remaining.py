@@ -75,13 +75,6 @@ _AWS_ACCOUNT_ID: str = "123456789012"
 _AWS_REGION: str = "us-east-1"
 _AWS_REPO: str = "org/my-repo"
 
-_SARIF_CONTENT: str = json.dumps(
-    {
-        "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
-        "version": "2.1.0",
-        "runs": [],
-    }
-)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -207,7 +200,7 @@ def test_upload_sarif_to_github_posts_to_code_scanning_api(
         return mock_response
 
     with patch("httpx.post", side_effect=fake_post):
-        upload_sarif_to_github(_SARIF_CONTENT, _github_context())
+        upload_sarif_to_github(_make_violation_result(), _github_context())
 
     assert any("code-scanning/sarifs" in url for url in captured_urls)
 
@@ -229,7 +222,7 @@ def test_upload_sarif_to_github_payload_contains_base64_encoded_sarif(
         return mock_response
 
     with patch("httpx.post", side_effect=fake_post):
-        upload_sarif_to_github(_SARIF_CONTENT, _github_context())
+        upload_sarif_to_github(_make_violation_result(), _github_context())
 
     assert captured_payloads
     encoded = captured_payloads[0]["sarif"]
@@ -248,7 +241,7 @@ def test_upload_sarif_skips_when_no_token(monkeypatch: pytest.MonkeyPatch) -> No
         return MagicMock()
 
     with patch("httpx.post", side_effect=fake_post):
-        upload_sarif_to_github(_SARIF_CONTENT, _github_context())
+        upload_sarif_to_github(_make_violation_result(), _github_context())
 
     assert call_count == 0
 
@@ -264,7 +257,7 @@ def test_upload_sarif_skips_when_no_sha(monkeypatch: pytest.MonkeyPatch) -> None
         return MagicMock()
 
     with patch("httpx.post", side_effect=fake_post):
-        upload_sarif_to_github(_SARIF_CONTENT, _github_context(sha=None))
+        upload_sarif_to_github(_make_violation_result(), _github_context(sha=None))
 
     assert call_count == 0
 
@@ -286,7 +279,7 @@ def test_upload_sarif_raises_ci_integration_error_on_http_failure(
 
     with patch("httpx.post", side_effect=fake_post):
         with pytest.raises(CIIntegrationError, match="GitHub SARIF upload failed"):
-            upload_sarif_to_github(_SARIF_CONTENT, _github_context())
+            upload_sarif_to_github(_make_violation_result(), _github_context())
 
 
 # ---------------------------------------------------------------------------

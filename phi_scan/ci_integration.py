@@ -42,6 +42,7 @@ import httpx
 from phi_scan.constants import SeverityLevel
 from phi_scan.exceptions import PhiScanError
 from phi_scan.models import ScanResult
+from phi_scan.output import format_sarif
 
 _LOG: logging.Logger = logging.getLogger(__name__)
 
@@ -575,47 +576,49 @@ def build_comment_body_with_baseline(
 # ---------------------------------------------------------------------------
 
 
-def _compress_and_encode_sarif(sarif_content: str) -> str:
-    """Gzip-compress and base64-encode a SARIF JSON string for GitHub upload.
-
-    GitHub Code Scanning requires the SARIF payload to be gzip-compressed and
-    then base64-encoded as an ASCII string.
+def _gzip_compress_sarif(sarif_content: str) -> bytes:
+    """Gzip-compress a SARIF JSON string to bytes.
 
     Args:
         sarif_content: Raw SARIF 2.1.0 JSON string.
 
     Returns:
-        Base64-encoded ASCII string of the gzip-compressed SARIF content.
+        Gzip-compressed bytes of the UTF-8 encoded SARIF content.
     """
-    gzip_compressed_sarif = gzip.compress(sarif_content.encode("utf-8"))
-    return base64.b64encode(gzip_compressed_sarif).decode("ascii")
+    return gzip.compress(sarif_content.encode("utf-8"))
 
 
-def upload_sarif_to_github(sarif_content: str, pr_context: PRContext) -> None:
+def _base64_encode_bytes(raw_bytes: bytes) -> str:
+    """Base64-encode bytes to an ASCII string.
+
+    Args:
+        raw_bytes: Bytes to encode.
+
+    Returns:
+        Base64-encoded ASCII string.
+    """
+    return base64.b64encode(raw_bytes).decode("ascii")
+
+
+def upload_sarif_to_github(scan_result: ScanResult, pr_context: PRContext) -> None:
     """Upload a SARIF report to the GitHub Code Scanning API for inline annotations.
 
     Each finding appears as an inline annotation on the exact line in the PR diff.
     Severity is mapped: HIGH→error, MEDIUM→warning, LOW/INFO→note.
 
-    PHI-safety guarantee: ``sarif_content`` must be produced by ``format_sarif()``
-    from ``phi_scan.output``. That function constructs SARIF from ``ScanFinding``
-    fields that are structurally guaranteed to contain no raw PHI:
-      - ``file_path`` and ``line_number`` — location metadata, not PHI values.
-      - ``entity_type`` and ``hipaa_category.value`` — enum/pattern names, not values.
-      - ``remediation_hint`` — static guidance text, not derived from the matched value.
-      - ``detection_layer.value`` — enum name only.
-    The raw matched value is stored only as ``value_hash`` (SHA-256) and is never
-    emitted by ``format_sarif()``. The ``code_context`` field (which holds the
-    redacted source line) is also deliberately omitted from SARIF output.
-    This contract is enforced by ``ScanFinding.__post_init__`` validation:
-      - ``_reject_unredacted_code_context`` ensures code_context contains [REDACTED].
-      - ``_reject_invalid_value_hash`` ensures value_hash is a valid SHA-256 digest.
+    PHI-safety: ``scan_result`` is passed to ``format_sarif()`` internally — this
+    function is the only path by which SARIF reaches the GitHub API, ensuring the
+    formatter's PHI exclusions are always applied. ``format_sarif()`` emits only
+    file path, line number, entity type, HIPAA category, detection layer, and
+    remediation hint. It deliberately omits ``value_hash``, ``code_context``, and
+    any raw matched values. This is enforced by ``ScanFinding.__post_init__``
+    validation, not by caller discipline.
 
     Requires the ``security-events: write`` permission in the GitHub Actions workflow.
 
     Args:
-        sarif_content: SARIF 2.1.0 JSON string produced by ``format_sarif()``.
-        pr_context:    GitHub PR context with repository and SHA.
+        scan_result: Completed scan result — SARIF is generated internally.
+        pr_context:  GitHub PR context with repository and SHA.
 
     Raises:
         CIIntegrationError: When the API call fails or authentication is missing.
@@ -631,7 +634,7 @@ def upload_sarif_to_github(sarif_content: str, pr_context: PRContext) -> None:
         _LOG.warning("GitHub SARIF upload: GITHUB_TOKEN not set — skipping")
         return
 
-    sarif_base64_encoded = _compress_and_encode_sarif(sarif_content)
+    sarif_base64_encoded = _base64_encode_bytes(_gzip_compress_sarif(format_sarif(scan_result)))
 
     url = _GITHUB_API_BASE_URL + _GITHUB_API_SARIF_UPLOAD_PATH.format(
         repository=repository,
