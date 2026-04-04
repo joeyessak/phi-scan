@@ -457,18 +457,18 @@ def query_recent_scans(
     cutoff = (
         datetime.datetime.now(datetime.UTC) - datetime.timedelta(days=lookback_days)
     ).isoformat()
-    sql = _SELECT_RECENT_SCANS_BASE_SQL
+    scan_query_sql = _SELECT_RECENT_SCANS_BASE_SQL
     params: list[Any] = [cutoff]
     if repository_hash is not None:
-        sql += _FILTER_REPOSITORY_HASH_SQL
+        scan_query_sql += _FILTER_REPOSITORY_HASH_SQL
         params.append(repository_hash)
     if should_show_violations_only:
-        sql += _FILTER_VIOLATIONS_ONLY_SQL
+        scan_query_sql += _FILTER_VIOLATIONS_ONLY_SQL
         params.append(_BOOLEAN_FALSE)
-    sql += _ORDER_BY_TIMESTAMP_DESC_SQL
+    scan_query_sql += _ORDER_BY_TIMESTAMP_DESC_SQL
     connection = _open_database(database_path)
     try:
-        cursor = connection.execute(sql, params)
+        cursor = connection.execute(scan_query_sql, params)
         return [dict(row) for row in cursor.fetchall()]
     except sqlite3.Error as db_error:
         raise AuditLogError(_DATABASE_ERROR.format(detail=db_error)) from db_error

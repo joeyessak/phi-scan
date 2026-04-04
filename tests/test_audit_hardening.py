@@ -655,10 +655,10 @@ def test_query_recent_scans_repository_hash_filters_to_matching_repo(tmp_path: P
     insert_scan_event(db_path, _make_clean_result())
     insert_scan_event(db_path, _make_clean_result())
 
-    all_rows = query_recent_scans(db_path, _RETENTION_WITHIN_WINDOW_DAYS)
-    assert len(all_rows) == 2
+    unfiltered_rows = query_recent_scans(db_path, _RETENTION_WITHIN_WINDOW_DAYS)
+    assert len(unfiltered_rows) == 2
 
-    stored_repo_hash = all_rows[0]["repository_hash"]
+    stored_repo_hash = unfiltered_rows[0]["repository_hash"]
     matching_rows = query_recent_scans(
         db_path, _RETENTION_WITHIN_WINDOW_DAYS, repository_hash=stored_repo_hash
     )
@@ -679,8 +679,8 @@ def test_query_recent_scans_combined_filters_narrow_results(tmp_path: Path) -> N
     insert_scan_event(db_path, _make_clean_result())
     insert_scan_event(db_path, _make_dirty_result())
 
-    all_rows = query_recent_scans(db_path, _RETENTION_WITHIN_WINDOW_DAYS)
-    stored_repo_hash = all_rows[0]["repository_hash"]
+    unfiltered_rows = query_recent_scans(db_path, _RETENTION_WITHIN_WINDOW_DAYS)
+    stored_repo_hash = unfiltered_rows[0]["repository_hash"]
 
     combined_rows = query_recent_scans(
         db_path,
