@@ -111,21 +111,23 @@ pipeline {
                     //   at-a-glance status in the Jenkins build history.
                     // -------------------------------------------------------
                     def phi_json = "${PHI_SCAN_OUTPUT_DIR}/phi-scan.json"
-                    def description = "PhiScan: unknown"
+                    def buildDescription = "PhiScan: unknown"
                     try {
                         def jsonText = readFile(phi_json)
-                        def result = readJSON(text: jsonText)
-                        if (result.is_clean) {
-                            description = "PhiScan: Clean"
+                        def scanResult = readJSON(text: jsonText)
+                        if (scanResult.is_clean) {
+                            buildDescription = "PhiScan: Clean"
                         } else {
-                            def high   = result.severity_counts?.HIGH   ?: 0
-                            def medium = result.severity_counts?.MEDIUM ?: 0
-                            def low    = result.severity_counts?.LOW    ?: 0
-                            description = "PhiScan: ${result.findings} findings " +
-                                          "(${high} HIGH, ${medium} MED, ${low} LOW)"
+                            def high   = scanResult.severity_counts?.HIGH   ?: 0
+                            def medium = scanResult.severity_counts?.MEDIUM ?: 0
+                            def low    = scanResult.severity_counts?.LOW    ?: 0
+                            buildDescription = "PhiScan: ${scanResult.findings} findings " +
+                                              "(${high} HIGH, ${medium} MED, ${low} LOW)"
                         }
-                    } catch (ignored) { /* JSON not available — leave default */ }
-                    currentBuild.description = description
+                    } catch (Exception jsonException) {
+                        echo "WARNING: phi-scan JSON summary unavailable — ${jsonException.message}"
+                    }
+                    currentBuild.description = buildDescription
 
                     // Archive artifacts before propagating failure
                     archiveArtifacts(

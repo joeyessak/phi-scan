@@ -146,6 +146,8 @@ _HTTP_TIMEOUT_SECONDS: float = 15.0
 
 # Maximum characters in a PR comment to stay within GitHub's 65536-char limit
 _MAX_COMMENT_LENGTH: int = 60_000
+_MAX_ERROR_RESPONSE_LOG_LENGTH: int = 200
+_DEFAULT_GIT_REF: str = "refs/heads/main"
 
 # GitHub Code Scanning SARIF upload API
 _GITHUB_API_SARIF_UPLOAD_PATH: str = "/repos/{repository}/code-scanning/sarifs"
@@ -598,7 +600,7 @@ def upload_sarif_to_github(sarif_content: str, pr_context: PRContext) -> None:
     )
     payload = {
         "commit_sha": sha,
-        "ref": pr_context.branch or "refs/heads/main",
+        "ref": pr_context.branch or _DEFAULT_GIT_REF,
         "sarif": encoded,
         "tool_name": "phi-scan",
     }
@@ -618,7 +620,7 @@ def upload_sarif_to_github(sarif_content: str, pr_context: PRContext) -> None:
     except httpx.HTTPStatusError as status_error:
         raise CIIntegrationError(
             f"GitHub SARIF upload failed (HTTP {status_error.response.status_code}): "
-            f"{status_error.response.text[:200]}"
+            f"{status_error.response.text[:_MAX_ERROR_RESPONSE_LOG_LENGTH]}"
         ) from status_error
     except httpx.RequestError as request_error:
         raise CIIntegrationError(
@@ -1117,7 +1119,7 @@ def import_findings_to_security_hub(
         if result.returncode != 0:
             raise CIIntegrationError(
                 f"AWS Security Hub import failed (exit {result.returncode}): "
-                f"{result.stderr.strip()[:200]}"
+                f"{result.stderr.strip()[:_MAX_ERROR_RESPONSE_LOG_LENGTH]}"
             )
     except FileNotFoundError as not_found_error:
         raise CIIntegrationError(
@@ -1308,7 +1310,7 @@ def _post_gitlab_mr_comment(comment_body: str, pr_context: PRContext) -> None:
     except httpx.HTTPStatusError as status_error:
         raise CIIntegrationError(
             f"GitLab MR comment failed (HTTP {status_error.response.status_code}): "
-            f"{status_error.response.text[:200]}"
+            f"{status_error.response.text[:_MAX_ERROR_RESPONSE_LOG_LENGTH]}"
         ) from status_error
     except httpx.RequestError as request_error:
         raise CIIntegrationError(
@@ -1371,7 +1373,7 @@ def _post_azure_pr_comment(comment_body: str, pr_context: PRContext) -> None:
     except httpx.HTTPStatusError as status_error:
         raise CIIntegrationError(
             f"Azure DevOps PR comment failed (HTTP {status_error.response.status_code}): "
-            f"{status_error.response.text[:200]}"
+            f"{status_error.response.text[:_MAX_ERROR_RESPONSE_LOG_LENGTH]}"
         ) from status_error
     except httpx.RequestError as request_error:
         raise CIIntegrationError(
@@ -1423,7 +1425,7 @@ def _post_bitbucket_pr_comment(comment_body: str, pr_context: PRContext) -> None
     except httpx.HTTPStatusError as status_error:
         raise CIIntegrationError(
             f"Bitbucket PR comment failed (HTTP {status_error.response.status_code}): "
-            f"{status_error.response.text[:200]}"
+            f"{status_error.response.text[:_MAX_ERROR_RESPONSE_LOG_LENGTH]}"
         ) from status_error
     except httpx.RequestError as request_error:
         raise CIIntegrationError(
@@ -1602,7 +1604,7 @@ def _set_github_commit_status(scan_result: ScanResult, pr_context: PRContext) ->
     except httpx.HTTPStatusError as status_error:
         raise CIIntegrationError(
             f"GitHub commit status failed (HTTP {status_error.response.status_code}): "
-            f"{status_error.response.text[:200]}"
+            f"{status_error.response.text[:_MAX_ERROR_RESPONSE_LOG_LENGTH]}"
         ) from status_error
     except httpx.RequestError as request_error:
         raise CIIntegrationError(

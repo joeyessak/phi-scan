@@ -61,19 +61,23 @@ def call(Map config = [:]) {
                 conclusion: exitCode == 0 ? 'SUCCESS' : 'FAILURE',
                 detailsURL: env.BUILD_URL ?: ''
             )
-        } catch (ignored) { /* Checks API plugin not installed — skip silently */ }
+        } catch (Exception checksException) {
+            echo "WARNING: Checks API plugin unavailable — inline annotations skipped: ${checksException.message}"
+        }
     }
 
     // 6C.14: Build description for at-a-glance status in build history
     try {
         def jsonFile = "${outputDir}/phi-scan.json"
         if (fileExists(jsonFile)) {
-            def result = readJSON(file: jsonFile)
-            currentBuild.description = result.is_clean
+            def scanResult = readJSON(file: jsonFile)
+            currentBuild.description = scanResult.is_clean
                 ? 'PhiScan: Clean'
-                : "PhiScan: ${result.findings} findings (${result.severity_counts?.HIGH ?: 0} HIGH)"
+                : "PhiScan: ${scanResult.findings} findings (${scanResult.severity_counts?.HIGH ?: 0} HIGH)"
         }
-    } catch (ignored) { /* JSON not available */ }
+    } catch (Exception jsonException) {
+        echo "WARNING: phi-scan JSON summary unavailable — ${jsonException.message}"
+    }
 
     archiveArtifacts(
         artifacts: "${outputDir}/**",
