@@ -1055,8 +1055,12 @@ def create_azure_boards_work_item(scan_result: ScanResult, pr_context: PRContext
         _LOG.warning("Azure Boards: SYSTEM_ACCESSTOKEN not set — skipping")
         return
 
-    # PHI-safety: title and description contain only counts (int) and PR number (str) —
-    # no finding text, entity values, matched strings, or file paths are included.
+    # PHI-SAFE OUTBOUND FIELDS (Azure Boards work item):
+    #   System.Title       — _AZURE_WORKITEM_TITLE_FORMAT: count (int) + pr_id (str) only
+    #   System.Description — count (int) + pr_id (str) + static text only
+    #   System.Tags        — static string literal
+    # Excluded from all fields: entity values, value_hash, hipaa_category,
+    # entity_type, file_path, line_number, code_context, remediation_hint.
     title = _AZURE_WORKITEM_TITLE_FORMAT.format(count=len(high_findings), pull_request_number=pr_id)
     url = _AZURE_WORKITEMS_PATH.format(
         collection_uri=collection_uri,
@@ -1070,6 +1074,7 @@ def create_azure_boards_work_item(scan_result: ScanResult, pr_context: PRContext
         {
             "op": "add",
             "path": "/fields/System.Description",
+            # PHI-SAFE: count (int) + pr_id (str) — no per-finding fields included
             "value": (
                 f"phi-scan detected {len(high_findings)} HIGH severity PHI/PII "
                 f"violation(s) in PR #{pr_id}. "
@@ -1147,6 +1152,20 @@ def convert_findings_to_asff(
         severity_score_map = {"HIGH": 70, "MEDIUM": 40, "LOW": 10, "INFORMATIONAL": 0}
         severity_score = severity_score_map.get(severity_label, 40)
 
+        # PHI-SAFE OUTBOUND FIELDS (ASFF — every field enumerated):
+        #   Id              — repository + file_path (relative) + line_number + value_hash[:16]
+        #                     value_hash is SHA-256 of the raw value, not the raw value itself
+        #   GeneratorId     — "phi-scan/" + entity_type (pattern name, e.g. "us_ssn")
+        #   AwsAccountId    — caller-supplied AWS account ID
+        #   Title           — hipaa_category.value (enum label) + file_path + line_number
+        #   Description     — hipaa_category.value + entity_type + confidence (float) +
+        #                     file_path + line_number + static "No raw value" note
+        #   Remediation     — remediation_hint (pre-canned guidance text, see ScanFinding)
+        #   SourceUrl       — GitHub blob URL built from repository + file_path + line_number
+        #   Resources.Id    — "file://" + file_path
+        #   Resources.Other — line_number, entity_type, hipaa_category.value,
+        #                     confidence (float), value_hash
+        # Excluded from ALL fields: raw entity value, code_context.
         asff_finding: dict[str, Any] = {
             "SchemaVersion": "2018-10-08",
             "Id": (

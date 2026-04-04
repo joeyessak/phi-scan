@@ -501,6 +501,41 @@ def test_create_azure_boards_work_item_posts_when_enabled_with_high_findings(
     assert any("workitems" in url for url in captured_urls)
 
 
+def test_create_azure_boards_work_item_payload_excludes_phi_fields(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Azure Boards work item payload contains only counts and PR number — no per-finding PHI.
+
+    Machine-verifies the PHI-SAFE OUTBOUND FIELDS comment in
+    create_azure_boards_work_item: title and description must contain only
+    aggregate counts and PR number, never hipaa_category, entity_type,
+    file_path, or code_context from individual findings.
+    """
+    monkeypatch.setenv("AZURE_BOARDS_INTEGRATION", "true")
+    monkeypatch.setenv("SYSTEM_ACCESSTOKEN", "azure_token_abc")
+    captured_json: list[list] = []
+
+    def fake_post(url: str, json: list, **kwargs: object) -> MagicMock:
+        captured_json.append(json)
+        mock_response = MagicMock()
+        mock_response.raise_for_status = MagicMock()
+        return mock_response
+
+    with patch("httpx.post", side_effect=fake_post):
+        create_azure_boards_work_item(_make_violation_result(), _azure_context())
+
+    assert captured_json, "expected a POST to Azure Boards"
+    payload_str = json.dumps(captured_json[0])
+
+    # Must contain aggregate count and PR number
+    assert "1" in payload_str  # count of HIGH findings
+    assert _AZURE_PR_ID in payload_str
+
+    # Must NOT contain individual finding fields
+    assert _TEST_CODE_CONTEXT not in payload_str
+    assert str(_TEST_FILE_PATH) not in payload_str
+
+
 # ---------------------------------------------------------------------------
 # 6D.21 — Bitbucket Code Insights
 # ---------------------------------------------------------------------------
@@ -669,6 +704,48 @@ def test_convert_findings_to_asff_does_not_include_raw_entity_value() -> None:
     # The value hash is in there; the raw SSN is not
     assert _TEST_VALUE_HASH in asff_str
     assert "321-54-9870" not in asff_str
+
+
+def test_convert_findings_to_asff_excludes_code_context() -> None:
+    """ASFF payload must not embed code_context — even the redacted form.
+
+    code_context is the source line with the PHI value replaced by [REDACTED].
+    It is not needed in Security Hub findings and must not appear in any field.
+    """
+    asff = convert_findings_to_asff(
+        _make_violation_result(), _AWS_ACCOUNT_ID, _AWS_REGION, _AWS_REPO
+    )
+    asff_str = json.dumps(asff)
+    # _TEST_CODE_CONTEXT = 'field = "[REDACTED]"' — the surrounding text is distinctive
+    assert _TEST_CODE_CONTEXT not in asff_str
+
+
+def test_convert_findings_to_asff_fields_are_enumerated_types_and_counts() -> None:
+    """Every per-finding field in the ASFF payload is a safe type (enum label, int, float, hash).
+
+    This test machine-verifies the PHI-SAFE OUTBOUND FIELDS comment in
+    convert_findings_to_asff: every field that varies per finding must be
+    either a count, an enum label, a file path, a line number, or a value hash.
+    """
+    asff = convert_findings_to_asff(
+        _make_violation_result(), _AWS_ACCOUNT_ID, _AWS_REGION, _AWS_REPO
+    )
+    assert len(asff) == 1
+    finding_record = asff[0]
+    details = finding_record["Resources"][0]["Details"]["Other"]
+
+    # Each field in the Resources.Other block is a safe type
+    assert details["line_number"] == str(_TEST_LINE_NUMBER)
+    assert details["entity_type"] == _TEST_ENTITY_TYPE
+    assert details["hipaa_category"] == PhiCategory.SSN.value
+    assert details["value_hash"] == _TEST_VALUE_HASH
+    # confidence is a formatted float string, not a raw entity value
+    assert "." in details["confidence"]
+
+    # Description contains a count and confidence, but not code_context
+    description = finding_record["Description"]
+    assert _TEST_CODE_CONTEXT not in description
+    assert "No raw value is stored" in description
 
 
 def test_convert_findings_to_asff_empty_when_clean() -> None:
