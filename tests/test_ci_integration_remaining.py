@@ -777,20 +777,22 @@ def test_convert_findings_to_asff_contains_file_path_in_title() -> None:
 
 
 def test_convert_findings_to_asff_does_not_include_raw_entity_value() -> None:
-    """ASFF findings must not contain raw PHI entity values or the full value_hash.
+    """ASFF findings must not contain raw PHI entity values or any value_hash derivative.
 
-    The full 64-char SHA-256 hash is excluded — it could be reversed for low-entropy
-    PHI like SSNs. Only the [:16] prefix is used in the ASFF Id field.
+    SSNs have ~30 bits of entropy — any SHA-256 derivative (full or truncated) is
+    reversible by brute-force over the input space. The ASFF Id uses structural
+    fields only (repository + file_path + line_number + entity_type).
     """
     asff = convert_findings_to_asff(
         _make_violation_result(), _AWS_ACCOUNT_ID, _AWS_REGION, _AWS_REPO
     )
     asff_str = json.dumps(asff)
-    # Full value hash must NOT be present anywhere in the payload
     assert _TEST_VALUE_HASH not in asff_str
-    # The truncated [:16] prefix is used in the Id field for deduplication only
-    assert _TEST_VALUE_HASH[:16] in asff[0]["Id"]
     assert "321-54-9870" not in asff_str
+    # Id is built from structural fields — no hash derivative present
+    assert _TEST_VALUE_HASH[:16] not in asff[0]["Id"]
+    assert str(_TEST_LINE_NUMBER) in asff[0]["Id"]
+    assert _TEST_ENTITY_TYPE in asff[0]["Id"]
 
 
 def test_convert_findings_to_asff_excludes_code_context() -> None:
@@ -839,20 +841,21 @@ def test_convert_findings_to_asff_fields_are_enumerated_types_and_counts() -> No
 
 
 def test_convert_findings_to_asff_excludes_full_value_hash() -> None:
-    """ASFF Resources.Other must not contain the full value_hash.
+    """ASFF payload must not contain value_hash or any truncated derivative.
 
-    The full 64-char SHA-256 hash of low-entropy PHI (e.g. SSNs, ~900M values)
-    is reversible via brute-force and must not be sent to an external API.
-    Only the [:16] prefix appears in the ASFF Id field for deduplication.
+    SSNs have ~30 bits of entropy — SHA-256 of any low-entropy PHI is reversible
+    by brute-force over the input space regardless of output length. The ASFF Id
+    uses structural fields (repository + file_path + line_number + entity_type) so
+    zero PHI-derived data leaves this process.
     """
     asff = convert_findings_to_asff(
         _make_violation_result(), _AWS_ACCOUNT_ID, _AWS_REGION, _AWS_REPO
     )
     asff_str = json.dumps(asff)
-    # Full hash must not appear anywhere in the payload
+    # Full hash and any prefix must not appear anywhere in the payload
     assert _TEST_VALUE_HASH not in asff_str
-    # But the [:16] prefix must appear in the Id field for deduplication
-    assert _TEST_VALUE_HASH[:16] in asff[0]["Id"]
+    assert _TEST_VALUE_HASH[:16] not in asff_str
+    assert _TEST_VALUE_HASH[:8] not in asff_str
 
 
 def test_convert_findings_to_asff_empty_when_clean() -> None:

@@ -57,12 +57,14 @@ enforced by ``_verify_sarif_excludes_code_snippets()`` before every upload.
     asserts entity_type, hipaa_category, value_hash, code_context, and
     remediation_hint are all absent from the POST body.
   - ASFF (Security Hub): file_path, line_number, entity_type,
-    hipaa_category.value, confidence (float) — never raw entity value,
-    code_context, or full value_hash. The Id field uses value_hash[:16] (64-bit
-    prefix) for ASFF deduplication only; the full 64-char hash is excluded from
-    all fields because SHA-256 of low-entropy PHI (e.g. SSNs) is reversible via
-    brute force. Verified by ``test_convert_findings_to_asff_excludes_code_context``
-    and ``test_convert_findings_to_asff_fields_are_enumerated_types_and_counts``.
+    hipaa_category.value, confidence (float) — zero PHI-derived data. The ASFF
+    Id field uses repository + file_path + line_number + entity_type (structural
+    fields only). value_hash and all derivatives are excluded because SSNs have
+    ~30 bits of entropy: any SHA-256 output is reversible over the 30-bit input
+    space regardless of output length. Verified by
+    ``test_convert_findings_to_asff_excludes_code_context``,
+    ``test_convert_findings_to_asff_fields_are_enumerated_types_and_counts``, and
+    ``test_convert_findings_to_asff_excludes_full_value_hash``.
   - Bitbucket Code Insights annotations: file_path, line_number,
     hipaa_category.value, severity label, confidence (float) — never raw entity
     value or code_context.
@@ -1211,11 +1213,14 @@ def convert_findings_to_asff(
         severity_score = severity_score_map.get(severity_label, 40)
 
         # PHI-SAFE OUTBOUND FIELDS (ASFF — every field enumerated):
-        #   Id              — repository + file_path (relative) + line_number + value_hash[:16]
-        #                     The 16-char (64-bit) prefix is the minimum for ASFF deduplication.
-        #                     SHA-256 of low-entropy PHI (e.g. SSNs, ~900M values) could be
-        #                     reversed via brute-force; the truncated prefix prevents this while
-        #                     still providing a unique finding identity key.
+        #   Id              — repository + file_path + line_number + entity_type
+        #                     Structural fields only — no PHI-derived data of any kind.
+        #                     value_hash and all truncations/derivatives are excluded because
+        #                     SSNs have ~30 bits of entropy: any SHA-256 output (full or
+        #                     truncated) is reversible by brute-force over the input space,
+        #                     not the hash output space. ASFF deduplication only requires
+        #                     a stable unique key per finding location, which file_path +
+        #                     line_number + entity_type provides without encoding the value.
         #   GeneratorId     — "phi-scan/" + entity_type (pattern name, e.g. "us_ssn")
         #   AwsAccountId    — caller-supplied AWS account ID
         #   Title           — hipaa_category.value (enum label) + file_path + line_number
@@ -1226,14 +1231,12 @@ def convert_findings_to_asff(
         #   Resources.Id    — "file://" + file_path
         #   Resources.Other — line_number, entity_type, hipaa_category.value,
         #                     confidence (float)
-        # Excluded from ALL fields: raw entity value, code_context, full value_hash.
-        # value_hash is intentionally excluded from Resources.Other — the full 64-char
-        # SHA-256 hash of low-entropy PHI could be reversed; only the [:16] prefix used
-        # in Id is sent, which satisfies ASFF deduplication without exposing the full hash.
+        # Excluded from ALL fields: raw entity value, code_context, value_hash and all
+        # derivatives (truncations, prefixes). No PHI-derived data leaves this process.
         asff_finding: dict[str, Any] = {
             "SchemaVersion": "2018-10-08",
             "Id": (
-                f"{repository}/{finding.file_path}/{finding.line_number}/{finding.value_hash[:16]}"
+                f"{repository}/{finding.file_path}/{finding.line_number}/{finding.entity_type}"
             ),
             "ProductArn": product_arn,
             "GeneratorId": f"phi-scan/{finding.entity_type}",
