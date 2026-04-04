@@ -342,8 +342,8 @@ def get_pr_context() -> PRContext:
 
 def _env(name: str) -> str | None:
     """Return the environment variable value, or None if unset or empty."""
-    value = os.environ.get(name, "").strip()
-    return value if value else None
+    env_value = os.environ.get(name, "").strip()
+    return env_value if env_value else None
 
 
 def _build_github_context() -> PRContext:
@@ -1275,16 +1275,16 @@ def import_findings_to_security_hub(
     findings_json = _json.dumps({"Findings": asff_findings})
 
     try:
-        result = subprocess.run(
+        aws_cli_result = subprocess.run(
             ["aws", "securityhub", "batch-import-findings", "--cli-input-json", findings_json],
             capture_output=True,
             text=True,
             check=False,
         )
-        if result.returncode != 0:
+        if aws_cli_result.returncode != 0:
             raise CIIntegrationError(
-                f"AWS Security Hub import failed (exit {result.returncode}): "
-                f"{result.stderr.strip()[:_MAX_ERROR_RESPONSE_LOG_LENGTH]}"
+                f"AWS Security Hub import failed (exit {aws_cli_result.returncode}): "
+                f"{aws_cli_result.stderr.strip()[:_MAX_ERROR_RESPONSE_LOG_LENGTH]}"
             )
     except FileNotFoundError as not_found_error:
         raise CIIntegrationError(
@@ -1396,7 +1396,7 @@ def _post_github_pr_comment(comment_body: str, pr_context: PRContext) -> None:
         env["GH_REPO"] = pr_context.repository
 
     try:
-        result = subprocess.run(
+        gh_result = subprocess.run(
             [
                 "gh",
                 "pr",
@@ -1411,19 +1411,19 @@ def _post_github_pr_comment(comment_body: str, pr_context: PRContext) -> None:
             env=env,
             check=False,
         )
-        if result.returncode != 0:
+        if gh_result.returncode != 0:
             # --edit-last fails when there is no existing comment — fall back to create
-            result = subprocess.run(
+            gh_result = subprocess.run(
                 ["gh", "pr", "comment", str(pr_number), "--body", comment_body],
                 capture_output=True,
                 text=True,
                 env=env,
                 check=False,
             )
-        if result.returncode != 0:
+        if gh_result.returncode != 0:
             raise CIIntegrationError(
-                f"gh pr comment failed (exit {result.returncode}): "
-                f"{result.stderr.strip()[:_MAX_ERROR_RESPONSE_LOG_LENGTH]}"
+                f"gh pr comment failed (exit {gh_result.returncode}): "
+                f"{gh_result.stderr.strip()[:_MAX_ERROR_RESPONSE_LOG_LENGTH]}"
             )
     except FileNotFoundError as not_found_error:
         raise CIIntegrationError(
