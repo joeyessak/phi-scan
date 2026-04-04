@@ -436,6 +436,58 @@ def test_set_azure_pr_status_skips_when_no_token(
     assert call_count == 0
 
 
+def test_set_azure_build_tag_http_error_excludes_response_body(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Azure build tag HTTP error message never includes the response body.
+
+    API error responses could echo back request content.  This sentinel test
+    machine-verifies the module docstring contract for the Azure platform.
+    """
+    monkeypatch.setenv("SYSTEM_ACCESSTOKEN", "azure_token_abc")
+    sentinel_body = "SENTINEL_AZURE_BUILD_TAG_RESPONSE_BODY_MUST_NOT_APPEAR"
+
+    def fake_put(url: str, **kwargs: object) -> MagicMock:
+        mock_response = MagicMock()
+        mock_response.status_code = 403
+        mock_response.reason_phrase = "Forbidden"
+        mock_response.text = sentinel_body
+        mock_response.raise_for_status.side_effect = httpx.HTTPStatusError(
+            "403", request=MagicMock(), response=mock_response
+        )
+        return mock_response
+
+    with patch("httpx.put", side_effect=fake_put):
+        with pytest.raises(CIIntegrationError) as exc_info:
+            set_azure_build_tag(_make_violation_result(), _azure_context())
+
+    assert sentinel_body not in str(exc_info.value)
+
+
+def test_set_azure_pr_status_http_error_excludes_response_body(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Azure PR status HTTP error message never includes the response body."""
+    monkeypatch.setenv("SYSTEM_ACCESSTOKEN", "azure_token_abc")
+    sentinel_body = "SENTINEL_AZURE_PR_STATUS_RESPONSE_BODY_MUST_NOT_APPEAR"
+
+    def fake_post(url: str, **kwargs: object) -> MagicMock:
+        mock_response = MagicMock()
+        mock_response.status_code = 422
+        mock_response.reason_phrase = "Unprocessable Entity"
+        mock_response.text = sentinel_body
+        mock_response.raise_for_status.side_effect = httpx.HTTPStatusError(
+            "422", request=MagicMock(), response=mock_response
+        )
+        return mock_response
+
+    with patch("httpx.post", side_effect=fake_post):
+        with pytest.raises(CIIntegrationError) as exc_info:
+            set_azure_pr_status(_make_violation_result(), _azure_context())
+
+    assert sentinel_body not in str(exc_info.value)
+
+
 # ---------------------------------------------------------------------------
 # 6C.18 — Azure Boards work-item creation
 # ---------------------------------------------------------------------------
@@ -655,6 +707,30 @@ def test_post_bitbucket_code_insights_skips_when_no_token(
         post_bitbucket_code_insights(_make_clean_result(), _bitbucket_context())
 
     assert call_count == 0
+
+
+def test_post_bitbucket_code_insights_http_error_excludes_response_body(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Bitbucket Code Insights HTTP error message never includes the response body."""
+    monkeypatch.setenv("BITBUCKET_TOKEN", "bb_testtoken")
+    sentinel_body = "SENTINEL_BITBUCKET_INSIGHTS_RESPONSE_BODY_MUST_NOT_APPEAR"
+
+    def fake_put(url: str, **kwargs: object) -> MagicMock:
+        mock_response = MagicMock()
+        mock_response.status_code = 401
+        mock_response.reason_phrase = "Unauthorized"
+        mock_response.text = sentinel_body
+        mock_response.raise_for_status.side_effect = httpx.HTTPStatusError(
+            "401", request=MagicMock(), response=mock_response
+        )
+        return mock_response
+
+    with patch("httpx.put", side_effect=fake_put):
+        with pytest.raises(CIIntegrationError) as exc_info:
+            post_bitbucket_code_insights(_make_violation_result(), _bitbucket_context())
+
+    assert sentinel_body not in str(exc_info.value)
 
 
 # ---------------------------------------------------------------------------
