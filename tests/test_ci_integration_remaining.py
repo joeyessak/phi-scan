@@ -531,9 +531,14 @@ def test_create_azure_boards_work_item_payload_excludes_phi_fields(
     assert "1" in payload_str  # count of HIGH findings
     assert _AZURE_PR_ID in payload_str
 
-    # Must NOT contain individual finding fields
-    assert _TEST_CODE_CONTEXT not in payload_str
-    assert str(_TEST_FILE_PATH) not in payload_str
+    # Must NOT contain any per-finding ScanFinding fields — exhaustive check
+    # covering every field the reviewer flagged as a potential indirect PHI leak.
+    assert _TEST_CODE_CONTEXT not in payload_str  # raw (redacted) source line
+    assert str(_TEST_FILE_PATH) not in payload_str  # file path
+    assert _TEST_ENTITY_TYPE not in payload_str  # entity_type (pattern name)
+    assert PhiCategory.SSN.value not in payload_str  # hipaa_category enum label
+    assert _TEST_VALUE_HASH not in payload_str  # SHA-256 of raw value
+    assert _TEST_REMEDIATION_HINT not in payload_str  # remediation guidance text
 
 
 # ---------------------------------------------------------------------------
