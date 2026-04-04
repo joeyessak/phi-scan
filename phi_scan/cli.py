@@ -1569,9 +1569,7 @@ def _call_ci_integration(
     except CIIntegrationError as integration_error:
         _logger.warning("CI integration (%s) failed: %s", label, integration_error)
         if is_rich_mode:
-            get_console().print(
-                f"[yellow]Warning:[/yellow] {label} failed — {integration_error}"
-            )
+            get_console().print(f"[yellow]Warning:[/yellow] {label} failed — {integration_error}")
 
 
 def _upload_sarif_from_report_path(

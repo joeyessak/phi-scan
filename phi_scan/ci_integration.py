@@ -187,8 +187,7 @@ _BITBUCKET_REPORTS_PATH: str = (
     "/repositories/{workspace}/{repo_slug}/commit/{commit}/reports/{report_id}"
 )
 _BITBUCKET_ANNOTATIONS_PATH: str = (
-    "/repositories/{workspace}/{repo_slug}/commit/{commit}"
-    "/reports/{report_id}/annotations"
+    "/repositories/{workspace}/{repo_slug}/commit/{commit}/reports/{report_id}/annotations"
 )
 _BITBUCKET_REPORT_ID: str = "phi-scan"
 _BITBUCKET_ANNOTATION_SEVERITY_MAP: dict[str, str] = {
@@ -698,8 +697,7 @@ def post_bitbucket_code_insights(scan_result: ScanResult, pr_context: PRContext)
         response.raise_for_status()
     except httpx.HTTPStatusError as status_error:
         raise CIIntegrationError(
-            f"Bitbucket Code Insights report failed "
-            f"(HTTP {status_error.response.status_code})"
+            f"Bitbucket Code Insights report failed (HTTP {status_error.response.status_code})"
         ) from status_error
     except httpx.RequestError as request_error:
         raise CIIntegrationError(
@@ -743,8 +741,7 @@ def post_bitbucket_code_insights(scan_result: ScanResult, pr_context: PRContext)
         response.raise_for_status()
     except httpx.HTTPStatusError as status_error:
         raise CIIntegrationError(
-            f"Bitbucket Code Insights annotations failed "
-            f"(HTTP {status_error.response.status_code})"
+            f"Bitbucket Code Insights annotations failed (HTTP {status_error.response.status_code})"
         ) from status_error
     except httpx.RequestError as request_error:
         raise CIIntegrationError(
@@ -911,9 +908,7 @@ def create_azure_boards_work_item(scan_result: ScanResult, pr_context: PRContext
         _LOG.debug("Azure Boards: AZURE_BOARDS_INTEGRATION not enabled — skipping")
         return
 
-    high_findings = [
-        f for f in scan_result.findings if f.severity.value.lower() == "high"
-    ]
+    high_findings = [f for f in scan_result.findings if f.severity.value.lower() == "high"]
     if not high_findings:
         _LOG.debug("Azure Boards: no HIGH severity findings — skipping work item")
         return
@@ -1023,8 +1018,7 @@ def convert_findings_to_asff(
         asff_finding: dict[str, Any] = {
             "SchemaVersion": "2018-10-08",
             "Id": (
-                f"{repository}/{finding.file_path}/{finding.line_number}"
-                f"/{finding.value_hash[:16]}"
+                f"{repository}/{finding.file_path}/{finding.line_number}/{finding.value_hash[:16]}"
             ),
             "ProductArn": product_arn,
             "GeneratorId": f"phi-scan/{finding.entity_type}",
