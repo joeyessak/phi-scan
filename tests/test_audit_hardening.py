@@ -605,3 +605,100 @@ def test_open_database_rejects_symlink(tmp_path: Path) -> None:
     symlink_path.symlink_to(real_db)
     with pytest.raises(AuditLogError):
         create_audit_schema(symlink_path)
+
+
+# ---------------------------------------------------------------------------
+# query_recent_scans filter tests (5C.5)
+# ---------------------------------------------------------------------------
+
+
+def test_query_recent_scans_violations_only_excludes_clean_rows(tmp_path: Path) -> None:
+    """violations_only=True returns only rows where is_clean=0."""
+    db_path = tmp_path / "audit.db"
+    key_path = generate_audit_key(db_path)
+    _ = key_path
+    create_audit_schema(db_path)
+    insert_scan_event(db_path, _make_clean_result())
+    insert_scan_event(db_path, _make_dirty_result())
+
+    rows = query_recent_scans(db_path, _RETENTION_WITHIN_WINDOW_DAYS, violations_only=True)
+
+    assert all(row["is_clean"] == 0 for row in rows)
+    assert len(rows) == 1
+
+
+def test_query_recent_scans_violations_only_false_returns_all_rows(tmp_path: Path) -> None:
+    """violations_only=False (default) returns both clean and dirty rows."""
+    db_path = tmp_path / "audit.db"
+    key_path = generate_audit_key(db_path)
+    _ = key_path
+    create_audit_schema(db_path)
+    insert_scan_event(db_path, _make_clean_result())
+    insert_scan_event(db_path, _make_dirty_result())
+
+    rows = query_recent_scans(db_path, _RETENTION_WITHIN_WINDOW_DAYS, violations_only=False)
+
+    assert len(rows) == 2
+
+
+def test_query_recent_scans_repository_hash_filters_to_matching_repo(tmp_path: Path) -> None:
+    """repository_hash filter returns only rows whose repository_hash column matches."""
+    import hashlib
+
+    db_path = tmp_path / "audit.db"
+    key_path = generate_audit_key(db_path)
+    _ = key_path
+    create_audit_schema(db_path)
+    # Insert two rows — both will carry the same repository_hash (current working dir hash),
+    # so we verify that filtering by that hash returns them and filtering by a different
+    # hash returns nothing.
+    insert_scan_event(db_path, _make_clean_result())
+    insert_scan_event(db_path, _make_clean_result())
+
+    all_rows = query_recent_scans(db_path, _RETENTION_WITHIN_WINDOW_DAYS)
+    assert len(all_rows) == 2
+
+    stored_repo_hash = all_rows[0]["repository_hash"]
+    matching_rows = query_recent_scans(
+        db_path, _RETENTION_WITHIN_WINDOW_DAYS, repository_hash=stored_repo_hash
+    )
+    assert len(matching_rows) == 2
+
+    nonexistent_hash = hashlib.sha256(b"repo_that_does_not_exist").hexdigest()
+    no_rows = query_recent_scans(
+        db_path, _RETENTION_WITHIN_WINDOW_DAYS, repository_hash=nonexistent_hash
+    )
+    assert len(no_rows) == 0
+
+
+def test_query_recent_scans_combined_filters_narrow_results(tmp_path: Path) -> None:
+    """repository_hash and violations_only can be combined to narrow results."""
+    import hashlib
+
+    db_path = tmp_path / "audit.db"
+    key_path = generate_audit_key(db_path)
+    _ = key_path
+    create_audit_schema(db_path)
+    insert_scan_event(db_path, _make_clean_result())
+    insert_scan_event(db_path, _make_dirty_result())
+
+    all_rows = query_recent_scans(db_path, _RETENTION_WITHIN_WINDOW_DAYS)
+    stored_repo_hash = all_rows[0]["repository_hash"]
+
+    combined_rows = query_recent_scans(
+        db_path,
+        _RETENTION_WITHIN_WINDOW_DAYS,
+        repository_hash=stored_repo_hash,
+        violations_only=True,
+    )
+    assert len(combined_rows) == 1
+    assert combined_rows[0]["is_clean"] == 0
+
+    nonexistent_hash = hashlib.sha256(b"no_such_repo").hexdigest()
+    empty_rows = query_recent_scans(
+        db_path,
+        _RETENTION_WITHIN_WINDOW_DAYS,
+        repository_hash=nonexistent_hash,
+        violations_only=True,
+    )
+    assert len(empty_rows) == 0
