@@ -122,7 +122,7 @@ pipeline {
                             def high   = scanResult.severity_counts?.HIGH   ?: 0
                             def medium = scanResult.severity_counts?.MEDIUM ?: 0
                             def low    = scanResult.severity_counts?.LOW    ?: 0
-                            buildDescription = "PhiScan: ${scanResult.findings} findings " +
+                            buildDescription = "PhiScan: ${scanResult.findings?.size()} findings " +
                                               "(${high} HIGH, ${medium} MED, ${low} LOW)"
                         }
                     } catch (Exception jsonException) {

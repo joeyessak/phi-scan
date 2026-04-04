@@ -130,6 +130,7 @@ commands:
               fi
             fi
 
+            set +e
             phi-scan scan "<< parameters.path >>" \
               $DIFF_FLAG \
               $SEVERITY_FLAG \
@@ -137,6 +138,8 @@ commands:
               --output json   --report-path "<< parameters.output_dir >>/phi-scan.json"  \
               --output junit  --report-path "<< parameters.output_dir >>/phi-scan-junit.xml" \
               $COMMENT_FLAGS
+            echo $? > "<< parameters.output_dir >>/phi-scan-exit-code"
+            set -e
 
   store_results:
     description: "Store phi-scan artifacts and JUnit test results"
@@ -212,17 +215,14 @@ jobs:
             - run:
                 name: Fail on violations
                 command: |
-                  python3 -c "
-                  import json, sys
-                  _KEY_IS_CLEAN = 'is_clean'
-                  _KEY_FINDINGS = 'findings'
-                  try:
-                      phi_scan_report = json.load(open('<< parameters.output_dir >>/phi-scan.json'))
-                      if not phi_scan_report.get(_KEY_IS_CLEAN, True):
-                          print(f'phi-scan: {len(phi_scan_report.get(_KEY_FINDINGS, []))} PHI/PII violation(s) found.', file=sys.stderr)
-                          sys.exit(1)
-                      print('phi-scan: no violations found.')
-                  except FileNotFoundError:
-                      print('phi-scan: results not found — scan may have failed.', file=sys.stderr)
-                      sys.exit(1)
-                  "
+                  exit_code_file="<< parameters.output_dir >>/phi-scan-exit-code"
+                  if [ ! -f "$exit_code_file" ]; then
+                    echo "phi-scan: exit code file not found — scan may have failed." >&2
+                    exit 1
+                  fi
+                  phi_scan_exit_code=$(cat "$exit_code_file")
+                  if [ "$phi_scan_exit_code" -ne 0 ]; then
+                    echo "phi-scan: PHI/PII violations detected (exit code ${phi_scan_exit_code})." >&2
+                    exit "$phi_scan_exit_code"
+                  fi
+                  echo "phi-scan: no violations found."

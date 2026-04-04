@@ -30,6 +30,7 @@ from __future__ import annotations
 import base64
 import enum
 import gzip
+import json
 import logging
 import os
 import subprocess
@@ -151,7 +152,7 @@ _MAX_COMMENT_LENGTH: int = 60_000
 _MAX_ERROR_RESPONSE_LOG_LENGTH: int = 200
 _DEFAULT_GIT_REF: str = "refs/heads/main"
 _COMMENT_HEADER_SPLIT_COUNT: int = 2
-_MINIMUM_COMMENT_LINES_FOR_BASELINE_INSERT: int = 2
+_MINIMUM_COMMENT_LINE_COUNT_FOR_HEADER_SPLIT: int = 2
 
 # GitHub Code Scanning SARIF upload API
 _GITHUB_API_SARIF_UPLOAD_PATH: str = "/repos/{repository}/code-scanning/sarifs"
@@ -181,7 +182,7 @@ _AZURE_WORKITEM_TITLE_FORMAT: str = (
 _AWS_SECURITY_HUB_PRODUCT_ARN_FORMAT: str = (
     "arn:aws:securityhub:{region}:{account_id}:product/{account_id}/default"
 )
-_ASFF_SEVERITY_MAP: dict[SeverityLevel, str] = {
+_AMAZON_SECURITY_FINDING_FORMAT_SEVERITY_MAP: dict[SeverityLevel, str] = {
     SeverityLevel.HIGH: "HIGH",
     SeverityLevel.MEDIUM: "MEDIUM",
     SeverityLevel.LOW: "LOW",
@@ -542,6 +543,28 @@ def build_comment_body(scan_result: ScanResult) -> str:
     return comment_body
 
 
+def _insert_baseline_context_into_comment(
+    comment_body: str,
+    baseline_line: str,
+) -> str:
+    """Insert a baseline context line after the first header line of a comment body.
+
+    Splits on the first newline to separate the badge/header from the rest of the
+    comment, then reassembles with the baseline line inserted between them.
+
+    Args:
+        comment_body:   Standard comment body produced by ``build_comment_body()``.
+        baseline_line:  Pre-formatted baseline summary line to insert.
+
+    Returns:
+        Comment body with the baseline line inserted after the first header line.
+    """
+    lines = comment_body.split("\n", _COMMENT_HEADER_SPLIT_COUNT)
+    if len(lines) >= _MINIMUM_COMMENT_LINE_COUNT_FOR_HEADER_SPLIT:
+        return "\n".join([lines[0], "", baseline_line, "", *lines[1:]])
+    return baseline_line + "\n\n" + comment_body
+
+
 def build_comment_body_with_baseline(
     scan_result: ScanResult,
     baseline_comparison: BaselineComparison,
@@ -563,17 +586,46 @@ def build_comment_body_with_baseline(
         f"{baseline_comparison.baselined_count} baselined | "
         f"{baseline_comparison.resolved_count} resolved since last scan"
     )
-    standard_body = build_comment_body(scan_result)
-    # Insert baseline context after the badge line
-    lines = standard_body.split("\n", _COMMENT_HEADER_SPLIT_COUNT)
-    if len(lines) >= _MINIMUM_COMMENT_LINES_FOR_BASELINE_INSERT:
-        return "\n".join([lines[0], "", baseline_line, "", *lines[1:]])
-    return baseline_line + "\n\n" + standard_body
+    return _insert_baseline_context_into_comment(build_comment_body(scan_result), baseline_line)
 
 
 # ---------------------------------------------------------------------------
 # Public API — upload SARIF to GitHub Code Scanning (6C.5)
 # ---------------------------------------------------------------------------
+
+
+def _assert_sarif_contains_no_code_snippets(sarif_content: str) -> None:
+    """Assert the SARIF output contains no code snippets or context regions.
+
+    This is a hard PHI-safety guard at the network boundary. ``format_sarif()``
+    is designed to omit code snippets, but this function verifies that guarantee
+    has not been violated — for example, by a future change to the formatter that
+    adds richer context. If a snippet or contextRegion is found, the upload is
+    aborted before any data reaches the GitHub Code Scanning API.
+
+    Args:
+        sarif_content: SARIF 2.1.0 JSON string to validate.
+
+    Raises:
+        CIIntegrationError: When any result location contains a ``snippet`` or
+            ``contextRegion`` field that could expose raw source content.
+    """
+    sarif_doc: dict = json.loads(sarif_content)
+    for sarif_run in sarif_doc.get("runs", []):
+        for sarif_result in sarif_run.get("results", []):
+            for location in sarif_result.get("locations", []):
+                physical_location = location.get("physicalLocation", {})
+                region = physical_location.get("region", {})
+                if "snippet" in region:
+                    raise CIIntegrationError(
+                        "SARIF upload aborted: code snippet detected in SARIF output — "
+                        "uploading would expose raw source content to GitHub Code Scanning API"
+                    )
+                if "contextRegion" in physical_location:
+                    raise CIIntegrationError(
+                        "SARIF upload aborted: contextRegion detected in SARIF output — "
+                        "uploading would expose raw source content to GitHub Code Scanning API"
+                    )
 
 
 def _gzip_compress_sarif(sarif_content: str) -> bytes:
@@ -634,7 +686,9 @@ def upload_sarif_to_github(scan_result: ScanResult, pr_context: PRContext) -> No
         _LOG.warning("GitHub SARIF upload: GITHUB_TOKEN not set — skipping")
         return
 
-    sarif_base64_encoded = _base64_encode_bytes(_gzip_compress_sarif(format_sarif(scan_result)))
+    sarif_content = format_sarif(scan_result)
+    _assert_sarif_contains_no_code_snippets(sarif_content)
+    sarif_base64_encoded = _base64_encode_bytes(_gzip_compress_sarif(sarif_content))
 
     url = _GITHUB_API_BASE_URL + _GITHUB_API_SARIF_UPLOAD_PATH.format(
         repository=repository,
@@ -1051,7 +1105,9 @@ def convert_findings_to_asff(
 
     asff_findings = []
     for finding in scan_result.findings:
-        severity_label = _ASFF_SEVERITY_MAP.get(finding.severity, "MEDIUM")
+        severity_label = _AMAZON_SECURITY_FINDING_FORMAT_SEVERITY_MAP.get(
+            finding.severity, "MEDIUM"
+        )
         # ASFF severity normalised score: HIGH=70, MEDIUM=40, LOW=10, INFO=0
         severity_score_map = {"HIGH": 70, "MEDIUM": 40, "LOW": 10, "INFORMATIONAL": 0}
         severity_score = severity_score_map.get(severity_label, 40)

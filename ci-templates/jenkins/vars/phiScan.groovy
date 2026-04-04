@@ -74,7 +74,7 @@ def call(Map config = [:]) {
             def scanResult = readJSON(file: phi_scan_json_path)
             currentBuild.description = scanResult.is_clean
                 ? 'PhiScan: Clean'
-                : "PhiScan: ${scanResult.findings} findings (${scanResult.severity_counts?.HIGH ?: 0} HIGH)"
+                : "PhiScan: ${scanResult.findings?.size()} findings (${scanResult.severity_counts?.HIGH ?: 0} HIGH)"
         }
     } catch (Exception jsonException) {
         echo "WARNING: phi-scan JSON summary unavailable — ${jsonException.message}"
