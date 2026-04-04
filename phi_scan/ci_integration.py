@@ -185,11 +185,11 @@ _AZURE_TAG_CLEAN: str = "phi-scan:clean"
 _AZURE_TAG_VIOLATIONS: str = "phi-scan:violations-found"
 
 # Azure Boards work-item API
-_AZURE_WORKITEM_TYPE: str = "Task"
-_AZURE_WORKITEMS_PATH: str = (
+_AZURE_WORK_ITEM_TYPE: str = "Task"
+_AZURE_WORK_ITEMS_PATH: str = (
     "{collection_uri}{team_project}/_apis/wit/workitems/${work_item_type}?api-version={api_version}"
 )
-_AZURE_WORKITEM_TITLE_FORMAT: str = (
+_AZURE_WORK_ITEM_TITLE_FORMAT: str = (
     "phi-scan: {count} HIGH severity PHI/PII violation(s) in PR #{pull_request_number}"
 )
 
@@ -199,16 +199,16 @@ _AWS_SECURITY_HUB_PRODUCT_ARN_FORMAT: str = (
 )
 # Explicit ASFF severity label constants — must not derive from enum internals at
 # runtime because the ASFF API contract is independent of SeverityLevel enum values.
-_ASFF_HIGH_SEVERITY_LABEL: str = "HIGH"
-_ASFF_MEDIUM_SEVERITY_LABEL: str = "MEDIUM"
-_ASFF_LOW_SEVERITY_LABEL: str = "LOW"
+_AWS_SECURITY_HUB_HIGH_SEVERITY_LABEL: str = "HIGH"
+_AWS_SECURITY_HUB_MEDIUM_SEVERITY_LABEL: str = "MEDIUM"
+_AWS_SECURITY_HUB_LOW_SEVERITY_LABEL: str = "LOW"
 # ASFF uses "INFORMATIONAL" for INFO-level findings — no SeverityLevel enum equivalent.
-_ASFF_INFO_SEVERITY_LABEL: str = "INFORMATIONAL"
+_AWS_SECURITY_HUB_INFO_SEVERITY_LABEL: str = "INFORMATIONAL"
 _AWS_SECURITY_HUB_SEVERITY_MAP: dict[SeverityLevel, str] = {
-    SeverityLevel.HIGH: _ASFF_HIGH_SEVERITY_LABEL,
-    SeverityLevel.MEDIUM: _ASFF_MEDIUM_SEVERITY_LABEL,
-    SeverityLevel.LOW: _ASFF_LOW_SEVERITY_LABEL,
-    SeverityLevel.INFO: _ASFF_INFO_SEVERITY_LABEL,
+    SeverityLevel.HIGH: _AWS_SECURITY_HUB_HIGH_SEVERITY_LABEL,
+    SeverityLevel.MEDIUM: _AWS_SECURITY_HUB_MEDIUM_SEVERITY_LABEL,
+    SeverityLevel.LOW: _AWS_SECURITY_HUB_LOW_SEVERITY_LABEL,
+    SeverityLevel.INFO: _AWS_SECURITY_HUB_INFO_SEVERITY_LABEL,
 }
 
 # Bitbucket Code Insights API
@@ -225,12 +225,12 @@ _BITBUCKET_HIGH_SEVERITY_LABEL: str = "HIGH"
 _BITBUCKET_MEDIUM_SEVERITY_LABEL: str = "MEDIUM"
 _BITBUCKET_LOW_SEVERITY_LABEL: str = "LOW"
 # Bitbucket Code Insights does not have an INFO severity level — INFO findings map to LOW.
-_BITBUCKET_INFO_MAPPED_SEVERITY: str = _BITBUCKET_LOW_SEVERITY_LABEL
+_BITBUCKET_INFO_SEVERITY_LABEL: str = _BITBUCKET_LOW_SEVERITY_LABEL
 _BITBUCKET_ANNOTATION_SEVERITY_MAP: dict[SeverityLevel, str] = {
     SeverityLevel.HIGH: _BITBUCKET_HIGH_SEVERITY_LABEL,
     SeverityLevel.MEDIUM: _BITBUCKET_MEDIUM_SEVERITY_LABEL,
     SeverityLevel.LOW: _BITBUCKET_LOW_SEVERITY_LABEL,
-    SeverityLevel.INFO: _BITBUCKET_INFO_MAPPED_SEVERITY,
+    SeverityLevel.INFO: _BITBUCKET_INFO_SEVERITY_LABEL,
 }
 
 
@@ -1071,16 +1071,18 @@ def create_azure_boards_work_item(scan_result: ScanResult, pr_context: PRContext
         return
 
     # PHI-SAFE OUTBOUND FIELDS (Azure Boards work item):
-    #   System.Title       — _AZURE_WORKITEM_TITLE_FORMAT: count (int) + pr_id (str) only
+    #   System.Title       — _AZURE_WORK_ITEM_TITLE_FORMAT: count (int) + pr_id (str) only
     #   System.Description — count (int) + pr_id (str) + static text only
     #   System.Tags        — static string literal
     # Excluded from all fields: entity values, value_hash, hipaa_category,
     # entity_type, file_path, line_number, code_context, remediation_hint.
-    title = _AZURE_WORKITEM_TITLE_FORMAT.format(count=len(high_findings), pull_request_number=pr_id)
-    url = _AZURE_WORKITEMS_PATH.format(
+    title = _AZURE_WORK_ITEM_TITLE_FORMAT.format(
+        count=len(high_findings), pull_request_number=pr_id
+    )
+    url = _AZURE_WORK_ITEMS_PATH.format(
         collection_uri=collection_uri,
         team_project=team_project,
-        work_item_type=_AZURE_WORKITEM_TYPE,
+        work_item_type=_AZURE_WORK_ITEM_TYPE,
         api_version=_AZURE_API_VERSION,
     )
     # Azure DevOps work-item PATCH format

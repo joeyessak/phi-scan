@@ -15,6 +15,16 @@
 //   setStatus         — set commit status (default: true on PR builds)
 //   failOnViolation   — fail the build on violations (default: true)
 
+// ---------------------------------------------------------------------------
+// Named constants for phi-scan JSON summary and build description
+// NOTE: PHI_SCAN_REPORT_FILENAME is intentionally duplicated in
+// Jenkinsfile — shared libraries cannot import constants from a
+// Jenkinsfile, so each file maintains its own copy.
+// ---------------------------------------------------------------------------
+def PHI_SCAN_REPORT_FILENAME        = "phi-scan.json"
+def PHI_SCAN_STATUS_CLEAN           = "PhiScan: Clean"
+def PHI_SCAN_STATUS_FINDINGS_FORMAT = "PhiScan: %d findings (%d HIGH)"
+
 def call(Map config = [:]) {
     def path            = config.get('path', '.')
     def outputDir       = config.get('outputDir', 'phi-scan-results')
@@ -71,16 +81,14 @@ def call(Map config = [:]) {
 
     // 6C.14: Build description for at-a-glance status in build history
     try {
-        // NOTE: phiScanReportFilename is intentionally duplicated in
-        // Jenkinsfile — shared libraries cannot import constants from a
-        // Jenkinsfile, so each file maintains its own copy.
-        def phiScanReportFilename = "phi-scan.json"
-        def phiScanJsonPath = "${outputDir}/${phiScanReportFilename}"
+        def phiScanJsonPath = "${outputDir}/${PHI_SCAN_REPORT_FILENAME}"
         if (fileExists(phiScanJsonPath)) {
             def scanResult = readJSON(file: phiScanJsonPath)
             currentBuild.description = scanResult.is_clean
-                ? 'PhiScan: Clean'
-                : "PhiScan: ${scanResult.findings?.size()} findings (${scanResult.severity_counts?.HIGH ?: 0} HIGH)"
+                ? PHI_SCAN_STATUS_CLEAN
+                : String.format(PHI_SCAN_STATUS_FINDINGS_FORMAT,
+                    scanResult.findings?.size(),
+                    scanResult.severity_counts?.HIGH ?: 0)
         }
     } catch (java.io.IOException | groovy.json.JsonException jsonException) {
         // Narrowed catch: only IO failures (readJSON file access) and JSON parse errors
