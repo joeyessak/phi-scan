@@ -54,7 +54,12 @@ from phi_scan.constants import (
     AUDIT_RETENTION_DAYS,
     AUDIT_SCHEMA_VERSION,
 )
-from phi_scan.exceptions import AuditKeyMissingError, AuditLogError, SchemaMigrationError
+from phi_scan.exceptions import (
+    AuditKeyMissingError,
+    AuditLogError,
+    PhiDetectionError,
+    SchemaMigrationError,
+)
 from phi_scan.logging_config import get_logger
 from phi_scan.models import ScanFinding, ScanResult
 
@@ -136,8 +141,8 @@ _KEY_FILE_EXISTS_ERROR: str = (
     "Audit key already exists at {redacted_key_path} — "
     "refusing to overwrite. Delete the file manually to regenerate."
 )
-_KEY_WRITE_ERROR: str = "Cannot write audit key to {redacted_key_path}: {io_error}"
-_KEY_READ_ERROR: str = "Cannot read audit key from {redacted_key_path}: {io_error}"
+_KEY_WRITE_ERROR: str = "Cannot write audit key to {redacted_key_path}: {io_strerror}"
+_KEY_READ_ERROR: str = "Cannot read audit key from {redacted_key_path}: {io_strerror}"
 
 # ---------------------------------------------------------------------------
 # Implementation constants
@@ -189,6 +194,18 @@ _PIPELINE_JENKINS_NAME: str = "jenkins"
 _PIPELINE_CIRCLECI_NAME: str = "circleci"
 _PIPELINE_BITBUCKET_NAME: str = "bitbucket-pipelines"
 _PIPELINE_LOCAL: str = "local"
+
+# ScanFinding field names that carry raw or PHI-adjacent values and must NEVER
+# appear as JSON keys in a serialised findings record stored to the audit DB.
+# _assert_no_raw_phi_fields() checks the output of _serialize_findings() against
+# this set before encryption as a defence-in-depth guard.
+#   "file_path"        — raw path; must be stored only as file_path_hash
+#   "code_context"     — source line (even though [REDACTED] replaces the match,
+#                        the surrounding tokens may still be PHI-adjacent)
+#   "remediation_hint" — free-text hint that may embed partial PHI
+_FORBIDDEN_AUDIT_FIELD_NAMES: frozenset[str] = frozenset(
+    {"file_path", "code_context", "remediation_hint"}
+)
 
 # AES-256-GCM constants.
 _AES_GCM_KEY_BYTES: int = 32  # 256-bit key
@@ -520,7 +537,7 @@ def migrate_schema(database_path: Path, from_version: int, to_version: int) -> N
         connection.close()
 
 
-def _verify_chain_rows(audit_rows: list[Any], audit_key: bytes) -> ChainVerifyResult:
+def _verify_chain_rows(audit_rows: list[Any], audit_key: bytearray) -> ChainVerifyResult:
     """Walk audit_rows in insertion order and verify each HMAC chain hash.
 
     Called by verify_audit_chain after the key and rows have been loaded.
@@ -588,16 +605,18 @@ def verify_audit_chain(database_path: Path) -> ChainVerifyResult:
         # False so callers checking only that field cannot conclude the chain is
         # clean when it was never checked.
         return ChainVerifyResult(is_intact=False, key_present=False)
-    connection = _open_database(database_path)
     try:
-        cursor = connection.execute(_SELECT_ALL_ROWS_ORDERED_SQL)
-        audit_rows = cursor.fetchall()
-    except sqlite3.Error as db_error:
-        raise AuditLogError(_DATABASE_ERROR.format(detail=db_error)) from db_error
+        connection = _open_database(database_path)
+        try:
+            cursor = connection.execute(_SELECT_ALL_ROWS_ORDERED_SQL)
+            audit_rows = cursor.fetchall()
+        except sqlite3.Error as db_error:
+            raise AuditLogError(_DATABASE_ERROR.format(detail=db_error)) from db_error
+        finally:
+            connection.close()
+        return _verify_chain_rows(audit_rows, audit_key)
     finally:
-        connection.close()
-
-    return _verify_chain_rows(audit_rows, audit_key)
+        audit_key[:] = bytes(len(audit_key))
 
 
 def purge_expired_audit_rows(database_path: Path) -> int:
@@ -668,7 +687,10 @@ def generate_audit_key(database_path: Path) -> Path:
                 _KEY_FILE_EXISTS_ERROR.format(redacted_key_path=_redact_key_path(key_path))
             ) from io_error
         raise AuditLogError(
-            _KEY_WRITE_ERROR.format(redacted_key_path=_redact_key_path(key_path), io_error=io_error)
+            _KEY_WRITE_ERROR.format(
+                redacted_key_path=_redact_key_path(key_path),
+                io_strerror=io_error.strerror or f"errno {io_error.errno}",
+            )
         ) from io_error
     return key_path
 
@@ -1043,7 +1065,33 @@ def _redact_key_path(key_path: Path) -> str:
     return f"<redacted>/{key_path.name}"
 
 
-def _load_audit_key(key_dir: Path) -> bytes | None:
+def _assert_no_raw_phi_fields(findings_json: str) -> None:
+    """Raise PhiDetectionError if findings_json contains a known PHI field name.
+
+    Defence-in-depth guard applied in _serialize_and_encrypt before encryption.
+    If _serialize_findings ever develops a regression that includes a raw-value
+    field (e.g. ``file_path``, ``code_context``, ``remediation_hint``), this
+    guard catches the violation at the encryption boundary rather than silently
+    persisting a PHI-adjacent field name in the audit database.
+
+    Args:
+        findings_json: The JSON string produced by _serialize_findings().
+
+    Raises:
+        PhiDetectionError: If any key in _FORBIDDEN_AUDIT_FIELD_NAMES appears
+            as a JSON key (``"field_name"``) in findings_json. This is a
+            serialisation bug, not a user error — callers should re-raise.
+    """
+    for field_name in _FORBIDDEN_AUDIT_FIELD_NAMES:
+        if f'"{field_name}"' in findings_json:
+            raise PhiDetectionError(
+                f"_serialize_findings produced findings_json containing the raw PHI "
+                f"field '{field_name}' — refusing to encrypt. This is a serialisation "
+                f"bug; file a security issue."
+            )
+
+
+def _load_audit_key(key_dir: Path) -> bytearray | None:
     """Load the AES-256-GCM audit key from the key file.
 
     Returns None if the key file does not exist (encryption not configured).
@@ -1057,7 +1105,14 @@ def _load_audit_key(key_dir: Path) -> bytes | None:
         key_dir: Directory that contains the audit.key file.
 
     Returns:
-        32-byte key bytes, or None if the key file is absent.
+        32-byte key as a ``bytearray`` (mutable so callers can zero it after
+        use), or None if the key file is absent.
+
+        Known limitation: Python's garbage collector may retain copies of the
+        bytearray's backing memory even after ``key[:] = bytes(len(key))``
+        zeroes the live object. This is a language-level constraint shared by
+        all Python cryptographic code. Callers must still zero promptly to
+        minimise the window during which the key is accessible.
 
     Raises:
         AuditLogError: If the key file exists but cannot be read.
@@ -1066,14 +1121,17 @@ def _load_audit_key(key_dir: Path) -> bytes | None:
     if not key_path.exists():
         return None
     try:
-        return key_path.read_bytes()
+        return bytearray(key_path.read_bytes())
     except OSError as io_error:
         raise AuditLogError(
-            _KEY_READ_ERROR.format(redacted_key_path=_redact_key_path(key_path), io_error=io_error)
+            _KEY_READ_ERROR.format(
+                redacted_key_path=_redact_key_path(key_path),
+                io_strerror=io_error.strerror or f"errno {io_error.errno}",
+            )
         ) from io_error
 
 
-def _encrypt_findings_json(plaintext: str, key: bytes) -> str:
+def _encrypt_findings_json(plaintext: str, key: bytearray) -> str:
     """Encrypt a findings JSON string with AES-256-GCM.
 
     The output is: AUDIT_ENCRYPTION_PREFIX + base64(nonce + ciphertext + tag).
@@ -1154,7 +1212,10 @@ def _serialize_and_encrypt(findings_json: str, key_dir: Path) -> str:
     Raises:
         AuditKeyMissingError: If the audit key file does not exist.
         AuditLogError: If the key exists but cannot be read.
+        PhiDetectionError: If findings_json contains a forbidden raw PHI field
+            name — indicates a serialisation bug in _serialize_findings.
     """
+    _assert_no_raw_phi_fields(findings_json)
     key = _load_audit_key(key_dir)
     if key is None:
         raise AuditKeyMissingError(
@@ -1162,7 +1223,10 @@ def _serialize_and_encrypt(findings_json: str, key_dir: Path) -> str:
                 redacted_key_path=_redact_key_path(_audit_key_path(key_dir))
             )
         )
-    return _encrypt_findings_json(findings_json, key)
+    try:
+        return _encrypt_findings_json(findings_json, key)
+    finally:
+        key[:] = bytes(len(key))
 
 
 # ---------------------------------------------------------------------------
@@ -1170,7 +1234,7 @@ def _serialize_and_encrypt(findings_json: str, key_dir: Path) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _hmac_sha256(key: bytes, message: str) -> str:
+def _hmac_sha256(key: bytearray, message: str) -> str:
     """Return HMAC-SHA256(key, message) as a lowercase hex string.
 
     Args:
@@ -1291,27 +1355,30 @@ def _compute_row_chain_hash(
             _CHAIN_KEY_MISSING_WARNING, _redact_key_path(_audit_key_path(database_path.parent))
         )
         return ""
-    prev_hash = _get_previous_chain_hash(connection, new_row_id)
-    # Reconstruct a row dict from the tuple for _row_content_for_hashing.
-    # Column order must match _INSERT_SCAN_EVENT_SQL (excluding id which is auto).
-    row_fields: dict[str, Any] = {
-        "id": new_row_id,
-        "timestamp": row_tuple[0],
-        "scanner_version": row_tuple[1],
-        "repository_hash": row_tuple[2],
-        "branch_hash": row_tuple[3],
-        "files_scanned": row_tuple[4],
-        "findings_count": row_tuple[5],
-        "findings_json": row_tuple[6],
-        "is_clean": row_tuple[7],
-        "scan_duration": row_tuple[8],
-        "event_type": row_tuple[9],
-        "committer_name_hash": row_tuple[10],
-        "committer_email_hash": row_tuple[11],
-        "pr_number": row_tuple[12],
-        "pipeline": row_tuple[13],
-        "action_taken": row_tuple[14],
-        "notifications_sent": row_tuple[15],
-    }
-    row_content_string = _row_content_for_hashing(row_fields)
-    return _hmac_sha256(key, prev_hash + row_content_string)
+    try:
+        prev_hash = _get_previous_chain_hash(connection, new_row_id)
+        # Reconstruct a row dict from the tuple for _row_content_for_hashing.
+        # Column order must match _INSERT_SCAN_EVENT_SQL (excluding id which is auto).
+        row_fields: dict[str, Any] = {
+            "id": new_row_id,
+            "timestamp": row_tuple[0],
+            "scanner_version": row_tuple[1],
+            "repository_hash": row_tuple[2],
+            "branch_hash": row_tuple[3],
+            "files_scanned": row_tuple[4],
+            "findings_count": row_tuple[5],
+            "findings_json": row_tuple[6],
+            "is_clean": row_tuple[7],
+            "scan_duration": row_tuple[8],
+            "event_type": row_tuple[9],
+            "committer_name_hash": row_tuple[10],
+            "committer_email_hash": row_tuple[11],
+            "pr_number": row_tuple[12],
+            "pipeline": row_tuple[13],
+            "action_taken": row_tuple[14],
+            "notifications_sent": row_tuple[15],
+        }
+        row_content_string = _row_content_for_hashing(row_fields)
+        return _hmac_sha256(key, prev_hash + row_content_string)
+    finally:
+        key[:] = bytes(len(key))
