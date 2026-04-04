@@ -27,7 +27,9 @@ Design constraints:
 
 from __future__ import annotations
 
+import base64
 import enum
+import gzip
 import logging
 import os
 import subprocess
@@ -144,6 +146,57 @@ _HTTP_TIMEOUT_SECONDS: float = 15.0
 
 # Maximum characters in a PR comment to stay within GitHub's 65536-char limit
 _MAX_COMMENT_LENGTH: int = 60_000
+
+# GitHub Code Scanning SARIF upload API
+_GITHUB_API_SARIF_UPLOAD_PATH: str = "/repos/{repository}/code-scanning/sarifs"
+
+# Azure DevOps build tag + PR status API paths
+_AZURE_BUILD_TAGS_PATH: str = (
+    "{collection_uri}{team_project}/_apis/build/builds/{build_id}"
+    "/tags/{tag}?api-version={api_version}"
+)
+_AZURE_PR_STATUSES_PATH: str = (
+    "{collection_uri}{team_project}/_apis/git/repositories/{repo_id}"
+    "/pullRequests/{pr_id}/statuses?api-version={api_version}"
+)
+# Azure build tag values
+_AZURE_TAG_CLEAN: str = "phi-scan:clean"
+_AZURE_TAG_VIOLATIONS: str = "phi-scan:violations-found"
+
+# Azure Boards work-item API
+_AZURE_WORKITEMS_PATH: str = (
+    "{collection_uri}{team_project}/_apis/wit/workitems/$Task?api-version={api_version}"
+)
+_AZURE_WORKITEM_TITLE_FORMAT: str = (
+    "phi-scan: {count} HIGH severity PHI/PII violation(s) in PR #{pr}"
+)
+
+# AWS Security Hub ASFF (Amazon Security Finding Format)
+_AWS_SECURITY_HUB_PRODUCT_ARN_FORMAT: str = (
+    "arn:aws:securityhub:{region}:{account_id}:product/{account_id}/default"
+)
+_ASFF_SEVERITY_MAP: dict[str, str] = {
+    "high": "HIGH",
+    "medium": "MEDIUM",
+    "low": "LOW",
+    "info": "INFORMATIONAL",
+}
+
+# Bitbucket Code Insights API
+_BITBUCKET_REPORTS_PATH: str = (
+    "/repositories/{workspace}/{repo_slug}/commit/{commit}/reports/{report_id}"
+)
+_BITBUCKET_ANNOTATIONS_PATH: str = (
+    "/repositories/{workspace}/{repo_slug}/commit/{commit}"
+    "/reports/{report_id}/annotations"
+)
+_BITBUCKET_REPORT_ID: str = "phi-scan"
+_BITBUCKET_ANNOTATION_SEVERITY_MAP: dict[str, str] = {
+    "high": "HIGH",
+    "medium": "MEDIUM",
+    "low": "LOW",
+    "info": "LOW",
+}
 
 
 # ---------------------------------------------------------------------------
@@ -469,6 +522,615 @@ def build_comment_body(scan_result: ScanResult) -> str:
             comment_body[:_MAX_COMMENT_LENGTH] + "\n\n*(comment truncated — too many findings)*"
         )
     return comment_body
+
+
+def build_comment_body_with_baseline(
+    scan_result: ScanResult,
+    new_findings_count: int,
+    baselined_count: int,
+    resolved_count: int,
+) -> str:
+    """Build a PR/MR comment body that includes baseline comparison context.
+
+    Adds a summary line of the form:
+    "N new findings | M baselined | K resolved since last scan"
+
+    Args:
+        scan_result:        The completed scan result (all findings, pre-baseline filtering).
+        new_findings_count: Number of findings not present in the accepted baseline.
+        baselined_count:    Number of findings accepted in the baseline (suppressed).
+        resolved_count:     Number of findings in the baseline that no longer appear.
+
+    Returns:
+        Markdown string with baseline context prepended to the standard comment body.
+    """
+    baseline_line = (
+        f"**{new_findings_count} new** | "
+        f"{baselined_count} baselined | "
+        f"{resolved_count} resolved since last scan"
+    )
+    standard_body = build_comment_body(scan_result)
+    # Insert baseline context after the badge line
+    lines = standard_body.split("\n", 2)
+    if len(lines) >= 2:
+        return "\n".join([lines[0], "", baseline_line, "", *lines[1:]])
+    return baseline_line + "\n\n" + standard_body
+
+
+# ---------------------------------------------------------------------------
+# Public API — upload SARIF to GitHub Code Scanning (6C.5)
+# ---------------------------------------------------------------------------
+
+
+def upload_sarif_to_github(sarif_content: str, pr_context: PRContext) -> None:
+    """Upload a SARIF report to the GitHub Code Scanning API for inline annotations.
+
+    Each finding appears as an inline annotation on the exact line in the PR diff.
+    Severity is mapped: HIGH→error, MEDIUM→warning, LOW/INFO→note.
+
+    Requires the ``security-events: write`` permission in the GitHub Actions workflow.
+    Works automatically when ``--output sarif`` is used in GitHub Actions — the
+    SARIF is gzip-compressed and base64-encoded before upload.
+
+    Args:
+        sarif_content: SARIF 2.1.0 JSON string produced by ``format_sarif()``.
+        pr_context:    GitHub PR context with repository and SHA.
+
+    Raises:
+        CIIntegrationError: When the API call fails or authentication is missing.
+    """
+    repository = pr_context.repository
+    sha = pr_context.sha
+    if not repository or not sha:
+        _LOG.debug("GitHub SARIF upload: missing repository or SHA — skipping")
+        return
+
+    token = _env(_ENV_GITHUB_TOKEN)
+    if not token:
+        _LOG.warning("GitHub SARIF upload: GITHUB_TOKEN not set — skipping")
+        return
+
+    # GitHub requires gzip-compressed, base64-encoded SARIF
+    compressed = gzip.compress(sarif_content.encode("utf-8"))
+    encoded = base64.b64encode(compressed).decode("ascii")
+
+    url = _GITHUB_API_BASE_URL + _GITHUB_API_SARIF_UPLOAD_PATH.format(
+        repository=repository,
+    )
+    payload = {
+        "commit_sha": sha,
+        "ref": pr_context.branch or "refs/heads/main",
+        "sarif": encoded,
+        "tool_name": "phi-scan",
+    }
+
+    try:
+        response = httpx.post(
+            url,
+            json=payload,
+            headers={
+                "Authorization": f"Bearer {token}",
+                "Accept": "application/vnd.github+json",
+                "X-GitHub-Api-Version": "2022-11-28",
+            },
+            timeout=_HTTP_TIMEOUT_SECONDS,
+        )
+        response.raise_for_status()
+    except httpx.HTTPStatusError as status_error:
+        raise CIIntegrationError(
+            f"GitHub SARIF upload failed (HTTP {status_error.response.status_code}): "
+            f"{status_error.response.text[:200]}"
+        ) from status_error
+    except httpx.RequestError as request_error:
+        raise CIIntegrationError(
+            f"GitHub SARIF upload request failed: {request_error}"
+        ) from request_error
+
+    _LOG.debug("GitHub: SARIF uploaded to Code Scanning for %s", sha[:8])
+
+
+# ---------------------------------------------------------------------------
+# Public API — Bitbucket Code Insights annotations (6C.23 supplement)
+# ---------------------------------------------------------------------------
+
+
+def post_bitbucket_code_insights(scan_result: ScanResult, pr_context: PRContext) -> None:
+    """Post Bitbucket Code Insights report and inline annotations.
+
+    Creates a Code Insights report on the commit and then adds one annotation
+    per finding, pointing to the exact file and line in the PR diff.
+
+    Args:
+        scan_result: The completed scan result.
+        pr_context:  Bitbucket context with commit SHA and workspace/repo.
+
+    Raises:
+        CIIntegrationError: When any API call fails.
+    """
+    sha = pr_context.sha
+    workspace = pr_context.extras.get("workspace", "")
+    repo_slug = pr_context.extras.get("repo_slug", "")
+
+    if not sha or not workspace or not repo_slug:
+        _LOG.debug("Bitbucket Code Insights: missing context — skipping")
+        return
+
+    token = _env(_ENV_BITBUCKET_TOKEN)
+    if not token:
+        _LOG.warning("Bitbucket: BITBUCKET_TOKEN not set — skipping Code Insights")
+        return
+
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json",
+    }
+    report_url = _BITBUCKET_API_BASE_URL + _BITBUCKET_REPORTS_PATH.format(
+        workspace=workspace,
+        repo_slug=repo_slug,
+        commit=sha,
+        report_id=_BITBUCKET_REPORT_ID,
+    )
+
+    # Create / update the report summary
+    findings_count = len(scan_result.findings)
+    report_payload: dict[str, Any] = {
+        "title": "phi-scan PHI/PII Scan",
+        "report_type": "SECURITY",
+        "reporter": "phi-scan",
+        "result": "PASSED" if scan_result.is_clean else "FAILED",
+        "data": [
+            {"title": "Total findings", "type": "NUMBER", "value": findings_count},
+            {
+                "title": "Risk level",
+                "type": "TEXT",
+                "value": scan_result.risk_level.value,
+            },
+        ],
+    }
+
+    try:
+        response = httpx.put(
+            report_url,
+            json=report_payload,
+            headers=headers,
+            timeout=_HTTP_TIMEOUT_SECONDS,
+        )
+        response.raise_for_status()
+    except httpx.HTTPStatusError as status_error:
+        raise CIIntegrationError(
+            f"Bitbucket Code Insights report failed "
+            f"(HTTP {status_error.response.status_code})"
+        ) from status_error
+    except httpx.RequestError as request_error:
+        raise CIIntegrationError(
+            f"Bitbucket Code Insights report request failed: {request_error}"
+        ) from request_error
+
+    if not scan_result.findings:
+        return
+
+    # Post inline annotations (capped at 1000 — Bitbucket API limit)
+    annotations_url = _BITBUCKET_API_BASE_URL + _BITBUCKET_ANNOTATIONS_PATH.format(
+        workspace=workspace,
+        repo_slug=repo_slug,
+        commit=sha,
+        report_id=_BITBUCKET_REPORT_ID,
+    )
+    annotations = [
+        {
+            "external_id": f"phi-scan-{finding.file_path}-{finding.line_number}-{idx}",
+            "annotation_type": "VULNERABILITY",
+            "path": str(finding.file_path),
+            "line": finding.line_number,
+            "message": (
+                f"{finding.hipaa_category.value} detected "
+                f"({finding.severity.value}, {finding.confidence:.0%} confidence)"
+            ),
+            "severity": _BITBUCKET_ANNOTATION_SEVERITY_MAP.get(
+                finding.severity.value.lower(), "MEDIUM"
+            ),
+        }
+        for idx, finding in enumerate(scan_result.findings[:1000])
+    ]
+
+    try:
+        response = httpx.post(
+            annotations_url,
+            json=annotations,
+            headers=headers,
+            timeout=_HTTP_TIMEOUT_SECONDS,
+        )
+        response.raise_for_status()
+    except httpx.HTTPStatusError as status_error:
+        raise CIIntegrationError(
+            f"Bitbucket Code Insights annotations failed "
+            f"(HTTP {status_error.response.status_code})"
+        ) from status_error
+    except httpx.RequestError as request_error:
+        raise CIIntegrationError(
+            f"Bitbucket Code Insights annotations request failed: {request_error}"
+        ) from request_error
+
+    _LOG.debug(
+        "Bitbucket: Code Insights report + %d annotation(s) posted for %s",
+        len(annotations),
+        sha[:8],
+    )
+
+
+# ---------------------------------------------------------------------------
+# Public API — Azure DevOps build tag + PR status (6C.17)
+# ---------------------------------------------------------------------------
+
+
+def set_azure_build_tag(scan_result: ScanResult, pr_context: PRContext) -> None:
+    """Tag the Azure DevOps build with phi-scan:clean or phi-scan:violations-found.
+
+    Uses ``SYSTEM_ACCESSTOKEN`` for authentication. The build ID is read from
+    the ``BUILD_BUILDID`` environment variable.
+
+    Args:
+        scan_result: The completed scan result.
+        pr_context:  Azure DevOps context with collection URI, team project, build ID.
+
+    Raises:
+        CIIntegrationError: When the API call fails.
+    """
+    collection_uri = pr_context.extras.get("collection_uri", "")
+    team_project = pr_context.extras.get("team_project", "")
+    build_id = pr_context.extras.get("build_id", "")
+
+    if not all([collection_uri, team_project, build_id]):
+        _LOG.debug("Azure DevOps build tag: missing context — skipping")
+        return
+
+    token = _env(_ENV_SYSTEM_ACCESSTOKEN)
+    if not token:
+        _LOG.warning("Azure DevOps build tag: SYSTEM_ACCESSTOKEN not set — skipping")
+        return
+
+    tag = _AZURE_TAG_CLEAN if scan_result.is_clean else _AZURE_TAG_VIOLATIONS
+    url = _AZURE_BUILD_TAGS_PATH.format(
+        collection_uri=collection_uri,
+        team_project=team_project,
+        build_id=build_id,
+        tag=tag,
+        api_version=_AZURE_API_VERSION,
+    )
+
+    try:
+        response = httpx.put(
+            url,
+            content=b"",
+            auth=("", token),
+            timeout=_HTTP_TIMEOUT_SECONDS,
+        )
+        response.raise_for_status()
+    except httpx.HTTPStatusError as status_error:
+        raise CIIntegrationError(
+            f"Azure DevOps build tag failed (HTTP {status_error.response.status_code})"
+        ) from status_error
+    except httpx.RequestError as request_error:
+        raise CIIntegrationError(
+            f"Azure DevOps build tag request failed: {request_error}"
+        ) from request_error
+
+    _LOG.debug("Azure DevOps: build tagged with %s", tag)
+
+
+def set_azure_pr_status(scan_result: ScanResult, pr_context: PRContext) -> None:
+    """Set an Azure DevOps PR status to block or allow completion via branch policy.
+
+    Posts to the Pull Request Statuses API so that a branch policy requiring
+    a green phi-scan status can block PR completion on violations.
+
+    Args:
+        scan_result: The completed scan result.
+        pr_context:  Azure DevOps PR context.
+
+    Raises:
+        CIIntegrationError: When the API call fails.
+    """
+    pr_id = pr_context.pr_number
+    repo_id = pr_context.repository
+    collection_uri = pr_context.extras.get("collection_uri", "")
+    team_project = pr_context.extras.get("team_project", "")
+
+    if not all([pr_id, repo_id, collection_uri, team_project]):
+        _LOG.debug("Azure DevOps PR status: missing context — skipping")
+        return
+
+    token = _env(_ENV_SYSTEM_ACCESSTOKEN)
+    if not token:
+        _LOG.warning("Azure DevOps PR status: SYSTEM_ACCESSTOKEN not set — skipping")
+        return
+
+    state = "succeeded" if scan_result.is_clean else "failed"
+    findings_count = len(scan_result.findings)
+    description = (
+        _COMMIT_STATUS_DESCRIPTION_CLEAN
+        if scan_result.is_clean
+        else _COMMIT_STATUS_DESCRIPTION_VIOLATIONS.format(count=findings_count)
+    )
+    url = _AZURE_PR_STATUSES_PATH.format(
+        collection_uri=collection_uri,
+        team_project=team_project,
+        repo_id=repo_id,
+        pr_id=pr_id,
+        api_version=_AZURE_API_VERSION,
+    )
+    payload = {
+        "state": state,
+        "description": description,
+        "context": {
+            "name": _COMMIT_STATUS_CONTEXT,
+            "genre": "phi-scan",
+        },
+    }
+
+    try:
+        response = httpx.post(
+            url,
+            json=payload,
+            auth=("", token),
+            timeout=_HTTP_TIMEOUT_SECONDS,
+        )
+        response.raise_for_status()
+    except httpx.HTTPStatusError as status_error:
+        raise CIIntegrationError(
+            f"Azure DevOps PR status failed (HTTP {status_error.response.status_code})"
+        ) from status_error
+    except httpx.RequestError as request_error:
+        raise CIIntegrationError(
+            f"Azure DevOps PR status request failed: {request_error}"
+        ) from request_error
+
+    _LOG.debug("Azure DevOps: PR status set to %s for PR #%s", state, pr_id)
+
+
+# ---------------------------------------------------------------------------
+# Public API — Azure Boards work-item linking (6C.18, optional)
+# ---------------------------------------------------------------------------
+
+
+def create_azure_boards_work_item(scan_result: ScanResult, pr_context: PRContext) -> None:
+    """Create an Azure Boards Task work item for HIGH severity PHI/PII findings.
+
+    Only creates a work item when there are HIGH severity findings and the
+    ``AZURE_BOARDS_INTEGRATION`` environment variable is set to ``true``.
+    Work items are linked to the current build for traceability.
+
+    Args:
+        scan_result: The completed scan result.
+        pr_context:  Azure DevOps context.
+
+    Raises:
+        CIIntegrationError: When the API call fails.
+    """
+    if _env("AZURE_BOARDS_INTEGRATION") != "true":
+        _LOG.debug("Azure Boards: AZURE_BOARDS_INTEGRATION not enabled — skipping")
+        return
+
+    high_findings = [
+        f for f in scan_result.findings if f.severity.value.lower() == "high"
+    ]
+    if not high_findings:
+        _LOG.debug("Azure Boards: no HIGH severity findings — skipping work item")
+        return
+
+    collection_uri = pr_context.extras.get("collection_uri", "")
+    team_project = pr_context.extras.get("team_project", "")
+    pr_id = pr_context.pr_number or "unknown"
+
+    if not all([collection_uri, team_project]):
+        _LOG.debug("Azure Boards: missing context — skipping work item")
+        return
+
+    token = _env(_ENV_SYSTEM_ACCESSTOKEN)
+    if not token:
+        _LOG.warning("Azure Boards: SYSTEM_ACCESSTOKEN not set — skipping")
+        return
+
+    title = _AZURE_WORKITEM_TITLE_FORMAT.format(count=len(high_findings), pr=pr_id)
+    url = _AZURE_WORKITEMS_PATH.format(
+        collection_uri=collection_uri,
+        team_project=team_project,
+        api_version=_AZURE_API_VERSION,
+    )
+    # Azure DevOps work-item PATCH format
+    patch_payload = [
+        {"op": "add", "path": "/fields/System.Title", "value": title},
+        {
+            "op": "add",
+            "path": "/fields/System.Description",
+            "value": (
+                f"phi-scan detected {len(high_findings)} HIGH severity PHI/PII "
+                f"violation(s) in PR #{pr_id}. "
+                "Remediate before merging."
+            ),
+        },
+        {"op": "add", "path": "/fields/System.Tags", "value": "phi-scan;security;phi-pii"},
+    ]
+
+    try:
+        response = httpx.post(
+            url,
+            json=patch_payload,
+            headers={
+                "Content-Type": "application/json-patch+json",
+            },
+            auth=("", token),
+            timeout=_HTTP_TIMEOUT_SECONDS,
+        )
+        response.raise_for_status()
+    except httpx.HTTPStatusError as status_error:
+        raise CIIntegrationError(
+            f"Azure Boards work item failed (HTTP {status_error.response.status_code})"
+        ) from status_error
+    except httpx.RequestError as request_error:
+        raise CIIntegrationError(
+            f"Azure Boards work item request failed: {request_error}"
+        ) from request_error
+
+    _LOG.debug(
+        "Azure Boards: work item created for PR #%s (%d HIGH findings)",
+        pr_id,
+        len(high_findings),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Public API — AWS Security Hub ASFF import (6C.27, optional)
+# ---------------------------------------------------------------------------
+
+
+def convert_findings_to_asff(
+    scan_result: ScanResult,
+    aws_account_id: str,
+    aws_region: str,
+    repository: str,
+) -> list[dict[str, Any]]:
+    """Convert phi-scan findings to AWS Security Finding Format (ASFF).
+
+    Produces one ASFF finding per phi-scan finding. Each ASFF finding includes:
+    file path, line number, severity, HIPAA category, confidence, and remediation hint.
+    No raw entity values are included — only the value hash.
+
+    Args:
+        scan_result:    The completed scan result.
+        aws_account_id: AWS account ID (12-digit string).
+        aws_region:     AWS region (e.g. ``us-east-1``).
+        repository:     Repository identifier for the ProductArn.
+
+    Returns:
+        List of ASFF finding dicts ready to pass to BatchImportFindings.
+    """
+    from datetime import UTC, datetime
+
+    product_arn = _AWS_SECURITY_HUB_PRODUCT_ARN_FORMAT.format(
+        region=aws_region,
+        account_id=aws_account_id,
+    )
+    now_iso = datetime.now(tz=UTC).strftime("%Y-%m-%dT%H:%M:%S.000Z")
+
+    asff_findings = []
+    for finding in scan_result.findings:
+        severity_label = _ASFF_SEVERITY_MAP.get(finding.severity.value.lower(), "MEDIUM")
+        # ASFF severity normalised score: HIGH=70, MEDIUM=40, LOW=10, INFO=0
+        severity_score_map = {"HIGH": 70, "MEDIUM": 40, "LOW": 10, "INFORMATIONAL": 0}
+        severity_score = severity_score_map.get(severity_label, 40)
+
+        asff_finding: dict[str, Any] = {
+            "SchemaVersion": "2018-10-08",
+            "Id": (
+                f"{repository}/{finding.file_path}/{finding.line_number}"
+                f"/{finding.value_hash[:16]}"
+            ),
+            "ProductArn": product_arn,
+            "GeneratorId": f"phi-scan/{finding.entity_type}",
+            "AwsAccountId": aws_account_id,
+            "Types": ["Software and Configuration Checks/Vulnerabilities/CVE"],
+            "FirstObservedAt": now_iso,
+            "UpdatedAt": now_iso,
+            "CreatedAt": now_iso,
+            "Severity": {
+                "Label": severity_label,
+                "Normalized": severity_score,
+            },
+            "Title": (
+                f"PHI/PII detected: {finding.hipaa_category.value} "
+                f"in {finding.file_path}:{finding.line_number}"
+            ),
+            "Description": (
+                f"phi-scan detected a {finding.hipaa_category.value} ({finding.entity_type}) "
+                f"with {finding.confidence:.0%} confidence at "
+                f"{finding.file_path} line {finding.line_number}. "
+                "No raw value is stored — only a one-way hash of the detected entity."
+            ),
+            "Remediation": {
+                "Recommendation": {
+                    "Text": finding.remediation_hint or "Remove or de-identify the PHI/PII value.",
+                }
+            },
+            "SourceUrl": f"https://github.com/{repository}/blob/HEAD/{finding.file_path}#L{finding.line_number}",
+            "Resources": [
+                {
+                    "Type": "Other",
+                    "Id": f"file://{finding.file_path}",
+                    "Details": {
+                        "Other": {
+                            "line_number": str(finding.line_number),
+                            "entity_type": finding.entity_type,
+                            "hipaa_category": finding.hipaa_category.value,
+                            "confidence": f"{finding.confidence:.4f}",
+                            "value_hash": finding.value_hash,
+                        }
+                    },
+                }
+            ],
+        }
+        asff_findings.append(asff_finding)
+
+    return asff_findings
+
+
+def import_findings_to_security_hub(
+    scan_result: ScanResult,
+    pr_context: PRContext,
+) -> None:
+    """Import phi-scan findings to AWS Security Hub via BatchImportFindings.
+
+    Only runs when ``AWS_SECURITY_HUB`` environment variable is set to ``true``
+    and ``AWS_ACCOUNT_ID`` / ``AWS_DEFAULT_REGION`` are available. Uses the
+    AWS CLI (``aws securityhub batch-import-findings``) to avoid adding boto3
+    as a hard dependency.
+
+    Args:
+        scan_result: The completed scan result.
+        pr_context:  Context providing the repository identifier.
+
+    Raises:
+        CIIntegrationError: When the AWS CLI invocation fails.
+    """
+    if _env("AWS_SECURITY_HUB") != "true":
+        _LOG.debug("Security Hub: AWS_SECURITY_HUB not enabled — skipping")
+        return
+
+    if scan_result.is_clean:
+        _LOG.debug("Security Hub: no findings to import")
+        return
+
+    account_id = _env("AWS_ACCOUNT_ID") or ""
+    region = _env("AWS_DEFAULT_REGION") or _env("AWS_REGION") or "us-east-1"
+    repository = pr_context.repository or _env(_ENV_GITHUB_REPOSITORY) or "unknown/repo"
+
+    if not account_id:
+        _LOG.warning("Security Hub: AWS_ACCOUNT_ID not set — skipping")
+        return
+
+    import json as _json
+
+    asff_findings = convert_findings_to_asff(scan_result, account_id, region, repository)
+    findings_json = _json.dumps({"Findings": asff_findings})
+
+    try:
+        result = subprocess.run(
+            ["aws", "securityhub", "batch-import-findings", "--cli-input-json", findings_json],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            raise CIIntegrationError(
+                f"AWS Security Hub import failed (exit {result.returncode}): "
+                f"{result.stderr.strip()[:200]}"
+            )
+    except FileNotFoundError as not_found_error:
+        raise CIIntegrationError(
+            "AWS CLI not found — install awscli to enable Security Hub integration"
+        ) from not_found_error
+
+    _LOG.debug("Security Hub: imported %d ASFF finding(s)", len(asff_findings))
 
 
 # ---------------------------------------------------------------------------

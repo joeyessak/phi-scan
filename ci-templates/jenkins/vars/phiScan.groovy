@@ -39,6 +39,7 @@ def call(Map config = [:]) {
         returnStatus: true
     )
 
+    // 6C.12: Warnings NG — SARIF severity maps to error/warning/note levels
     recordIssues(
         enabledForFailure: true,
         tools: [
@@ -49,6 +50,30 @@ def call(Map config = [:]) {
             )
         ]
     )
+
+    // 6C.13: Checks API — inline annotations on GitHub/Bitbucket PR builds
+    if (env.CHANGE_ID) {
+        try {
+            publishChecks(
+                name: 'phi-scan',
+                title: 'PHI/PII Scan',
+                summary: exitCode == 0 ? 'No PHI/PII violations.' : 'Violations detected — see Warnings NG.',
+                conclusion: exitCode == 0 ? 'SUCCESS' : 'FAILURE',
+                detailsURL: env.BUILD_URL ?: ''
+            )
+        } catch (ignored) { /* Checks API plugin not installed — skip silently */ }
+    }
+
+    // 6C.14: Build description for at-a-glance status in build history
+    try {
+        def jsonFile = "${outputDir}/phi-scan.json"
+        if (fileExists(jsonFile)) {
+            def result = readJSON(file: jsonFile)
+            currentBuild.description = result.is_clean
+                ? 'PhiScan: Clean'
+                : "PhiScan: ${result.findings} findings (${result.severity_counts?.HIGH ?: 0} HIGH)"
+        }
+    } catch (ignored) { /* JSON not available */ }
 
     archiveArtifacts(
         artifacts: "${outputDir}/**",

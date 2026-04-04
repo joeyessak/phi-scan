@@ -66,7 +66,15 @@ pipeline {
                     // Use returnStatus so Warnings NG can still publish before we fail
                     def exitCode = sh(script: scanCmd.trim(), returnStatus: true)
 
-                    // Publish Warnings NG report (inline PR annotations via SARIF)
+                    // -------------------------------------------------------
+                    // 6C.12: Publish Warnings NG report
+                    //   SARIF severity mapping to Warnings NG levels:
+                    //     error   (HIGH)   → red annotation in build results
+                    //     warning (MEDIUM) → yellow annotation
+                    //     note    (LOW)    → blue annotation
+                    //   Findings are visible in the Warnings NG trend charts
+                    //   across builds (Jenkins Build → Warnings tab).
+                    // -------------------------------------------------------
                     recordIssues(
                         enabledForFailure: true,
                         aggregatingResults: true,
@@ -78,6 +86,46 @@ pipeline {
                             )
                         ]
                     )
+
+                    // -------------------------------------------------------
+                    // 6C.13: Jenkins Checks API — post inline annotations to
+                    //   the GitHub/Bitbucket PR when building from GitHub Branch
+                    //   Source or Bitbucket Branch Source plugin.
+                    //   Requires: Checks API plugin + Branch Source plugin.
+                    // -------------------------------------------------------
+                    if (env.CHANGE_ID) {
+                        def checkStatus = (exitCode == 0) ? 'SUCCESS' : 'FAILURE'
+                        publishChecks(
+                            name: 'phi-scan',
+                            title: 'PHI/PII Scan',
+                            summary: (exitCode == 0)
+                                ? 'No PHI/PII violations found.'
+                                : "phi-scan detected violations. See Warnings NG for details.",
+                            conclusion: checkStatus,
+                            detailsURL: env.BUILD_URL
+                        )
+                    }
+
+                    // -------------------------------------------------------
+                    // 6C.14: Set build description to scan summary for quick
+                    //   at-a-glance status in the Jenkins build history.
+                    // -------------------------------------------------------
+                    def phi_json = "${PHI_SCAN_OUTPUT_DIR}/phi-scan.json"
+                    def description = "PhiScan: unknown"
+                    try {
+                        def jsonText = readFile(phi_json)
+                        def result = readJSON(text: jsonText)
+                        if (result.is_clean) {
+                            description = "PhiScan: Clean"
+                        } else {
+                            def high   = result.severity_counts?.HIGH   ?: 0
+                            def medium = result.severity_counts?.MEDIUM ?: 0
+                            def low    = result.severity_counts?.LOW    ?: 0
+                            description = "PhiScan: ${result.findings} findings " +
+                                          "(${high} HIGH, ${medium} MED, ${low} LOW)"
+                        }
+                    } catch (ignored) { /* JSON not available — leave default */ }
+                    currentBuild.description = description
 
                     // Archive artifacts before propagating failure
                     archiveArtifacts(
