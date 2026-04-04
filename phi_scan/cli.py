@@ -1607,7 +1607,7 @@ def display_history(
         bool, typer.Option(_AUDIT_CHAIN_VERIFY_FLAG, help=_HISTORY_VERIFY_HELP)
     ] = False,
     repo: Annotated[str | None, typer.Option("--repo", help=_HISTORY_REPO_HELP)] = None,
-    violations_only: Annotated[
+    should_show_violations_only: Annotated[
         bool, typer.Option("--violations-only", help=_HISTORY_VIOLATIONS_ONLY_HELP)
     ] = False,
 ) -> None:
@@ -1631,12 +1631,12 @@ def display_history(
         else:
             typer.echo(_AUDIT_CHAIN_FAIL_MESSAGE, err=True)
             raise typer.Exit(code=EXIT_CODE_VIOLATION)
-    repository_hash = hashlib.sha256(repo.encode()).hexdigest() if repo else None
+    repository_hash = hashlib.sha256(repo.encode("utf-8")).hexdigest() if repo else None
     scan_events = query_recent_scans(
         database_path,
         lookback_days,
         repository_hash=repository_hash,
-        violations_only=violations_only,
+        should_show_violations_only=should_show_violations_only,
     )
     _display_scan_history(scan_events)
 

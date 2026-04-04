@@ -275,6 +275,10 @@ _INSERT_SCAN_EVENT_SQL: str = f"""
          pr_number, pipeline, action_taken, notifications_sent, row_chain_hash)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 """
+_SELECT_RECENT_SCANS_BASE_SQL: str = f"SELECT * FROM {_SCAN_EVENTS_TABLE} WHERE timestamp >= ?"
+_FILTER_REPOSITORY_HASH_SQL: str = " AND repository_hash = ?"
+_FILTER_VIOLATIONS_ONLY_SQL: str = " AND is_clean = ?"
+_ORDER_BY_TIMESTAMP_DESC_SQL: str = " ORDER BY timestamp DESC"
 _SELECT_LAST_SCAN_SQL: str = (
     f"SELECT * FROM {_SCAN_EVENTS_TABLE} ORDER BY id DESC LIMIT {_LAST_SCAN_LIMIT}"
 )
@@ -431,7 +435,7 @@ def query_recent_scans(
     database_path: Path,
     lookback_days: int,
     repository_hash: str | None = None,
-    violations_only: bool = False,
+    should_show_violations_only: bool = False,
 ) -> list[dict[str, Any]]:
     """Return scan events recorded within the last ``lookback_days`` days.
 
@@ -441,7 +445,8 @@ def query_recent_scans(
         repository_hash: Optional SHA-256 hex digest to filter by repository.
             When provided, only rows whose ``repository_hash`` column matches
             exactly are returned. Callers must hash the raw path before passing.
-        violations_only: When True, only rows where ``is_clean = 0`` are returned.
+        should_show_violations_only: When True, only rows where ``is_clean = 0``
+            are returned.
 
     Returns:
         List of scan event rows as dicts, ordered by timestamp descending.
@@ -452,19 +457,15 @@ def query_recent_scans(
     cutoff = (
         datetime.datetime.now(datetime.UTC) - datetime.timedelta(days=lookback_days)
     ).isoformat()
-    conditions = ["timestamp >= ?"]
+    sql = _SELECT_RECENT_SCANS_BASE_SQL
     params: list[Any] = [cutoff]
     if repository_hash is not None:
-        conditions.append("repository_hash = ?")
+        sql += _FILTER_REPOSITORY_HASH_SQL
         params.append(repository_hash)
-    if violations_only:
-        conditions.append("is_clean = ?")
+    if should_show_violations_only:
+        sql += _FILTER_VIOLATIONS_ONLY_SQL
         params.append(_BOOLEAN_FALSE)
-    sql = (
-        f"SELECT * FROM {_SCAN_EVENTS_TABLE} "
-        f"WHERE {' AND '.join(conditions)} "
-        f"ORDER BY timestamp DESC"
-    )
+    sql += _ORDER_BY_TIMESTAMP_DESC_SQL
     connection = _open_database(database_path)
     try:
         cursor = connection.execute(sql, params)
