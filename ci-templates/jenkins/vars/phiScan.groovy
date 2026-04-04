@@ -68,6 +68,9 @@ def call(Map config = [:]) {
 
     // 6C.14: Build description for at-a-glance status in build history
     try {
+        // NOTE: phiScanReportFilename is intentionally duplicated in
+        // Jenkinsfile — shared libraries cannot import constants from a
+        // Jenkinsfile, so each file maintains its own copy.
         def phiScanReportFilename = "phi-scan.json"
         def phiScanJsonPath = "${outputDir}/${phiScanReportFilename}"
         if (fileExists(phiScanJsonPath)) {

@@ -151,9 +151,19 @@ _HTTP_TIMEOUT_SECONDS: float = 15.0
 _MAX_COMMENT_LENGTH: int = 60_000
 _MAX_ERROR_RESPONSE_LOG_LENGTH: int = 200
 _DEFAULT_GIT_REF: str = "refs/heads/main"
-# Used both as the split limit and the minimum line count for baseline insertion —
-# these are intentionally the same value and must remain coupled.
-_COMMENT_HEADER_SPLIT_COUNT: int = 2
+_COMMENT_BODY_SPLIT_MAX_PARTS: int = 2
+_COMMENT_MIN_SECTION_COUNT: int = 2
+_BASELINE_CONTEXT_FORMAT: str = (
+    "**{new_findings_count} new** | "
+    "{baselined_count} baselined | "
+    "{resolved_count} resolved since last scan"
+)
+
+# Maximum length of a SARIF result message.text before upload is aborted.
+# _build_sarif_finding_message() produces at most ~1200 chars
+# (remediation_hint max 1024 + category/layer/confidence overhead).
+# Values well above this indicate unexpected content was embedded.
+_SARIF_MAX_MESSAGE_TEXT_LENGTH: int = 1_500
 
 # GitHub Code Scanning SARIF upload API
 _GITHUB_API_SARIF_UPLOAD_PATH: str = "/repos/{repository}/code-scanning/sarifs"
@@ -565,8 +575,8 @@ def _insert_baseline_context_into_comment(
     Returns:
         Comment body with the baseline line inserted after the first header line.
     """
-    lines = comment_body.split("\n", _COMMENT_HEADER_SPLIT_COUNT)
-    if len(lines) < _COMMENT_HEADER_SPLIT_COUNT:
+    lines = comment_body.split("\n", _COMMENT_BODY_SPLIT_MAX_PARTS)
+    if len(lines) < _COMMENT_MIN_SECTION_COUNT:
         # Comment body has no header/body split — prepend baseline line instead
         return baseline_line + "\n\n" + comment_body
     return "\n".join([lines[0], "", baseline_line, "", *lines[1:]])
@@ -588,10 +598,10 @@ def build_comment_body_with_baseline(
     Returns:
         Markdown string with baseline context prepended to the standard comment body.
     """
-    baseline_line = (
-        f"**{baseline_comparison.new_findings_count} new** | "
-        f"{baseline_comparison.baselined_count} baselined | "
-        f"{baseline_comparison.resolved_count} resolved since last scan"
+    baseline_line = _BASELINE_CONTEXT_FORMAT.format(
+        new_findings_count=baseline_comparison.new_findings_count,
+        baselined_count=baseline_comparison.baselined_count,
+        resolved_count=baseline_comparison.resolved_count,
     )
     return _insert_baseline_context_into_comment(build_comment_body(scan_result), baseline_line)
 
@@ -627,6 +637,13 @@ def _verify_sarif_excludes_code_snippets(sarif_content: str) -> None:
     sarif_doc: dict[str, Any] = json.loads(sarif_content)
     for sarif_run in sarif_doc.get("runs", []):
         for sarif_result in sarif_run.get("results", []):
+            message_text = sarif_result.get("message", {}).get("text", "")
+            if len(message_text) > _SARIF_MAX_MESSAGE_TEXT_LENGTH:
+                raise CIIntegrationError(
+                    f"SARIF upload aborted: message.text length {len(message_text)} "
+                    f"exceeds limit of {_SARIF_MAX_MESSAGE_TEXT_LENGTH} — "
+                    "unexpected content may be embedded"
+                )
             for location in sarif_result.get("locations", []):
                 physical_location = location.get("physicalLocation", {})
                 region = physical_location.get("region", {})

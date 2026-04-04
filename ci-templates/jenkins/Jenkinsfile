@@ -110,9 +110,13 @@ pipeline {
                     // 6C.14: Set build description to scan summary for quick
                     //   at-a-glance status in the Jenkins build history.
                     // -------------------------------------------------------
+                    // NOTE: phiScanReportFilename is intentionally duplicated in
+                    // vars/phiScan.groovy — shared libraries cannot import constants
+                    // from a Jenkinsfile, so each file maintains its own copy.
                     def phiScanReportFilename = "phi-scan.json"
                     def phiScanJsonPath = "${PHI_SCAN_OUTPUT_DIR}/${phiScanReportFilename}"
-                    def buildDescription = "PhiScan: unknown"
+                    def phiScanUnknownStatus = "PhiScan: unknown"
+                    def buildDescription = phiScanUnknownStatus
                     try {
                         def jsonText = readFile(phiScanJsonPath)
                         def scanResult = readJSON(text: jsonText)
