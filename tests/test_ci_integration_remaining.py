@@ -777,13 +777,19 @@ def test_convert_findings_to_asff_contains_file_path_in_title() -> None:
 
 
 def test_convert_findings_to_asff_does_not_include_raw_entity_value() -> None:
-    """ASFF findings must not contain raw PHI entity values."""
+    """ASFF findings must not contain raw PHI entity values or the full value_hash.
+
+    The full 64-char SHA-256 hash is excluded — it could be reversed for low-entropy
+    PHI like SSNs. Only the [:16] prefix is used in the ASFF Id field.
+    """
     asff = convert_findings_to_asff(
         _make_violation_result(), _AWS_ACCOUNT_ID, _AWS_REGION, _AWS_REPO
     )
     asff_str = json.dumps(asff)
-    # The value hash is in there; the raw SSN is not
-    assert _TEST_VALUE_HASH in asff_str
+    # Full value hash must NOT be present anywhere in the payload
+    assert _TEST_VALUE_HASH not in asff_str
+    # The truncated [:16] prefix is used in the Id field for deduplication only
+    assert _TEST_VALUE_HASH[:16] in asff[0]["Id"]
     assert "321-54-9870" not in asff_str
 
 
@@ -802,11 +808,13 @@ def test_convert_findings_to_asff_excludes_code_context() -> None:
 
 
 def test_convert_findings_to_asff_fields_are_enumerated_types_and_counts() -> None:
-    """Every per-finding field in the ASFF payload is a safe type (enum label, int, float, hash).
+    """Every per-finding field in the ASFF payload is a safe type (enum label, int, float).
 
     This test machine-verifies the PHI-SAFE OUTBOUND FIELDS comment in
     convert_findings_to_asff: every field that varies per finding must be
-    either a count, an enum label, a file path, a line number, or a value hash.
+    either a count, an enum label, a file path, a line number, or a float.
+    Full value_hash is excluded — only value_hash[:16] appears in the Id field
+    for ASFF deduplication; the full SHA-256 is not sent to Security Hub.
     """
     asff = convert_findings_to_asff(
         _make_violation_result(), _AWS_ACCOUNT_ID, _AWS_REGION, _AWS_REPO
@@ -819,14 +827,32 @@ def test_convert_findings_to_asff_fields_are_enumerated_types_and_counts() -> No
     assert details["line_number"] == str(_TEST_LINE_NUMBER)
     assert details["entity_type"] == _TEST_ENTITY_TYPE
     assert details["hipaa_category"] == PhiCategory.SSN.value
-    assert details["value_hash"] == _TEST_VALUE_HASH
     # confidence is a formatted float string, not a raw entity value
     assert "." in details["confidence"]
+    # full value_hash must not be present — only [:16] prefix used in the Id field
+    assert "value_hash" not in details
 
     # Description contains a count and confidence, but not code_context
     description = finding_record["Description"]
     assert _TEST_CODE_CONTEXT not in description
     assert "No raw value is stored" in description
+
+
+def test_convert_findings_to_asff_excludes_full_value_hash() -> None:
+    """ASFF Resources.Other must not contain the full value_hash.
+
+    The full 64-char SHA-256 hash of low-entropy PHI (e.g. SSNs, ~900M values)
+    is reversible via brute-force and must not be sent to an external API.
+    Only the [:16] prefix appears in the ASFF Id field for deduplication.
+    """
+    asff = convert_findings_to_asff(
+        _make_violation_result(), _AWS_ACCOUNT_ID, _AWS_REGION, _AWS_REPO
+    )
+    asff_str = json.dumps(asff)
+    # Full hash must not appear anywhere in the payload
+    assert _TEST_VALUE_HASH not in asff_str
+    # But the [:16] prefix must appear in the Id field for deduplication
+    assert _TEST_VALUE_HASH[:16] in asff[0]["Id"]
 
 
 def test_convert_findings_to_asff_empty_when_clean() -> None:
