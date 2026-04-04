@@ -93,12 +93,14 @@ phases:
           python3 -c "
         import json, sys
         try:
-            data = json.load(open('$PHI_SCAN_OUTPUT_DIR/phi-scan.json'))
-            count = len(data.get('findings', []))
-            high = data.get('severity_counts', {}).get('HIGH', 0)
+            with open('$PHI_SCAN_OUTPUT_DIR/phi-scan.json') as fh:
+                scan_report = json.load(fh)
+            count = len(scan_report.get('findings', []))
+            high = scan_report.get('severity_counts', {}).get('HIGH', 0)
             print(f'PHI/PII violations found: {count} ({high} HIGH)')
         except Exception as exc:
-            print(f'Could not read phi-scan results: {exc}')
+            print(f'Could not read phi-scan results: {exc}', file=sys.stderr)
+            sys.exit(1)
           "
           exit "$phi_scan_exit_code"
         fi

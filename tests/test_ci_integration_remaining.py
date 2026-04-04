@@ -19,6 +19,7 @@ from unittest.mock import MagicMock, patch
 
 import httpx
 import pytest
+import yaml
 
 from phi_scan.ci_integration import (
     BaselineComparison,
@@ -1077,43 +1078,49 @@ _CIRCLECI_ORB_YML = Path(__file__).parent.parent / "ci-templates" / "circleci" /
 _CIRCLECI_CONFIG_YML = Path(__file__).parent.parent / "ci-templates" / "circleci" / "config.yml"
 _BUILDSPEC_YML = Path(__file__).parent.parent / "ci-templates" / "aws-codebuild" / "buildspec.yml"
 
+# Named constants for template structure assertions — avoids magic string literals in logic
+_JUNIT_OUTPUT_FLAG: str = "--output junit"
+_STORE_TEST_RESULTS_STEP: str = "store_test_results"
+_SARIF_FILE_FORMAT: str = "file-format: SARIF"
+_EXIT_CODE_FILE_NAME: str = "phi-scan-exit-code"
+_EXIT_CODE_VAR_NAME: str = "phi_scan_exit_code"
+
 
 def test_circleci_orb_scan_command_includes_junit_output() -> None:
     """orb.yml scan command must include --output junit for CircleCI Test Summary."""
     content = _CIRCLECI_ORB_YML.read_text()
-    assert "--output junit" in content, (
-        "orb.yml scan command is missing '--output junit' required for CircleCI Test Summary"
+    assert _JUNIT_OUTPUT_FLAG in content, (
+        f"orb.yml scan command is missing '{_JUNIT_OUTPUT_FLAG}' required for CircleCI Test Summary"
     )
 
 
 def test_circleci_orb_store_test_results_present() -> None:
     """orb.yml store_results command must include store_test_results step."""
     content = _CIRCLECI_ORB_YML.read_text()
-    assert "store_test_results" in content, (
-        "orb.yml store_results command is missing 'store_test_results' step"
+    assert _STORE_TEST_RESULTS_STEP in content, (
+        f"orb.yml store_results command is missing '{_STORE_TEST_RESULTS_STEP}' step"
     )
 
 
 def test_circleci_config_scan_command_includes_junit_output() -> None:
     """config.yml scan step must include --output junit for CircleCI Test Summary."""
     content = _CIRCLECI_CONFIG_YML.read_text()
-    assert "--output junit" in content, (
-        "config.yml is missing '--output junit' required for CircleCI Test Summary"
+    assert _JUNIT_OUTPUT_FLAG in content, (
+        f"config.yml is missing '{_JUNIT_OUTPUT_FLAG}' required for CircleCI Test Summary"
     )
 
 
 def test_circleci_config_store_test_results_present() -> None:
     """config.yml must include store_test_results step for CircleCI Test Summary tab."""
     content = _CIRCLECI_CONFIG_YML.read_text()
-    assert "store_test_results" in content, (
-        "config.yml is missing 'store_test_results' step required for CircleCI Test Summary"
+    assert _STORE_TEST_RESULTS_STEP in content, (
+        f"config.yml is missing '{_STORE_TEST_RESULTS_STEP}' step "
+        "required for CircleCI Test Summary"
     )
 
 
 def test_circleci_orb_junit_report_path_consistent_with_store_test_results() -> None:
     """The JUnit report-path and store_test_results path must point to the same directory."""
-    import yaml
-
     spec = yaml.safe_load(_CIRCLECI_ORB_YML.read_text())
     commands = spec.get("commands", {})
     scan_cmd = commands.get("scan", {})
@@ -1125,15 +1132,17 @@ def test_circleci_orb_junit_report_path_consistent_with_store_test_results() -> 
         None,
     )
     assert scan_run_step is not None, "orb.yml scan command step not found"
-    assert "--output junit" in scan_run_step
+    assert _JUNIT_OUTPUT_FLAG in scan_run_step
 
     store_cmd = commands.get("store_results", {})
     store_steps = store_cmd.get("steps", [])
     store_step = next(
-        (s for s in store_steps if isinstance(s, dict) and "store_test_results" in s),
+        (s for s in store_steps if isinstance(s, dict) and _STORE_TEST_RESULTS_STEP in s),
         None,
     )
-    assert store_step is not None, "store_test_results step not found in store_results command"
+    assert store_step is not None, (
+        f"'{_STORE_TEST_RESULTS_STEP}' step not found in store_results command"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1144,8 +1153,8 @@ def test_circleci_orb_junit_report_path_consistent_with_store_test_results() -> 
 def test_codebuild_buildspec_reports_section_uses_sarif() -> None:
     """buildspec.yml reports section must specify SARIF format for CodeBuild Reports tab."""
     content = _BUILDSPEC_YML.read_text()
-    assert "file-format: SARIF" in content, (
-        "buildspec.yml reports section is missing 'file-format: SARIF'"
+    assert _SARIF_FILE_FORMAT in content, (
+        f"buildspec.yml reports section is missing '{_SARIF_FILE_FORMAT}'"
     )
 
 
@@ -1156,23 +1165,22 @@ def test_codebuild_buildspec_build_phase_captures_exit_code() -> None:
         "buildspec.yml build phase must use 'set +e' so phi-scan exit 1 "
         "does not abort the phase before the SARIF file is written"
     )
-    assert "phi-scan-exit-code" in content, (
-        "buildspec.yml must write phi-scan exit code to a file for deferred failure"
+    assert _EXIT_CODE_FILE_NAME in content, (
+        f"buildspec.yml must write phi-scan exit code to '{_EXIT_CODE_FILE_NAME}' "
+        "for deferred failure"
     )
 
 
 def test_codebuild_buildspec_post_build_reads_exit_code_file() -> None:
     """buildspec.yml post_build must read the exit code file written in the build phase."""
     content = _BUILDSPEC_YML.read_text()
-    assert "phi-scan-exit-code" in content
+    assert _EXIT_CODE_FILE_NAME in content
     # post_build must propagate the phi-scan exit code
-    assert "phi_scan_exit_code" in content
+    assert _EXIT_CODE_VAR_NAME in content
 
 
 def test_codebuild_buildspec_parsed_structure() -> None:
     """buildspec.yml must parse as valid YAML with report group using SARIF format."""
-    import yaml
-
     spec = yaml.safe_load(_BUILDSPEC_YML.read_text())
     assert spec.get("version") == 0.2
     reports = spec.get("reports", {})
@@ -1208,8 +1216,8 @@ def test_codebuild_buildspec_parsed_structure() -> None:
 # ---------------------------------------------------------------------------
 
 
-def _check_buildx_arm_available() -> bool:
-    """Return True if Docker buildx can build linux/arm64 images on this machine."""
+def _detect_arm_buildx_support() -> bool:
+    """Return True if Docker buildx reports linux/arm64 support on this machine."""
     try:
         result = subprocess.run(
             ["docker", "buildx", "inspect", "--bootstrap"],
@@ -1223,17 +1231,23 @@ def _check_buildx_arm_available() -> bool:
         return False
 
 
-_BUILDX_ARM_AVAILABLE: bool = _check_buildx_arm_available() if _DOCKER_AVAILABLE else False
+_BUILDX_ARM_AVAILABLE: bool = _detect_arm_buildx_support() if _DOCKER_AVAILABLE else False
 
-_DOCKER_ARM_IMAGE_TAG: str = "phi-scan-test-arm64:ci"
-_DOCKER_ARM_IMAGE_BUILT: bool = False
+_ARM_IMAGE_TAG: str = "phi-scan-test-arm64:ci"
 
 
-def _ensure_docker_arm_image_built() -> None:
-    """Build the phi-scan Docker image for linux/arm64 once for the test session."""
-    global _DOCKER_ARM_IMAGE_BUILT
-    if _DOCKER_ARM_IMAGE_BUILT:
-        return
+@pytest.fixture(scope="session")
+def arm_docker_image() -> str:
+    """Build the phi-scan Docker image for linux/arm64 once per test session.
+
+    Skips when Docker or buildx linux/arm64 is unavailable (e.g., standard CI hosts).
+    Active on Apple Silicon and any QEMU-equipped host with linux/arm64 support.
+    Returns the image tag so tests can reference it without module-level mutable state.
+    """
+    if not _DOCKER_AVAILABLE:
+        pytest.skip("Docker not available in this environment")
+    if not _BUILDX_ARM_AVAILABLE:
+        pytest.skip("Docker buildx linux/arm64 not available")
     dockerfile_dir = Path(__file__).parent.parent / "docker"
     result = subprocess.run(
         [
@@ -1244,7 +1258,7 @@ def _ensure_docker_arm_image_built() -> None:
             "linux/arm64",
             "--load",
             "-t",
-            _DOCKER_ARM_IMAGE_TAG,
+            _ARM_IMAGE_TAG,
             str(dockerfile_dir),
         ],
         capture_output=True,
@@ -1254,14 +1268,11 @@ def _ensure_docker_arm_image_built() -> None:
     )
     if result.returncode != 0:
         pytest.skip(f"ARM Docker build failed: {result.stderr[:200]}")
-    _DOCKER_ARM_IMAGE_BUILT = True
+    return _ARM_IMAGE_TAG
 
 
-@pytest.mark.skipif(not _DOCKER_AVAILABLE, reason="Docker not available in this environment")
-@pytest.mark.skipif(not _BUILDX_ARM_AVAILABLE, reason="Docker buildx linux/arm64 not available")
-def test_docker_arm_image_runs_phi_scan_help() -> None:
+def test_docker_arm_image_runs_phi_scan_help(arm_docker_image: str) -> None:
     """phi-scan Docker image built for linux/arm64 runs phi-scan --help and exits 0."""
-    _ensure_docker_arm_image_built()
     result = subprocess.run(
         [
             "docker",
@@ -1269,7 +1280,7 @@ def test_docker_arm_image_runs_phi_scan_help() -> None:
             "--rm",
             "--platform",
             "linux/arm64",
-            _DOCKER_ARM_IMAGE_TAG,
+            arm_docker_image,
             "--help",
         ],
         capture_output=True,
