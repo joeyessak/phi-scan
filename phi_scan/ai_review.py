@@ -278,6 +278,9 @@ def _apply_review_to_single_finding(
     try:
         review_result = _request_ai_confidence_review(finding, api_key)
     except AIReviewError as review_error:
+        # Log only the exception type, not str(review_error). AIReviewError messages
+        # embed entity_type and file_path (never raw PHI), but at this outbound log
+        # boundary we are conservative — type name is sufficient to triage failures.
         _logger.warning(
             "AI review failed for %s in %s — using local score: %s",
             finding.entity_type,
@@ -403,7 +406,9 @@ def _parse_ai_response(response_text: str) -> _AIResponsePayload:
         response_text: Raw text response from Claude.
 
     Returns:
-        _AIResponsePayload with is_phi_risk, confidence, and reasoning fields.
+        _AIResponsePayload with is_phi_risk and confidence fields. reasoning is
+        validated as present in Claude's JSON but is never extracted into the
+        return value — see _AIResponsePayload for the PHI safety rationale.
 
     Raises:
         AIReviewError: If the response cannot be parsed or is missing required keys.
