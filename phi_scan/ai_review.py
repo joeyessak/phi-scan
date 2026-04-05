@@ -39,6 +39,7 @@ from phi_scan.constants import (
     AI_RESPONSE_MAX_TOKENS,
     AI_RESPONSE_REQUIRED_KEYS,
     AI_RESPONSE_TRUNCATION_LENGTH,
+    AI_REVIEW_PERMITTED_EMPTY_CONTEXT_ENTITY_TYPES,
     AI_REVIEW_REDACTED_PLACEHOLDER,
     AI_REVIEW_SYSTEM_PROMPT,
     AI_TOKENS_PER_MILLION,
@@ -56,6 +57,7 @@ __all__ = [
 
 _logger = logging.getLogger(__name__)
 
+_MARKDOWN_CODE_FENCE: str = "```"
 _ENV_VAR_API_KEY: str = "ANTHROPIC_API_KEY"
 _MISSING_API_KEY_ERROR: str = (
     "AI review is enabled but no API key was found. "
@@ -76,6 +78,11 @@ _PHI_SAFETY_VIOLATION_ERROR: str = (
     "PHI safety violation: code_context for {entity_type} does not contain "
     f"the required redaction marker '{AI_REVIEW_REDACTED_PLACEHOLDER}' — "
     "this finding must not be sent to any external API"
+)
+_EMPTY_CODE_CONTEXT_NOT_PERMITTED_ERROR: str = (
+    "PHI safety violation: code_context for {entity_type!r} is empty and "
+    "{entity_type!r} is not in AI_REVIEW_PERMITTED_EMPTY_CONTEXT_ENTITY_TYPES — "
+    "add the entity type to the allowlist only if it is proven to carry no source line"
 )
 
 
@@ -192,17 +199,17 @@ def apply_ai_review_to_findings(
     if not config.is_enabled:
         return findings
     api_key = resolve_api_key(config)
-    reviewed_findings, usage_summary = _iterate_and_review_findings(findings, api_key, config)
+    reviewed_findings, usage_summary = _review_qualifying_findings(findings, api_key, config)
     _log_ai_usage_summary(usage_summary)
     return reviewed_findings
 
 
-def _iterate_and_review_findings(
+def _review_qualifying_findings(
     findings: list[ScanFinding],
     api_key: str,
     config: AIReviewConfig,
 ) -> tuple[list[ScanFinding], AIUsageSummary]:
-    """Iterate findings, dispatch AI review for qualifying ones, accumulate usage.
+    """Dispatch AI review for each qualifying finding and accumulate usage stats.
 
     Args:
         findings: All findings from the local detection layers.
@@ -305,8 +312,11 @@ def _redact_phi_from_context(finding: ScanFinding) -> str:
     gate — if the ScanFinding contract were ever weakened, this explicit check at
     the outbound API boundary prevents raw PHI from escaping to Claude.
 
-    Empty code_context is permitted (e.g. HL7 segment-only findings that carry no
-    source line). Non-empty code_context without the redaction marker is rejected.
+    Empty code_context is only permitted for entity types listed in
+    AI_REVIEW_PERMITTED_EMPTY_CONTEXT_ENTITY_TYPES. All current detection layers
+    produce at least a labelled segment/field context containing the redaction
+    marker, so that allowlist is currently empty. Any future finding type that
+    legitimately carries no source line must be added to the allowlist explicitly.
 
     Args:
         finding: A validated ScanFinding whose code_context has been redacted.
@@ -315,9 +325,19 @@ def _redact_phi_from_context(finding: ScanFinding) -> str:
         The verified code context string, safe to transmit to external APIs.
 
     Raises:
-        AIReviewError: If code_context is non-empty and lacks the redaction marker.
+        AIReviewError: If code_context is empty and entity_type is not in the
+            permitted-empty allowlist, or if code_context is non-empty and lacks
+            the redaction marker.
     """
-    if finding.code_context and AI_REVIEW_REDACTED_PLACEHOLDER not in finding.code_context:
+    if not finding.code_context:
+        if finding.entity_type not in AI_REVIEW_PERMITTED_EMPTY_CONTEXT_ENTITY_TYPES:
+            raise AIReviewError(
+                _EMPTY_CODE_CONTEXT_NOT_PERMITTED_ERROR.format(
+                    entity_type=finding.entity_type
+                )
+            )
+        return finding.code_context
+    if AI_REVIEW_REDACTED_PLACEHOLDER not in finding.code_context:
         raise AIReviewError(_PHI_SAFETY_VIOLATION_ERROR.format(entity_type=finding.entity_type))
     return finding.code_context
 
@@ -362,10 +382,10 @@ def _strip_markdown_fence(response_text: str) -> str:
         The response text with fence lines removed, or the original if no fence found.
     """
     stripped = response_text.strip()
-    if not stripped.startswith("```"):
+    if not stripped.startswith(_MARKDOWN_CODE_FENCE):
         return stripped
     lines = stripped.split("\n")
-    if lines[-1].strip() == "```":
+    if lines[-1].strip() == _MARKDOWN_CODE_FENCE:
         return "\n".join(lines[1:-1])
     return "\n".join(lines[1:])
 
@@ -461,20 +481,20 @@ def _extract_text_from_message(message: Any) -> str:
     return str(first_block.text)
 
 
-def _call_claude_api(client: Any, prompt: str) -> Any:
+def _call_claude_api(anthropic_client: Any, prompt: str) -> Any:
     """Invoke the Claude messages API with the given prompt.
 
     Separating the raw API call from error handling and response parsing keeps
     _request_ai_confidence_review under 30 lines.
 
     Args:
-        client: An instantiated anthropic.Anthropic client.
+        anthropic_client: An instantiated anthropic.Anthropic client.
         prompt: The user-turn prompt text to send to Claude.
 
     Returns:
         The raw message response object from the Anthropic SDK.
     """
-    return client.messages.create(
+    return anthropic_client.messages.create(
         model=AI_MODEL_NAME,
         max_tokens=AI_RESPONSE_MAX_TOKENS,
         system=AI_REVIEW_SYSTEM_PROMPT,
@@ -505,14 +525,14 @@ def _request_ai_confidence_review(finding: ScanFinding, api_key: str) -> AIRevie
 
     prompt = _build_review_prompt(finding)
     try:
-        message = _call_claude_api(anthropic.Anthropic(api_key=api_key), prompt)
+        claude_response = _call_claude_api(anthropic.Anthropic(api_key=api_key), prompt)
     except anthropic.APIError as api_error:
         raise AIReviewError(
             f"Claude API error reviewing {finding.entity_type} in {finding.file_path}: "
             f"{type(api_error).__name__}"
         ) from api_error
 
-    response_text = _extract_text_from_message(message)
+    response_text = _extract_text_from_message(claude_response)
     try:
         ai_response_payload = _parse_ai_response(response_text)
     except AIReviewError as parse_error:
@@ -528,6 +548,6 @@ def _request_ai_confidence_review(finding: ScanFinding, api_key: str) -> AIRevie
         original_confidence=finding.confidence,
         revised_confidence=ai_response_payload["confidence"],
         is_phi_risk=ai_response_payload["is_phi_risk"],
-        input_tokens=message.usage.input_tokens,
-        output_tokens=message.usage.output_tokens,
+        input_tokens=claude_response.usage.input_tokens,
+        output_tokens=claude_response.usage.output_tokens,
     )

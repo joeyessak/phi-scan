@@ -135,6 +135,36 @@ class TestPhiSafety:
                 remediation_hint=_FINDING_REMEDIATION_HINT,
             )
 
+    def test_empty_code_context_not_in_allowlist_raises_ai_review_error(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        """Empty code_context must be rejected at the AI boundary for unlisted entity types.
+
+        The ScanFinding model permits empty code_context, but the outbound API gate
+        requires the redaction marker (or explicit allowlist membership).  A finding
+        constructed with empty code_context and an entity_type not in
+        AI_REVIEW_PERMITTED_EMPTY_CONTEXT_ENTITY_TYPES must raise AIReviewError
+        before any prompt is assembled or transmitted.
+        """
+        finding_empty_context = ScanFinding(
+            file_path=_FINDING_FILE_PATH,
+            line_number=_FINDING_LINE_NUMBER,
+            entity_type=_FINDING_ENTITY_TYPE,
+            hipaa_category=PhiCategory.SSN,
+            confidence=_CONFIDENCE_IN_BAND,
+            detection_layer=DetectionLayer.REGEX,
+            value_hash=_FINDING_VALUE_HASH,
+            severity=SeverityLevel.HIGH,
+            code_context="",
+            remediation_hint=_FINDING_REMEDIATION_HINT,
+        )
+        monkeypatch.setenv(_ENV_VAR_NAME, _VALID_API_KEY)
+        config = AIReviewConfig(is_enabled=True)
+        with patch("phi_scan.ai_review._call_claude_api") as mock_call:
+            result = apply_ai_review_to_findings([finding_empty_context], config)
+        mock_call.assert_not_called()
+        assert result == [finding_empty_context]
+
 
 # ---------------------------------------------------------------------------
 # resolve_api_key

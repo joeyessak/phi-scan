@@ -101,6 +101,7 @@ __all__ = [
     "AI_RESPONSE_MAX_TOKENS",
     "AI_RESPONSE_REQUIRED_KEYS",
     "AI_RESPONSE_TRUNCATION_LENGTH",
+    "AI_REVIEW_PERMITTED_EMPTY_CONTEXT_ENTITY_TYPES",
     "AI_REVIEW_REDACTED_PLACEHOLDER",
     "AI_REVIEW_SYSTEM_PROMPT",
     "AI_TOKENS_PER_MILLION",
@@ -277,6 +278,14 @@ AI_MESSAGE_CONTENT_KEY: str = "content"
 # Required keys in Claude's JSON response payload.  Using a frozenset guarantees
 # the collection is immutable and hashable — no accidental mutation at call sites.
 AI_RESPONSE_REQUIRED_KEYS: frozenset[str] = frozenset({"is_phi_risk", "confidence", "reasoning"})
+
+# Entity types for which an empty code_context is permitted at the outbound API
+# boundary.  All current production detection layers (regex, NLP, HL7, FHIR,
+# quasi-identifier) always provide at least a segment/field label that includes
+# the redaction marker, so this set is intentionally empty.  A future finding
+# type that carries no source line at all must be added here explicitly — it may
+# NOT silently bypass the redaction check by leaving code_context empty.
+AI_REVIEW_PERMITTED_EMPTY_CONTEXT_ENTITY_TYPES: frozenset[str] = frozenset()
 
 # Index of the first content block in Claude's response message.
 AI_RESPONSE_FIRST_CONTENT_BLOCK_INDEX: int = 0
