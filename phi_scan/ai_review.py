@@ -24,13 +24,16 @@ import json
 import logging
 import os
 from dataclasses import dataclass, field
-from typing import TypedDict
+from typing import Any, TypedDict
 
 from phi_scan.constants import (
     AI_CONFIDENCE_REVIEW_LOWER_BOUND,
     AI_CONFIDENCE_REVIEW_UPPER_BOUND,
     AI_COST_PER_MILLION_INPUT_TOKENS,
     AI_COST_PER_MILLION_OUTPUT_TOKENS,
+    AI_MESSAGE_CONTENT_KEY,
+    AI_MESSAGE_ROLE_KEY,
+    AI_MESSAGE_ROLE_USER,
     AI_MODEL_NAME,
     AI_RESPONSE_MAX_TOKENS,
     AI_REVIEW_REDACTED_PLACEHOLDER,
@@ -65,6 +68,11 @@ _UNEXPECTED_AI_RESPONSE_ERROR_TEMPLATE: str = (
 )
 _UNEXPECTED_CONTENT_BLOCK_ERROR: str = (
     "Claude returned a non-text content block ({block_type!r}) — expected TextBlock"
+)
+_PHI_SAFETY_VIOLATION_ERROR: str = (
+    "PHI safety violation: code_context for {entity_type} does not contain "
+    f"the required redaction marker '{AI_REVIEW_REDACTED_PLACEHOLDER}' — "
+    "this finding must not be sent to any external API"
 )
 
 
@@ -117,11 +125,14 @@ class AIReviewConfig:
 class AIReviewResult:
     """Result of a single Claude confidence review call.
 
+    reasoning is intentionally absent — Claude's explanation may paraphrase PHI
+    context. It is logged at DEBUG level inside _request_ai_confidence_review and
+    immediately discarded rather than stored in this dataclass.
+
     Args:
         original_confidence: Confidence score from the local detection layer.
         revised_confidence: Confidence score returned by Claude.
         is_phi_risk: Whether Claude considers this a genuine PHI risk.
-        reasoning: Claude's reasoning for the score (logged, never stored in findings).
         input_tokens: Tokens consumed in the request (for cost tracking).
         output_tokens: Tokens consumed in the response (for cost tracking).
     """
@@ -129,7 +140,6 @@ class AIReviewResult:
     original_confidence: float
     revised_confidence: float
     is_phi_risk: bool
-    reasoning: str
     input_tokens: int
     output_tokens: int
 
@@ -162,8 +172,8 @@ def apply_ai_review_to_findings(
 
     Findings outside the review band [lower_bound, upper_bound) are returned
     unchanged. Findings within the band are sent to Claude with redacted context;
-    the returned confidence replaces the local score. Findings Claude scores
-    below the original lower_bound are filtered out (false positive eliminated).
+    the returned confidence replaces the local score. Findings Claude scores as
+    not PHI risks are removed (false positives eliminated).
 
     If the Claude API call fails for any finding, that finding is returned with
     its original confidence score — the scan never crashes due to AI unavailability.
@@ -178,8 +188,29 @@ def apply_ai_review_to_findings(
     """
     if not config.is_enabled:
         return findings
-
     api_key = resolve_api_key(config)
+    reviewed_findings, usage_summary = _iterate_and_review_findings(findings, api_key, config)
+    _log_ai_usage_summary(usage_summary)
+    return reviewed_findings
+
+
+def _iterate_and_review_findings(
+    findings: list[ScanFinding],
+    api_key: str,
+    config: AIReviewConfig,
+) -> tuple[list[ScanFinding], AIUsageSummary]:
+    """Iterate findings, dispatch AI review for qualifying ones, accumulate usage.
+
+    Args:
+        findings: All findings from the local detection layers.
+        api_key: Resolved Anthropic API key.
+        config: AI review configuration for band filtering.
+
+    Returns:
+        Tuple of (reviewed_findings, usage_summary) where reviewed_findings has
+        false positives removed and confidence scores updated, and usage_summary
+        aggregates token counts and cost for the scan.
+    """
     reviewed_findings: list[ScanFinding] = []
     total_input_tokens: int = 0
     total_output_tokens: int = 0
@@ -190,26 +221,23 @@ def apply_ai_review_to_findings(
         if not _qualifies_for_review(finding, config):
             reviewed_findings.append(finding)
             continue
-        reviewed, review_result = _apply_review_to_single_finding(finding, api_key)
+        updated_finding, review_result = _apply_review_to_single_finding(finding, api_key)
         if review_result is not None:
             findings_reviewed += 1
             total_input_tokens += review_result.input_tokens
             total_output_tokens += review_result.output_tokens
-            if reviewed is None:
+            if updated_finding is None:
                 false_positives_removed += 1
-        if reviewed is not None:
-            reviewed_findings.append(reviewed)
+        if updated_finding is not None:
+            reviewed_findings.append(updated_finding)
 
-    _log_ai_usage_summary(
-        AIUsageSummary(
-            findings_reviewed=findings_reviewed,
-            false_positives_removed=false_positives_removed,
-            input_tokens=total_input_tokens,
-            output_tokens=total_output_tokens,
-            estimated_cost_usd=_estimate_cost_usd(total_input_tokens, total_output_tokens),
-        )
+    return reviewed_findings, AIUsageSummary(
+        findings_reviewed=findings_reviewed,
+        false_positives_removed=false_positives_removed,
+        input_tokens=total_input_tokens,
+        output_tokens=total_output_tokens,
+        estimated_cost_usd=_estimate_cost_usd(total_input_tokens, total_output_tokens),
     )
-    return reviewed_findings
 
 
 def _apply_review_to_single_finding(
@@ -252,10 +280,9 @@ def _apply_review_to_single_finding(
     )
     if not review_result.is_phi_risk:
         _logger.debug(
-            "AI review eliminated false positive: %s in %s — %s",
+            "AI review eliminated false positive: %s in %s",
             finding.entity_type,
             finding.file_path,
-            review_result.reasoning,
         )
         return None, review_result
 
@@ -268,19 +295,27 @@ def _qualifies_for_review(finding: ScanFinding, config: AIReviewConfig) -> bool:
 
 
 def _redact_phi_from_context(finding: ScanFinding) -> str:
-    """Return the finding's code context, verifying PHI is already redacted.
+    """Return the finding's code context after verifying the redaction marker is present.
 
-    ScanFinding enforces that code_context is set to CODE_CONTEXT_REDACTED_VALUE
-    at construction time, so no raw PHI can be present. This function exists as
-    an explicit named step in the outbound payload pipeline so it is visible to
-    reviewers and auditors.
+    ScanFinding enforces CODE_CONTEXT_REDACTED_VALUE at construction time, making
+    this check redundant under normal operation. It exists as a defence-in-depth
+    gate — if the ScanFinding contract were ever weakened, this explicit check at
+    the outbound API boundary prevents raw PHI from escaping to Claude.
+
+    Empty code_context is permitted (e.g. HL7 segment-only findings that carry no
+    source line). Non-empty code_context without the redaction marker is rejected.
 
     Args:
         finding: A validated ScanFinding whose code_context has been redacted.
 
     Returns:
-        The redacted code context string, safe to transmit to external APIs.
+        The verified code context string, safe to transmit to external APIs.
+
+    Raises:
+        AIReviewError: If code_context is non-empty and lacks the redaction marker.
     """
+    if finding.code_context and AI_REVIEW_REDACTED_PLACEHOLDER not in finding.code_context:
+        raise AIReviewError(_PHI_SAFETY_VIOLATION_ERROR.format(entity_type=finding.entity_type))
     return finding.code_context
 
 
@@ -301,7 +336,6 @@ def _build_review_prompt(finding: ScanFinding) -> str:
     return (
         f"Entity type: {finding.entity_type}\n"
         f"HIPAA category: {finding.hipaa_category.value}\n"
-        f"File: {finding.file_path}\n"
         f"Line: {finding.line_number}\n"
         f"Local confidence: {finding.confidence:.2f}\n"
         f"Code context (PHI replaced with {AI_REVIEW_REDACTED_PLACEHOLDER}):\n"
@@ -401,6 +435,29 @@ def _log_ai_usage_summary(summary: AIUsageSummary) -> None:
     )
 
 
+def _extract_text_from_message(message: Any) -> str:
+    """Extract the text content from a Claude API message response.
+
+    message is typed as Any because anthropic is an optional dependency loaded
+    at runtime — its types are not available at module import time.
+
+    Args:
+        message: A response object from anthropic.Anthropic().messages.create().
+
+    Returns:
+        The text content of the first content block.
+
+    Raises:
+        AIReviewError: If the first content block does not have a text attribute.
+    """
+    first_block = message.content[0]
+    if not hasattr(first_block, "text"):
+        raise AIReviewError(
+            _UNEXPECTED_CONTENT_BLOCK_ERROR.format(block_type=type(first_block).__name__)
+        )
+    return str(first_block.text)
+
+
 def _request_ai_confidence_review(finding: ScanFinding, api_key: str) -> AIReviewResult:
     """Call Claude to review a single medium-confidence finding.
 
@@ -428,7 +485,7 @@ def _request_ai_confidence_review(finding: ScanFinding, api_key: str) -> AIRevie
             model=AI_MODEL_NAME,
             max_tokens=AI_RESPONSE_MAX_TOKENS,
             system=AI_REVIEW_SYSTEM_PROMPT,
-            messages=[{"role": "user", "content": prompt}],
+            messages=[{AI_MESSAGE_ROLE_KEY: AI_MESSAGE_ROLE_USER, AI_MESSAGE_CONTENT_KEY: prompt}],  # type: ignore[misc]
         )
     except anthropic.APIError as api_error:
         raise AIReviewError(
@@ -436,12 +493,7 @@ def _request_ai_confidence_review(finding: ScanFinding, api_key: str) -> AIRevie
             f"{type(api_error).__name__}"
         ) from api_error
 
-    first_block = message.content[0]
-    if not isinstance(first_block, anthropic.types.TextBlock):
-        raise AIReviewError(
-            _UNEXPECTED_CONTENT_BLOCK_ERROR.format(block_type=type(first_block).__name__)
-        )
-    response_text = first_block.text
+    response_text = _extract_text_from_message(message)
     try:
         parsed = _parse_ai_response(response_text)
     except AIReviewError as parse_error:
@@ -453,11 +505,19 @@ def _request_ai_confidence_review(finding: ScanFinding, api_key: str) -> AIRevie
             )
         ) from parse_error
 
+    # Log Claude's reasoning at DEBUG and immediately discard — the string may
+    # paraphrase PHI context and must never be stored in a structured object.
+    _logger.debug(
+        "AI review reasoning for %s: is_phi_risk=%s confidence=%.2f — %s",
+        finding.entity_type,
+        parsed["is_phi_risk"],
+        parsed["confidence"],
+        parsed["reasoning"],
+    )
     return AIReviewResult(
         original_confidence=finding.confidence,
         revised_confidence=parsed["confidence"],
         is_phi_risk=parsed["is_phi_risk"],
-        reasoning=parsed["reasoning"],
         input_tokens=message.usage.input_tokens,
         output_tokens=message.usage.output_tokens,
     )

@@ -252,6 +252,13 @@ AI_RESPONSE_MAX_TOKENS: int = 256
 # API call. Must appear in every outbound payload — verified by sentinel tests.
 AI_REVIEW_REDACTED_PLACEHOLDER: str = "[REDACTED]"
 
+# Keys and values used when constructing the messages list for the Anthropic API.
+# String literals in logic code are banned — these named constants must be used
+# everywhere a messages=[{"role": ..., "content": ...}] payload is built.
+AI_MESSAGE_ROLE_KEY: str = "role"
+AI_MESSAGE_ROLE_USER: str = "user"
+AI_MESSAGE_CONTENT_KEY: str = "content"
+
 # Token cost rates for claude-sonnet-4-6 (USD per million tokens).
 # Used to compute estimated_cost_usd in the per-scan AI usage summary.
 AI_COST_PER_MILLION_INPUT_TOKENS: float = 3.00

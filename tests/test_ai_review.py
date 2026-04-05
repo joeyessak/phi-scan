@@ -56,7 +56,6 @@ _ENV_VAR_NAME: str = "ANTHROPIC_API_KEY"
 
 _AI_REVISED_CONFIDENCE: float = 0.72
 _AI_REVISED_CONFIDENCE_LOW: float = 0.20
-_AI_REASONING: str = "The pattern matches a real SSN format in production code."
 _AI_INPUT_TOKENS: int = 150
 _AI_OUTPUT_TOKENS: int = 48
 
@@ -217,7 +216,6 @@ class TestReviewBandFiltering:
             original_confidence=_CONFIDENCE_AT_LOWER_BOUND,
             revised_confidence=_AI_REVISED_CONFIDENCE,
             is_phi_risk=True,
-            reasoning=_AI_REASONING,
             input_tokens=_AI_INPUT_TOKENS,
             output_tokens=_AI_OUTPUT_TOKENS,
         )
@@ -245,7 +243,6 @@ class TestConfidenceUpdateAndFalsePositive:
             original_confidence=_CONFIDENCE_IN_BAND,
             revised_confidence=_AI_REVISED_CONFIDENCE,
             is_phi_risk=True,
-            reasoning=_AI_REASONING,
             input_tokens=_AI_INPUT_TOKENS,
             output_tokens=_AI_OUTPUT_TOKENS,
         )
@@ -264,7 +261,6 @@ class TestConfidenceUpdateAndFalsePositive:
             original_confidence=_CONFIDENCE_IN_BAND,
             revised_confidence=_AI_REVISED_CONFIDENCE_LOW,
             is_phi_risk=False,
-            reasoning="This is a test fixture, not production code.",
             input_tokens=_AI_INPUT_TOKENS,
             output_tokens=_AI_OUTPUT_TOKENS,
         )
@@ -283,7 +279,6 @@ class TestConfidenceUpdateAndFalsePositive:
             original_confidence=_CONFIDENCE_IN_BAND,
             revised_confidence=_AI_REVISED_CONFIDENCE,
             is_phi_risk=True,
-            reasoning=_AI_REASONING,
             input_tokens=_AI_INPUT_TOKENS,
             output_tokens=_AI_OUTPUT_TOKENS,
         )
@@ -327,7 +322,6 @@ class TestGracefulFallback:
             original_confidence=passing_finding.confidence,
             revised_confidence=_AI_REVISED_CONFIDENCE,
             is_phi_risk=True,
-            reasoning=_AI_REASONING,
             input_tokens=_AI_INPUT_TOKENS,
             output_tokens=_AI_OUTPUT_TOKENS,
         )
@@ -404,7 +398,6 @@ class TestTokenUsageLogging:
             original_confidence=_CONFIDENCE_IN_BAND,
             revised_confidence=_AI_REVISED_CONFIDENCE,
             is_phi_risk=True,
-            reasoning=_AI_REASONING,
             input_tokens=_EXPECTED_INPUT_TOKENS,
             output_tokens=_EXPECTED_OUTPUT_TOKENS,
         )
@@ -426,7 +419,6 @@ class TestTokenUsageLogging:
             original_confidence=_CONFIDENCE_IN_BAND,
             revised_confidence=_AI_REVISED_CONFIDENCE_LOW,
             is_phi_risk=False,
-            reasoning="Test fixture — not real PHI.",
             input_tokens=_EXPECTED_INPUT_TOKENS,
             output_tokens=_EXPECTED_OUTPUT_TOKENS,
         )
