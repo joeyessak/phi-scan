@@ -89,6 +89,23 @@ __all__ = [
     "ACTION_TAKEN_PASS",
     "ACTION_TAKEN_FAIL",
     "ACTION_TAKEN_WARN",
+    "AI_CONFIDENCE_REVIEW_LOWER_BOUND",
+    "AI_CONFIDENCE_REVIEW_UPPER_BOUND",
+    "AI_COST_PER_MILLION_INPUT_TOKENS",
+    "AI_COST_PER_MILLION_OUTPUT_TOKENS",
+    "AI_MESSAGE_CONTENT_KEY",
+    "AI_MESSAGE_ROLE_KEY",
+    "AI_MESSAGE_ROLE_USER",
+    "AI_MODEL_NAME",
+    "AI_RESPONSE_FIRST_CONTENT_BLOCK_INDEX",
+    "AI_RESPONSE_MAX_TOKENS",
+    "AI_RESPONSE_REQUIRED_KEYS",
+    "AI_RESPONSE_TRUNCATION_LENGTH",
+    "ANTHROPIC_API_KEY_ENV_VAR",
+    "AI_REVIEW_PERMITTED_EMPTY_CONTEXT_ENTITY_TYPES",
+    "AI_REVIEW_REDACTED_PLACEHOLDER",
+    "AI_REVIEW_SYSTEM_PROMPT",
+    "AI_TOKENS_PER_MILLION",
 ]
 
 # ---------------------------------------------------------------------------
@@ -228,6 +245,81 @@ CONFIDENCE_STRUCTURED_MAX: float = 0.95
 # Layer 4 (AI) refines an existing score by at most this amount in either
 # direction. Do not compare this constant against raw confidence scores.
 AI_LAYER_CONFIDENCE_ADJUSTMENT_MAX: float = 0.15
+
+# ---------------------------------------------------------------------------
+# AI confidence review band (Phase 7A)
+# ---------------------------------------------------------------------------
+
+# Findings with confidence in [AI_CONFIDENCE_REVIEW_LOWER_BOUND,
+# AI_CONFIDENCE_REVIEW_UPPER_BOUND) are sent to Claude for re-scoring.
+# High-confidence findings (≥ upper bound) bypass AI review entirely —
+# they are already definitive and the API call adds no value.
+# Low-confidence findings (< lower bound) are below the scan threshold
+# and are never reported regardless of AI review.
+# Environment variable name for the Anthropic API key — part of the public BYOAK
+# contract documented in ai_review.py and user-facing documentation.  Exported so
+# any module that reads this env var can import the name rather than duplicate it.
+ANTHROPIC_API_KEY_ENV_VAR: str = "ANTHROPIC_API_KEY"
+
+AI_CONFIDENCE_REVIEW_LOWER_BOUND: float = 0.50
+AI_CONFIDENCE_REVIEW_UPPER_BOUND: float = 0.80
+
+# Claude model used for confidence review.
+AI_MODEL_NAME: str = "claude-sonnet-4-6"
+
+# Maximum tokens in Claude's response — the JSON answer is short.
+AI_RESPONSE_MAX_TOKENS: int = 256
+
+# Placeholder that replaces matched PHI values in code context before any
+# API call. Must appear in every outbound payload — verified by sentinel tests.
+AI_REVIEW_REDACTED_PLACEHOLDER: str = "[REDACTED]"
+
+# Keys and values used when constructing the messages list for the Anthropic API.
+# String literals in logic code are banned — these named constants must be used
+# everywhere a messages=[{"role": ..., "content": ...}] payload is built.
+AI_MESSAGE_ROLE_KEY: str = "role"
+AI_MESSAGE_ROLE_USER: str = "user"
+AI_MESSAGE_CONTENT_KEY: str = "content"
+
+# Keys Claude must return for the response to be actionable. Only the fields we
+# actually read and act on are required — reasoning is intentionally excluded:
+# we have explicitly decided not to store or log it (PHI-adjacent), so requiring
+# it would create an implicit dependency on a field we throw away and would fail
+# scans if Claude omits it in a future model version.
+AI_RESPONSE_REQUIRED_KEYS: frozenset[str] = frozenset({"is_phi_risk", "confidence"})
+
+# Entity types for which an empty code_context is permitted at the outbound API
+# boundary.  All current production detection layers (regex, NLP, HL7, FHIR,
+# quasi-identifier) always provide at least a segment/field label that includes
+# the redaction marker, so this set is intentionally empty.  A future finding
+# type that carries no source line at all must be added here explicitly — it may
+# NOT silently bypass the redaction check by leaving code_context empty.
+AI_REVIEW_PERMITTED_EMPTY_CONTEXT_ENTITY_TYPES: frozenset[str] = frozenset()
+
+# Index of the first content block in Claude's response message.
+AI_RESPONSE_FIRST_CONTENT_BLOCK_INDEX: int = 0
+
+# Maximum characters of a raw Claude response included in error messages.
+# Enough context to diagnose malformed JSON without logging verbose output.
+AI_RESPONSE_TRUNCATION_LENGTH: int = 200
+
+# Token cost rates for claude-sonnet-4-6 (USD per million tokens).
+# Used to compute estimated_cost_usd in the per-scan AI usage summary.
+AI_COST_PER_MILLION_INPUT_TOKENS: float = 3.00
+AI_COST_PER_MILLION_OUTPUT_TOKENS: float = 15.00
+AI_TOKENS_PER_MILLION: int = 1_000_000
+
+# System prompt for Claude confidence review calls.
+AI_REVIEW_SYSTEM_PROMPT: str = (
+    "You are a HIPAA compliance expert reviewing code for PHI/PII risk. "
+    "You will be shown code context where the matched value has been replaced "
+    "with [REDACTED]. Based only on the code structure, variable names, and "
+    "surrounding context, determine whether this is a genuine PHI risk in "
+    "production code or a false positive (test data, example values, config "
+    "templates, comments, etc.). "
+    "Respond ONLY with valid JSON in this exact format: "
+    '{"is_phi_risk": true, "confidence": 0.85, "reasoning": "brief explanation"}'
+)
 
 # ---------------------------------------------------------------------------
 # File size limit
