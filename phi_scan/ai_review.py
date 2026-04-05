@@ -24,14 +24,18 @@ import json
 import logging
 import os
 from dataclasses import dataclass, field
+from typing import TypedDict
 
 from phi_scan.constants import (
     AI_CONFIDENCE_REVIEW_LOWER_BOUND,
     AI_CONFIDENCE_REVIEW_UPPER_BOUND,
+    AI_COST_PER_MILLION_INPUT_TOKENS,
+    AI_COST_PER_MILLION_OUTPUT_TOKENS,
     AI_MODEL_NAME,
     AI_RESPONSE_MAX_TOKENS,
     AI_REVIEW_REDACTED_PLACEHOLDER,
     AI_REVIEW_SYSTEM_PROMPT,
+    AI_TOKENS_PER_MILLION,
 )
 from phi_scan.exceptions import AIConfigurationError, AIReviewError
 from phi_scan.models import ScanFinding
@@ -39,6 +43,7 @@ from phi_scan.models import ScanFinding
 __all__ = [
     "AIReviewConfig",
     "AIReviewResult",
+    "AIUsageSummary",
     "apply_ai_review_to_findings",
     "resolve_api_key",
 ]
@@ -58,6 +63,36 @@ _AI_IMPORT_ERROR: str = (
 _UNEXPECTED_AI_RESPONSE_ERROR_TEMPLATE: str = (
     "Unexpected AI response structure for finding {entity_type} in {file_path}: {error}"
 )
+_UNEXPECTED_CONTENT_BLOCK_ERROR: str = (
+    "Claude returned a non-text content block ({block_type!r}) — expected TextBlock"
+)
+
+
+class _AIResponsePayload(TypedDict):
+    """Typed structure of the JSON object Claude returns for confidence review."""
+
+    is_phi_risk: bool
+    confidence: float
+    reasoning: str
+
+
+@dataclass
+class AIUsageSummary:
+    """Aggregated token usage and cost across all AI review calls in one scan.
+
+    Args:
+        findings_reviewed: Number of findings sent to Claude for re-scoring.
+        false_positives_removed: Findings Claude determined were not PHI risks.
+        input_tokens: Total prompt tokens consumed across all API calls.
+        output_tokens: Total completion tokens consumed across all API calls.
+        estimated_cost_usd: Estimated API cost in USD based on published token rates.
+    """
+
+    findings_reviewed: int
+    false_positives_removed: int
+    input_tokens: int
+    output_tokens: int
+    estimated_cost_usd: float
 
 
 @dataclass
@@ -146,32 +181,53 @@ def apply_ai_review_to_findings(
 
     api_key = resolve_api_key(config)
     reviewed_findings: list[ScanFinding] = []
+    total_input_tokens: int = 0
+    total_output_tokens: int = 0
+    findings_reviewed: int = 0
+    false_positives_removed: int = 0
 
     for finding in findings:
         if not _qualifies_for_review(finding, config):
             reviewed_findings.append(finding)
             continue
-        reviewed = _apply_review_to_single_finding(finding, api_key)
+        reviewed, review_result = _apply_review_to_single_finding(finding, api_key)
+        if review_result is not None:
+            findings_reviewed += 1
+            total_input_tokens += review_result.input_tokens
+            total_output_tokens += review_result.output_tokens
+            if reviewed is None:
+                false_positives_removed += 1
         if reviewed is not None:
             reviewed_findings.append(reviewed)
 
+    _log_ai_usage_summary(
+        AIUsageSummary(
+            findings_reviewed=findings_reviewed,
+            false_positives_removed=false_positives_removed,
+            input_tokens=total_input_tokens,
+            output_tokens=total_output_tokens,
+            estimated_cost_usd=_estimate_cost_usd(total_input_tokens, total_output_tokens),
+        )
+    )
     return reviewed_findings
 
 
-def _apply_review_to_single_finding(finding: ScanFinding, api_key: str) -> ScanFinding | None:
-    """Call Claude for one finding and return the updated finding, or None to discard.
+def _apply_review_to_single_finding(
+    finding: ScanFinding, api_key: str
+) -> tuple[ScanFinding | None, AIReviewResult | None]:
+    """Call Claude for one finding and return the result alongside the updated finding.
 
-    Returns None when Claude determines the finding is not a PHI risk (false positive
-    eliminated). Returns the original finding unchanged when the API call fails so the
-    scan can continue with the local confidence score.
+    The second tuple element is None when the API call fails — callers use this to
+    distinguish a skipped review from a completed review that eliminated the finding.
 
     Args:
         finding: A medium-confidence finding whose code_context is already redacted.
         api_key: Resolved Anthropic API key.
 
     Returns:
-        Updated ScanFinding with revised confidence, or None if not a PHI risk.
-        Original ScanFinding when the API call raises AIReviewError.
+        (updated_finding, review_result): updated_finding is None when Claude
+        determines the finding is not a PHI risk, or the original finding on API
+        failure. review_result is None on API failure, populated otherwise.
     """
     try:
         review_result = _request_ai_confidence_review(finding, api_key)
@@ -182,7 +238,7 @@ def _apply_review_to_single_finding(finding: ScanFinding, api_key: str) -> ScanF
             finding.file_path,
             review_error,
         )
-        return finding
+        return finding, None
 
     _logger.info(
         "AI review: %s in %s — original=%.2f revised=%.2f phi_risk=%s tokens=%d+%d",
@@ -201,9 +257,9 @@ def _apply_review_to_single_finding(finding: ScanFinding, api_key: str) -> ScanF
             finding.file_path,
             review_result.reasoning,
         )
-        return None
+        return None, review_result
 
-    return dataclasses.replace(finding, confidence=review_result.revised_confidence)
+    return dataclasses.replace(finding, confidence=review_result.revised_confidence), review_result
 
 
 def _qualifies_for_review(finding: ScanFinding, config: AIReviewConfig) -> bool:
@@ -277,14 +333,14 @@ def _strip_markdown_fence(response_text: str) -> str:
     return "\n".join(lines[1:])
 
 
-def _parse_ai_response(response_text: str) -> dict[str, object]:
-    """Parse Claude's JSON response into a dict with required keys.
+def _parse_ai_response(response_text: str) -> _AIResponsePayload:
+    """Parse Claude's JSON response into a typed payload.
 
     Args:
         response_text: Raw text response from Claude.
 
     Returns:
-        Dict with keys: is_phi_risk (bool), confidence (float), reasoning (str).
+        _AIResponsePayload with is_phi_risk, confidence, and reasoning fields.
 
     Raises:
         AIReviewError: If the response cannot be parsed or is missing required keys.
@@ -304,7 +360,45 @@ def _parse_ai_response(response_text: str) -> dict[str, object]:
         raise AIReviewError(
             f"AI response missing required keys {missing!r} — response: {response_text[:200]}"
         )
-    return parsed  # type: ignore[return-value]
+    return _AIResponsePayload(
+        is_phi_risk=bool(parsed["is_phi_risk"]),
+        confidence=float(parsed["confidence"]),
+        reasoning=str(parsed["reasoning"]),
+    )
+
+
+def _estimate_cost_usd(input_tokens: int, output_tokens: int) -> float:
+    """Calculate estimated API cost in USD from token counts.
+
+    Args:
+        input_tokens: Total prompt tokens consumed.
+        output_tokens: Total completion tokens consumed.
+
+    Returns:
+        Estimated cost in USD based on published claude-sonnet-4-6 rates.
+    """
+    input_cost = (input_tokens / AI_TOKENS_PER_MILLION) * AI_COST_PER_MILLION_INPUT_TOKENS
+    output_cost = (output_tokens / AI_TOKENS_PER_MILLION) * AI_COST_PER_MILLION_OUTPUT_TOKENS
+    return input_cost + output_cost
+
+
+def _log_ai_usage_summary(summary: AIUsageSummary) -> None:
+    """Emit a structured INFO log line with per-scan AI token usage and cost.
+
+    Args:
+        summary: Aggregated token usage for the completed scan.
+    """
+    if summary.findings_reviewed == 0:
+        return
+    _logger.info(
+        "AI review scan summary: reviewed=%d eliminated=%d "
+        "input_tokens=%d output_tokens=%d estimated_cost_usd=$%.4f",
+        summary.findings_reviewed,
+        summary.false_positives_removed,
+        summary.input_tokens,
+        summary.output_tokens,
+        summary.estimated_cost_usd,
+    )
 
 
 def _request_ai_confidence_review(finding: ScanFinding, api_key: str) -> AIReviewResult:
@@ -342,7 +436,12 @@ def _request_ai_confidence_review(finding: ScanFinding, api_key: str) -> AIRevie
             f"{type(api_error).__name__}"
         ) from api_error
 
-    response_text = message.content[0].text
+    first_block = message.content[0]
+    if not isinstance(first_block, anthropic.types.TextBlock):
+        raise AIReviewError(
+            _UNEXPECTED_CONTENT_BLOCK_ERROR.format(block_type=type(first_block).__name__)
+        )
+    response_text = first_block.text
     try:
         parsed = _parse_ai_response(response_text)
     except AIReviewError as parse_error:
@@ -356,9 +455,9 @@ def _request_ai_confidence_review(finding: ScanFinding, api_key: str) -> AIRevie
 
     return AIReviewResult(
         original_confidence=finding.confidence,
-        revised_confidence=float(parsed["confidence"]),
-        is_phi_risk=bool(parsed["is_phi_risk"]),
-        reasoning=str(parsed["reasoning"]),
+        revised_confidence=parsed["confidence"],
+        is_phi_risk=parsed["is_phi_risk"],
+        reasoning=parsed["reasoning"],
         input_tokens=message.usage.input_tokens,
         output_tokens=message.usage.output_tokens,
     )

@@ -252,6 +252,12 @@ AI_RESPONSE_MAX_TOKENS: int = 256
 # API call. Must appear in every outbound payload — verified by sentinel tests.
 AI_REVIEW_REDACTED_PLACEHOLDER: str = "[REDACTED]"
 
+# Token cost rates for claude-sonnet-4-6 (USD per million tokens).
+# Used to compute estimated_cost_usd in the per-scan AI usage summary.
+AI_COST_PER_MILLION_INPUT_TOKENS: float = 3.00
+AI_COST_PER_MILLION_OUTPUT_TOKENS: float = 15.00
+AI_TOKENS_PER_MILLION: int = 1_000_000
+
 # System prompt for Claude confidence review calls.
 AI_REVIEW_SYSTEM_PROMPT: str = (
     "You are a HIPAA compliance expert reviewing code for PHI/PII risk. "

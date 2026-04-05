@@ -1892,7 +1892,7 @@ matches bypass Claude entirely.
 - [x] **7A.7** Cost control — skip Claude for high-confidence (≥ 0.8) and regex-only matches entirely
 - [x] **7A.8** Config: `ai.enable_claude_review: false` by default in `.phi-scanner.yml`
 - [x] **7A.9** BYOAK — read API key from `ANTHROPIC_API_KEY` env var OR `ai.anthropic_api_key` in config; clear error if AI enabled but no key found
-- [ ] **7A.10** Token usage logging — log input/output tokens and estimated cost per scan to audit log
+- [x] **7A.10** Token usage logging — log input/output tokens and estimated cost per scan to audit log
 
 ### 7B — GitHub Action
 

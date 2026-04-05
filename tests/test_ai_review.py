@@ -15,6 +15,7 @@ import pytest
 from phi_scan.ai_review import (
     AIReviewConfig,
     AIReviewResult,
+    AIUsageSummary,
     apply_ai_review_to_findings,
     resolve_api_key,
 )
@@ -380,6 +381,93 @@ class TestParseAiResponse:
         response = json.dumps({"is_phi_risk": True, "confidence": 0.8})
         with pytest.raises(AIReviewError, match="missing required keys"):
             _parse_ai_response(response)
+
+
+# ---------------------------------------------------------------------------
+# Token usage logging — 7A.10
+# ---------------------------------------------------------------------------
+
+_EXPECTED_INPUT_TOKENS: int = _AI_INPUT_TOKENS
+_EXPECTED_OUTPUT_TOKENS: int = _AI_OUTPUT_TOKENS
+
+
+class TestTokenUsageLogging:
+    """Token counts are accumulated and logged as a scan-level summary."""
+
+    def test_usage_summary_logged_when_findings_reviewed(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv(_ENV_VAR_NAME, _VALID_API_KEY)
+        finding = _build_finding(_CONFIDENCE_IN_BAND)
+        config = AIReviewConfig(is_enabled=True)
+        review_result = AIReviewResult(
+            original_confidence=_CONFIDENCE_IN_BAND,
+            revised_confidence=_AI_REVISED_CONFIDENCE,
+            is_phi_risk=True,
+            reasoning=_AI_REASONING,
+            input_tokens=_EXPECTED_INPUT_TOKENS,
+            output_tokens=_EXPECTED_OUTPUT_TOKENS,
+        )
+        with patch("phi_scan.ai_review._request_ai_confidence_review", return_value=review_result):
+            with patch("phi_scan.ai_review._log_ai_usage_summary") as mock_log:
+                apply_ai_review_to_findings([finding], config)
+        mock_log.assert_called_once()
+        summary: AIUsageSummary = mock_log.call_args[0][0]
+        assert summary.findings_reviewed == 1
+        assert summary.input_tokens == _EXPECTED_INPUT_TOKENS
+        assert summary.output_tokens == _EXPECTED_OUTPUT_TOKENS
+        assert summary.estimated_cost_usd > 0
+
+    def test_false_positives_counted_in_summary(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv(_ENV_VAR_NAME, _VALID_API_KEY)
+        finding = _build_finding(_CONFIDENCE_IN_BAND)
+        config = AIReviewConfig(is_enabled=True)
+        review_result = AIReviewResult(
+            original_confidence=_CONFIDENCE_IN_BAND,
+            revised_confidence=_AI_REVISED_CONFIDENCE_LOW,
+            is_phi_risk=False,
+            reasoning="Test fixture — not real PHI.",
+            input_tokens=_EXPECTED_INPUT_TOKENS,
+            output_tokens=_EXPECTED_OUTPUT_TOKENS,
+        )
+        with patch("phi_scan.ai_review._request_ai_confidence_review", return_value=review_result):
+            with patch("phi_scan.ai_review._log_ai_usage_summary") as mock_log:
+                apply_ai_review_to_findings([finding], config)
+        summary: AIUsageSummary = mock_log.call_args[0][0]
+        assert summary.false_positives_removed == 1
+
+    def test_tokens_not_counted_on_api_failure(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setenv(_ENV_VAR_NAME, _VALID_API_KEY)
+        finding = _build_finding(_CONFIDENCE_IN_BAND)
+        config = AIReviewConfig(is_enabled=True)
+        with patch(
+            "phi_scan.ai_review._request_ai_confidence_review",
+            side_effect=AIReviewError("timeout"),
+        ):
+            with patch("phi_scan.ai_review._log_ai_usage_summary") as mock_log:
+                apply_ai_review_to_findings([finding], config)
+        summary: AIUsageSummary = mock_log.call_args[0][0]
+        assert summary.findings_reviewed == 0
+        assert summary.input_tokens == 0
+        assert summary.output_tokens == 0
+
+    def test_cost_estimate_is_positive_for_nonzero_tokens(self) -> None:
+        from phi_scan.ai_review import _estimate_cost_usd
+
+        cost = _estimate_cost_usd(1000, 200)
+        assert cost > 0
+
+    def test_no_summary_logged_when_no_findings_reviewed(
+        self, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        monkeypatch.setenv(_ENV_VAR_NAME, _VALID_API_KEY)
+        finding = _build_finding(_CONFIDENCE_ABOVE_BAND)
+        config = AIReviewConfig(is_enabled=True)
+        with patch("phi_scan.ai_review._log_ai_usage_summary") as mock_log:
+            apply_ai_review_to_findings([finding], config)
+        mock_log.assert_called_once()
+        summary: AIUsageSummary = mock_log.call_args[0][0]
+        assert summary.findings_reviewed == 0
 
 
 # ---------------------------------------------------------------------------
