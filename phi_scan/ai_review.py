@@ -35,7 +35,10 @@ from phi_scan.constants import (
     AI_MESSAGE_ROLE_KEY,
     AI_MESSAGE_ROLE_USER,
     AI_MODEL_NAME,
+    AI_RESPONSE_FIRST_CONTENT_BLOCK_INDEX,
     AI_RESPONSE_MAX_TOKENS,
+    AI_RESPONSE_REQUIRED_KEYS,
+    AI_RESPONSE_TRUNCATION_LENGTH,
     AI_REVIEW_REDACTED_PLACEHOLDER,
     AI_REVIEW_SYSTEM_PROMPT,
     AI_TOKENS_PER_MILLION,
@@ -381,23 +384,23 @@ def _parse_ai_response(response_text: str) -> _AIResponsePayload:
     """
     fence_stripped_response = _strip_markdown_fence(response_text)
     try:
-        parsed = json.loads(fence_stripped_response)
+        raw_payload = json.loads(fence_stripped_response)
     except (json.JSONDecodeError, ValueError) as parse_error:
         raise AIReviewError(
             f"Could not parse AI response as JSON: {parse_error!r} — "
-            f"response: {response_text[:200]}"
+            f"response: {response_text[:AI_RESPONSE_TRUNCATION_LENGTH]}"
         ) from parse_error
 
-    required_keys = {"is_phi_risk", "confidence", "reasoning"}
-    missing = required_keys - parsed.keys()
+    missing = AI_RESPONSE_REQUIRED_KEYS - raw_payload.keys()
     if missing:
         raise AIReviewError(
-            f"AI response missing required keys {missing!r} — response: {response_text[:200]}"
+            f"AI response missing required keys {missing!r} — "
+            f"response: {response_text[:AI_RESPONSE_TRUNCATION_LENGTH]}"
         )
     return _AIResponsePayload(
-        is_phi_risk=bool(parsed["is_phi_risk"]),
-        confidence=float(parsed["confidence"]),
-        reasoning=str(parsed["reasoning"]),
+        is_phi_risk=bool(raw_payload["is_phi_risk"]),
+        confidence=float(raw_payload["confidence"]),
+        reasoning=str(raw_payload["reasoning"]),
     )
 
 
@@ -450,12 +453,35 @@ def _extract_text_from_message(message: Any) -> str:
     Raises:
         AIReviewError: If the first content block does not have a text attribute.
     """
-    first_block = message.content[0]
+    first_block = message.content[AI_RESPONSE_FIRST_CONTENT_BLOCK_INDEX]
     if not hasattr(first_block, "text"):
         raise AIReviewError(
             _UNEXPECTED_CONTENT_BLOCK_ERROR.format(block_type=type(first_block).__name__)
         )
     return str(first_block.text)
+
+
+def _call_claude_api(client: Any, prompt: str) -> Any:
+    """Invoke the Claude messages API with the given prompt.
+
+    Separating the raw API call from error handling and response parsing keeps
+    _request_ai_confidence_review under 30 lines.
+
+    Args:
+        client: An instantiated anthropic.Anthropic client.
+        prompt: The user-turn prompt text to send to Claude.
+
+    Returns:
+        The raw message response object from the Anthropic SDK.
+    """
+    return client.messages.create(
+        model=AI_MODEL_NAME,
+        max_tokens=AI_RESPONSE_MAX_TOKENS,
+        system=AI_REVIEW_SYSTEM_PROMPT,
+        messages=[  # type: ignore[misc, unused-ignore]
+            {AI_MESSAGE_ROLE_KEY: AI_MESSAGE_ROLE_USER, AI_MESSAGE_CONTENT_KEY: prompt}
+        ],
+    )
 
 
 def _request_ai_confidence_review(finding: ScanFinding, api_key: str) -> AIReviewResult:
@@ -478,15 +504,8 @@ def _request_ai_confidence_review(finding: ScanFinding, api_key: str) -> AIRevie
         raise AIConfigurationError(_AI_IMPORT_ERROR) from import_error
 
     prompt = _build_review_prompt(finding)
-
     try:
-        client = anthropic.Anthropic(api_key=api_key)
-        message = client.messages.create(
-            model=AI_MODEL_NAME,
-            max_tokens=AI_RESPONSE_MAX_TOKENS,
-            system=AI_REVIEW_SYSTEM_PROMPT,
-            messages=[{AI_MESSAGE_ROLE_KEY: AI_MESSAGE_ROLE_USER, AI_MESSAGE_CONTENT_KEY: prompt}],  # type: ignore[misc]
-        )
+        message = _call_claude_api(anthropic.Anthropic(api_key=api_key), prompt)
     except anthropic.APIError as api_error:
         raise AIReviewError(
             f"Claude API error reviewing {finding.entity_type} in {finding.file_path}: "
@@ -495,7 +514,7 @@ def _request_ai_confidence_review(finding: ScanFinding, api_key: str) -> AIRevie
 
     response_text = _extract_text_from_message(message)
     try:
-        parsed = _parse_ai_response(response_text)
+        ai_response_payload = _parse_ai_response(response_text)
     except AIReviewError as parse_error:
         raise AIReviewError(
             _UNEXPECTED_AI_RESPONSE_ERROR_TEMPLATE.format(
@@ -505,19 +524,10 @@ def _request_ai_confidence_review(finding: ScanFinding, api_key: str) -> AIRevie
             )
         ) from parse_error
 
-    # Log Claude's reasoning at DEBUG and immediately discard — the string may
-    # paraphrase PHI context and must never be stored in a structured object.
-    _logger.debug(
-        "AI review reasoning for %s: is_phi_risk=%s confidence=%.2f — %s",
-        finding.entity_type,
-        parsed["is_phi_risk"],
-        parsed["confidence"],
-        parsed["reasoning"],
-    )
     return AIReviewResult(
         original_confidence=finding.confidence,
-        revised_confidence=parsed["confidence"],
-        is_phi_risk=parsed["is_phi_risk"],
+        revised_confidence=ai_response_payload["confidence"],
+        is_phi_risk=ai_response_payload["is_phi_risk"],
         input_tokens=message.usage.input_tokens,
         output_tokens=message.usage.output_tokens,
     )
