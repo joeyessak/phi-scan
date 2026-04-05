@@ -971,9 +971,9 @@ def _emit_verbose_phase(message: str, is_verbose: bool) -> None:
     typer.echo(_VERBOSE_PHASE_PREFIX.format(timestamp=timestamp, message=message), err=True)
 
 
-def _write_path_with_error_handling(write_fn: Callable[[Path], object], report_path: Path) -> None:
+def _invoke_report_writer(write_callable: Callable[[Path], object], report_path: Path) -> None:
     try:
-        write_fn(report_path)
+        write_callable(report_path)
     except OSError as write_error:
         typer.echo(_REPORT_PATH_WRITE_ERROR.format(path=report_path, error=write_error), err=True)
         raise typer.Exit(code=EXIT_CODE_ERROR) from write_error
@@ -990,7 +990,7 @@ def _write_report_to_file(content: str, report_path: Path) -> None:
     Raises:
         typer.Exit: If the file cannot be written (e.g. permission error).
     """
-    _write_path_with_error_handling(
+    _invoke_report_writer(
         lambda p: p.write_text(content, encoding=DEFAULT_TEXT_ENCODING), report_path
     )
 
@@ -1005,7 +1005,7 @@ def _write_report_bytes_to_file(content: bytes, report_path: Path) -> None:
     Raises:
         typer.Exit: If the file cannot be written (e.g. permission error).
     """
-    _write_path_with_error_handling(lambda p: p.write_bytes(content), report_path)
+    _invoke_report_writer(lambda p: p.write_bytes(content), report_path)
 
 
 def _generate_report_bytes(
