@@ -272,6 +272,7 @@ ANTHROPIC_API_KEY_ENV_VAR: str = "ANTHROPIC_API_KEY"
 OPENAI_API_KEY_ENV_VAR: str = "OPENAI_API_KEY"
 GOOGLE_API_KEY_ENV_VAR: str = "GOOGLE_API_KEY"
 
+
 class AIProviderName(StrEnum):
     """Identifies which external AI provider backs a model name.
 
@@ -282,6 +283,7 @@ class AIProviderName(StrEnum):
     ANTHROPIC = "anthropic"
     OPENAI = "openai"
     GOOGLE = "google"
+
 
 AI_CONFIDENCE_REVIEW_LOWER_BOUND: float = 0.50
 AI_CONFIDENCE_REVIEW_UPPER_BOUND: float = 0.80
