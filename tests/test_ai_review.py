@@ -548,9 +548,7 @@ class TestABComparison:
       - delta == number of false positives removed
     """
 
-    def test_ai_review_reduces_false_positive_count(
-        self, monkeypatch: pytest.MonkeyPatch
-    ) -> None:
+    def test_ai_review_reduces_false_positive_count(self, monkeypatch: pytest.MonkeyPatch) -> None:
         monkeypatch.setenv(_ENV_VAR_NAME, _VALID_API_KEY)
         findings = [_build_finding(_CONFIDENCE_IN_BAND) for _ in range(_AB_FINDINGS_TOTAL)]
         false_positive_indices = set(range(_AB_FALSE_POSITIVE_COUNT))
