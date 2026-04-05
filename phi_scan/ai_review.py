@@ -51,6 +51,7 @@ from phi_scan.constants import (
     AI_REVIEW_REDACTED_PLACEHOLDER,
     AI_REVIEW_SYSTEM_PROMPT,
     AI_TOKENS_PER_MILLION,
+    AI_ZERO_TOKEN_COUNT,
     ANTHROPIC_API_KEY_ENV_VAR,
     GOOGLE_API_KEY_ENV_VAR,
     OPENAI_API_KEY_ENV_VAR,
@@ -461,7 +462,7 @@ class _OpenAIProvider:
         usage = response.usage
         if usage is None:
             _logger.warning(_USAGE_METRICS_UNAVAILABLE_WARNING, model)
-            return first_choice.message.content, 0, 0
+            return first_choice.message.content, AI_ZERO_TOKEN_COUNT, AI_ZERO_TOKEN_COUNT
         return first_choice.message.content, usage.prompt_tokens, usage.completion_tokens
 
 
@@ -501,7 +502,7 @@ class _GoogleProvider:
         usage = response.usage_metadata
         if usage is None:
             _logger.warning(_USAGE_METRICS_UNAVAILABLE_WARNING, model)
-            return response_text, 0, 0
+            return response_text, AI_ZERO_TOKEN_COUNT, AI_ZERO_TOKEN_COUNT
         return response_text, usage.prompt_token_count, usage.candidates_token_count
 
 
@@ -743,11 +744,11 @@ def _calculate_cost_usd(model: str, input_tokens: int, output_tokens: int) -> fl
         Estimated cost in USD.
     """
     try:
-        provider = _detect_provider_name(model)
+        provider_name = _detect_provider_name(model)
     except AIConfigurationError:
         _logger.warning(_COST_FALLBACK_WARNING, model)
-        provider = AIProviderName.ANTHROPIC
-    input_rate, output_rate = _PROVIDER_COST_RATES[provider]
+        provider_name = AIProviderName.ANTHROPIC
+    input_rate, output_rate = _PROVIDER_COST_RATES[provider_name]
     input_cost = (input_tokens / AI_TOKENS_PER_MILLION) * input_rate
     output_cost = (output_tokens / AI_TOKENS_PER_MILLION) * output_rate
     return input_cost + output_cost

@@ -106,6 +106,7 @@ __all__ = [
     "AI_RESPONSE_FIRST_CHOICE_INDEX",
     "AI_RESPONSE_FIRST_CONTENT_BLOCK_INDEX",
     "AI_RESPONSE_MAX_TOKENS",
+    "AI_ZERO_TOKEN_COUNT",
     "AI_RESPONSE_REQUIRED_KEYS",
     "AI_RESPONSE_TRUNCATION_LENGTH",
     "ANTHROPIC_API_KEY_ENV_VAR",
@@ -295,6 +296,8 @@ AI_DEFAULT_MODEL: str = "claude-sonnet-4-6"
 
 # Maximum tokens in Claude's response — the JSON answer is short.
 AI_RESPONSE_MAX_TOKENS: int = 256
+# Token count returned when the provider reports no usage metadata.
+AI_ZERO_TOKEN_COUNT: int = 0
 
 # Placeholder that replaces matched PHI values in code context before any
 # API call. Must appear in every outbound payload — verified by sentinel tests.
