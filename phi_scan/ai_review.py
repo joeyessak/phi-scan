@@ -136,8 +136,10 @@ class AIReviewResult:
     """Result of a single Claude confidence review call.
 
     reasoning is intentionally absent — Claude's explanation may paraphrase PHI
-    context. It is logged at DEBUG level inside _request_ai_confidence_review and
-    immediately discarded rather than stored in this dataclass.
+    context. It is parsed inside _request_ai_confidence_review and immediately
+    discarded without logging or storage. Logging was considered but ruled out
+    because log aggregation systems (CI, Datadog, CloudWatch) may retain the
+    text, creating a HIPAA risk if the reasoning echoes patient context.
 
     Args:
         original_confidence: Confidence score from the local detection layer.
@@ -332,9 +334,7 @@ def _redact_phi_from_context(finding: ScanFinding) -> str:
     if not finding.code_context:
         if finding.entity_type not in AI_REVIEW_PERMITTED_EMPTY_CONTEXT_ENTITY_TYPES:
             raise AIReviewError(
-                _EMPTY_CODE_CONTEXT_NOT_PERMITTED_ERROR.format(
-                    entity_type=finding.entity_type
-                )
+                _EMPTY_CODE_CONTEXT_NOT_PERMITTED_ERROR.format(entity_type=finding.entity_type)
             )
         return finding.code_context
     if AI_REVIEW_REDACTED_PLACEHOLDER not in finding.code_context:
@@ -404,23 +404,23 @@ def _parse_ai_response(response_text: str) -> _AIResponsePayload:
     """
     fence_stripped_response = _strip_markdown_fence(response_text)
     try:
-        raw_payload = json.loads(fence_stripped_response)
+        json_payload = json.loads(fence_stripped_response)
     except (json.JSONDecodeError, ValueError) as parse_error:
         raise AIReviewError(
             f"Could not parse AI response as JSON: {parse_error!r} — "
             f"response: {response_text[:AI_RESPONSE_TRUNCATION_LENGTH]}"
         ) from parse_error
 
-    missing = AI_RESPONSE_REQUIRED_KEYS - raw_payload.keys()
-    if missing:
+    missing_keys = AI_RESPONSE_REQUIRED_KEYS - json_payload.keys()
+    if missing_keys:
         raise AIReviewError(
-            f"AI response missing required keys {missing!r} — "
+            f"AI response missing required keys {missing_keys!r} — "
             f"response: {response_text[:AI_RESPONSE_TRUNCATION_LENGTH]}"
         )
     return _AIResponsePayload(
-        is_phi_risk=bool(raw_payload["is_phi_risk"]),
-        confidence=float(raw_payload["confidence"]),
-        reasoning=str(raw_payload["reasoning"]),
+        is_phi_risk=bool(json_payload["is_phi_risk"]),
+        confidence=float(json_payload["confidence"]),
+        reasoning=str(json_payload["reasoning"]),
     )
 
 
