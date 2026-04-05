@@ -400,7 +400,8 @@ class TestParseAiResponse:
     def test_missing_required_key_raises_ai_review_error(self) -> None:
         from phi_scan.ai_review import _parse_ai_response
 
-        response = json.dumps({"is_phi_risk": True, "confidence": 0.8})
+        # Only is_phi_risk and confidence are required; omitting either must raise.
+        response = json.dumps({"confidence": 0.8})  # missing is_phi_risk
         with pytest.raises(AIReviewError, match="missing required keys"):
             _parse_ai_response(response)
 

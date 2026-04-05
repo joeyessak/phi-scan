@@ -281,9 +281,12 @@ AI_MESSAGE_ROLE_KEY: str = "role"
 AI_MESSAGE_ROLE_USER: str = "user"
 AI_MESSAGE_CONTENT_KEY: str = "content"
 
-# Required keys in Claude's JSON response payload.  Using a frozenset guarantees
-# the collection is immutable and hashable — no accidental mutation at call sites.
-AI_RESPONSE_REQUIRED_KEYS: frozenset[str] = frozenset({"is_phi_risk", "confidence", "reasoning"})
+# Keys Claude must return for the response to be actionable. Only the fields we
+# actually read and act on are required — reasoning is intentionally excluded:
+# we have explicitly decided not to store or log it (PHI-adjacent), so requiring
+# it would create an implicit dependency on a field we throw away and would fail
+# scans if Claude omits it in a future model version.
+AI_RESPONSE_REQUIRED_KEYS: frozenset[str] = frozenset({"is_phi_risk", "confidence"})
 
 # Entity types for which an empty code_context is permitted at the outbound API
 # boundary.  All current production detection layers (regex, NLP, HL7, FHIR,

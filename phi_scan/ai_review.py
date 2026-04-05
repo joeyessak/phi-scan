@@ -89,11 +89,10 @@ _EMPTY_CODE_CONTEXT_NOT_PERMITTED_ERROR: str = (
 class _AIResponsePayload(TypedDict):
     """Typed structure of the JSON Claude returns, containing only the fields we act on.
 
-    reasoning is intentionally excluded: Claude's explanation may paraphrase PHI
-    context. It is present in the decoded_response dict inside _parse_ai_response
-    (json.loads includes all keys), but it is never accessed or extracted from that
-    dict — only is_phi_risk and confidence are read. Excluding it from this TypedDict
-    ensures no caller can accidentally reference, store, or log it.
+    reasoning is intentionally excluded from AI_RESPONSE_REQUIRED_KEYS and from
+    this TypedDict. Claude's explanation may paraphrase PHI context — we never
+    want to store, access, or log it. Not requiring it also means the contract
+    does not break if a future Claude model version omits the field.
     """
 
     is_phi_risk: bool
@@ -407,8 +406,7 @@ def _parse_ai_response(response_text: str) -> _AIResponsePayload:
 
     Returns:
         _AIResponsePayload with is_phi_risk and confidence fields. reasoning is
-        validated as present in Claude's JSON but is never extracted into the
-        return value — see _AIResponsePayload for the PHI safety rationale.
+        not required and not extracted — see _AIResponsePayload for the rationale.
 
     Raises:
         AIReviewError: If the response cannot be parsed or is missing required keys.
@@ -428,8 +426,6 @@ def _parse_ai_response(response_text: str) -> _AIResponsePayload:
             f"AI response missing required keys {missing_keys!r} — "
             f"response: {response_text[:AI_RESPONSE_TRUNCATION_LENGTH]}"
         )
-    # reasoning is validated (present in decoded_response per AI_RESPONSE_REQUIRED_KEYS)
-    # but never accessed or extracted — only is_phi_risk and confidence are read out.
     return _AIResponsePayload(
         is_phi_risk=bool(decoded_response["is_phi_risk"]),
         confidence=float(decoded_response["confidence"]),
