@@ -1914,7 +1914,7 @@ matches bypass Claude entirely.
 
 - [ ] `[REDACTED]` appears in every Claude API request — zero raw PHI leaks
 - [ ] False positive rate reduced measurably with AI enabled vs disabled
-- [ ] Claude API failure falls back to local score — scanner does not crash
+- [x] Claude API failure falls back to local score — scanner does not crash
 - [ ] `ai.enable_claude_review: false` (default) produces zero API calls
 - [ ] Missing API key with AI enabled raises `AIConfigurationError` with clear message
 - [x] Token usage logged per scan in audit database

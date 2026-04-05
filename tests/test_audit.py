@@ -1012,6 +1012,9 @@ _AI_SAMPLE_INPUT_TOKENS: int = 450
 _AI_SAMPLE_OUTPUT_TOKENS: int = 80
 _AI_SAMPLE_COST_USD: float = 0.001
 _AI_ZERO_TOKENS: int = 0
+_AI_ROW_INPUT_TOKENS_INDEX: int = 0
+_AI_ROW_OUTPUT_TOKENS_INDEX: int = 1
+_AI_ROW_COST_USD_INDEX: int = 2
 _AI_ZERO_COST: float = 0.0
 
 
@@ -1045,9 +1048,9 @@ def test_ai_token_usage_written_to_audit_log_when_ai_review_ran(
     with sqlite3.connect(str(database_with_key)) as connection:
         ai_usage_row = connection.execute(_AI_TOKEN_USAGE_QUERY).fetchone()
     assert ai_usage_row is not None
-    assert ai_usage_row[0] == _AI_SAMPLE_INPUT_TOKENS
-    assert ai_usage_row[1] == _AI_SAMPLE_OUTPUT_TOKENS
-    assert ai_usage_row[2] > _AI_ZERO_COST
+    assert ai_usage_row[_AI_ROW_INPUT_TOKENS_INDEX] == _AI_SAMPLE_INPUT_TOKENS
+    assert ai_usage_row[_AI_ROW_OUTPUT_TOKENS_INDEX] == _AI_SAMPLE_OUTPUT_TOKENS
+    assert ai_usage_row[_AI_ROW_COST_USD_INDEX] > _AI_ZERO_COST
 
 
 def test_ai_token_usage_is_zero_when_ai_review_disabled(
@@ -1061,6 +1064,6 @@ def test_ai_token_usage_is_zero_when_ai_review_disabled(
     with sqlite3.connect(str(database_with_key)) as connection:
         ai_usage_row = connection.execute(_AI_TOKEN_USAGE_QUERY).fetchone()
     assert ai_usage_row is not None
-    assert ai_usage_row[0] == _AI_ZERO_TOKENS
-    assert ai_usage_row[1] == _AI_ZERO_TOKENS
-    assert ai_usage_row[2] == _AI_ZERO_COST
+    assert ai_usage_row[_AI_ROW_INPUT_TOKENS_INDEX] == _AI_ZERO_TOKENS
+    assert ai_usage_row[_AI_ROW_OUTPUT_TOKENS_INDEX] == _AI_ZERO_TOKENS
+    assert ai_usage_row[_AI_ROW_COST_USD_INDEX] == _AI_ZERO_COST

@@ -555,7 +555,7 @@ class TestABComparison:
 
         next_call_index = 0
 
-        def _mock_review(finding: ScanFinding, api_key: str) -> AIReviewResult:
+        def _return_mock_review_result(finding: ScanFinding, api_key: str) -> AIReviewResult:
             nonlocal next_call_index
             is_phi = next_call_index not in false_positive_indices
             next_call_index += 1
@@ -572,7 +572,10 @@ class TestABComparison:
         enabled_config = AIReviewConfig(is_enabled=True)
 
         baseline_findings, baseline_usage = apply_ai_review_to_findings(findings, disabled_config)
-        with patch("phi_scan.ai_review._request_ai_confidence_review", side_effect=_mock_review):
+        with patch(
+            "phi_scan.ai_review._request_ai_confidence_review",
+            side_effect=_return_mock_review_result,
+        ):
             reviewed_findings, ai_usage = apply_ai_review_to_findings(findings, enabled_config)
 
         assert len(baseline_findings) == _AB_FINDINGS_TOTAL
