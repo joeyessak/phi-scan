@@ -617,9 +617,16 @@ def _warn_member_too_large(member_info: zipfile.ZipInfo, archive_path: Path) -> 
     )
 
 
-def _warn_member_ratio_exceeded(member_info: zipfile.ZipInfo, archive_path: Path) -> None:
-    """Emit a WARNING log when a member's compression ratio exceeds the limit."""
-    ratio = member_info.file_size / member_info.compress_size
+def _warn_member_ratio_exceeded(
+    member_info: zipfile.ZipInfo, archive_path: Path, ratio: float
+) -> None:
+    """Emit a WARNING log when a member's compression ratio exceeds the limit.
+
+    Args:
+        member_info: ZipInfo for the member (provides filename for the message).
+        archive_path: Path to the containing archive (used in the message).
+        ratio: Pre-computed compression ratio (caller must ensure compress_size > 0).
+    """
     _logger.warning(
         _ARCHIVE_MEMBER_RATIO_WARNING.format(
             member=member_info.filename,
@@ -653,7 +660,8 @@ def _passes_decompression_bomb_guards(member_info: zipfile.ZipInfo, archive_path
         member_info.compress_size > 0
         and member_info.file_size > ARCHIVE_MAX_COMPRESSION_RATIO * member_info.compress_size
     ):
-        _warn_member_ratio_exceeded(member_info, archive_path)
+        ratio = member_info.file_size / member_info.compress_size
+        _warn_member_ratio_exceeded(member_info, archive_path, ratio)
         return False
     return True
 
