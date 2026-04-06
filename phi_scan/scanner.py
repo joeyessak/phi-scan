@@ -21,6 +21,8 @@ if TYPE_CHECKING:
 from phi_scan.cache import FileCacheKey, get_cached_result, store_cached_result
 from phi_scan.constants import (
     ARCHIVE_EXTENSIONS,
+    ARCHIVE_MAX_COMPRESSION_RATIO,
+    ARCHIVE_MAX_MEMBER_UNCOMPRESSED_BYTES,
     ARCHIVE_SCANNABLE_EXTENSIONS,
     BINARY_CHECK_BYTE_COUNT,
     BYTES_PER_MEGABYTE,
@@ -75,6 +77,14 @@ _ARCHIVE_BAD_FORMAT_WARNING: str = (
     "Skipping archive {path!r} — not a valid ZIP/JAR/WAR file: {error}"
 )
 _ARCHIVE_MEMBER_READ_ERROR_WARNING: str = "Skipping archive member {member!r} in {path!r}: {error}"
+_ARCHIVE_MEMBER_TOO_LARGE_WARNING: str = (
+    "Skipping archive member {member!r} in {path!r} — uncompressed size "
+    "{size} bytes exceeds limit of {limit} bytes (decompression bomb protection)"
+)
+_ARCHIVE_MEMBER_RATIO_WARNING: str = (
+    "Skipping archive member {member!r} in {path!r} — compression ratio "
+    "{ratio}:1 exceeds limit of {limit}:1 (decompression bomb protection)"
+)
 _ARCHIVE_MEMBER_UNSAFE_PATH_DEBUG: str = (
     "Skipping archive member {member!r} in {path!r} — unsafe path traversal sequence detected"
 )
@@ -595,6 +605,67 @@ def _is_safe_archive_member_path(member_name: str) -> bool:
     return _DOTDOT_PATH_COMPONENT not in member_path.parts
 
 
+def _warn_member_too_large(member_info: zipfile.ZipInfo, archive_path: Path) -> None:
+    """Emit a WARNING log when a member exceeds the absolute size limit."""
+    _logger.warning(
+        _ARCHIVE_MEMBER_TOO_LARGE_WARNING.format(
+            member=member_info.filename,
+            path=archive_path,
+            size=member_info.file_size,
+            limit=ARCHIVE_MAX_MEMBER_UNCOMPRESSED_BYTES,
+        )
+    )
+
+
+def _warn_member_ratio_exceeded(
+    member_info: zipfile.ZipInfo, archive_path: Path, ratio: float
+) -> None:
+    """Emit a WARNING log when a member's compression ratio exceeds the limit.
+
+    Args:
+        member_info: ZipInfo for the member (provides filename for the message).
+        archive_path: Path to the containing archive (used in the message).
+        ratio: Pre-computed compression ratio (caller must ensure compress_size > 0).
+    """
+    _logger.warning(
+        _ARCHIVE_MEMBER_RATIO_WARNING.format(
+            member=member_info.filename,
+            path=archive_path,
+            ratio=f"{ratio:.1f}",
+            limit=ARCHIVE_MAX_COMPRESSION_RATIO,
+        )
+    )
+
+
+def _passes_decompression_bomb_guards(member_info: zipfile.ZipInfo, archive_path: Path) -> bool:
+    """Return True if the member passes both decompression bomb guards; False and log if not.
+
+    Applies two independent guards before the member is read into memory:
+    1. Absolute uncompressed size must not exceed ARCHIVE_MAX_MEMBER_UNCOMPRESSED_BYTES.
+    2. Uncompressed size must not exceed ARCHIVE_MAX_COMPRESSION_RATIO × compressed size.
+       Uses multiplication (file_size > limit × compress_size) to avoid floor-rounding
+       ambiguity at the boundary and floating-point imprecision.
+
+    Args:
+        member_info: ZipInfo metadata for the member (read before decompression).
+        archive_path: Path to the archive on disk (used for log messages only).
+
+    Returns:
+        True if the member passes both guards, False if either guard triggers.
+    """
+    if member_info.file_size > ARCHIVE_MAX_MEMBER_UNCOMPRESSED_BYTES:
+        _warn_member_too_large(member_info, archive_path)
+        return False
+    if (
+        member_info.compress_size > 0
+        and member_info.file_size > ARCHIVE_MAX_COMPRESSION_RATIO * member_info.compress_size
+    ):
+        ratio = member_info.file_size / member_info.compress_size
+        _warn_member_ratio_exceeded(member_info, archive_path, ratio)
+        return False
+    return True
+
+
 def _scan_archive_members(
     archive: zipfile.ZipFile,
     archive_path: Path,
@@ -611,13 +682,16 @@ def _scan_archive_members(
         Aggregated findings from all eligible members.
     """
     findings: list[ScanFinding] = []
-    for member_name in archive.namelist():
+    for member_info in archive.infolist():
+        member_name = member_info.filename
         if not _is_safe_archive_member_path(member_name):
             _logger.debug(
                 _ARCHIVE_MEMBER_UNSAFE_PATH_DEBUG.format(member=member_name, path=archive_path)
             )
             continue
         if Path(member_name).suffix.lower() not in ARCHIVE_SCANNABLE_EXTENSIONS:
+            continue
+        if not _passes_decompression_bomb_guards(member_info, archive_path):
             continue
         try:
             member_bytes = archive.read(member_name)
