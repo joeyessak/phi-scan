@@ -85,10 +85,15 @@ _WEBHOOK_SCHEME_ERROR: str = (
 _WEBHOOK_PRIVATE_IP_ERROR: str = (
     "Webhook URL {url!r} resolves to a private or reserved IP address {address!r}. "
     "Requests to RFC1918, link-local, and cloud metadata ranges are blocked by default. "
-    "Set allow_private_webhook_urls=True in NotificationConfig to allow self-hosted targets."
+    "Set is_private_webhook_url_allowed=True in NotificationConfig to allow self-hosted targets."
+)
+_WEBHOOK_DOMAIN_BYPASS_DEBUG: str = (
+    "Webhook hostname {hostname!r} is not a literal IP address — SSRF IP block list skipped. "
+    "DNS-based SSRF (e.g. a domain resolving to 169.254.169.254) is not covered by this check; "
+    "enforce network-level egress controls to block metadata endpoint access."
 )
 
-# IP networks blocked by SSRF protection when allow_private_webhook_urls=False.
+# IP networks blocked by SSRF protection when is_private_webhook_url_allowed=False.
 # Covers RFC1918 private ranges, link-local, loopback, CGNAT, cloud metadata,
 # and IPv6 equivalents. Addresses not in these ranges are permitted.
 _BLOCKED_IP_NETWORKS: tuple[ipaddress.IPv4Network | ipaddress.IPv6Network, ...] = (
@@ -544,22 +549,22 @@ def _build_webhook_payload(
     return _build_generic_payload(scan_result, repo, branch, scanner_version)
 
 
-def _validate_webhook_url(url: str, allow_private: bool) -> None:
+def _validate_webhook_url(url: str, is_private_allowed: bool) -> None:
     """Raise NotificationError if the webhook URL fails SSRF safety checks.
 
-    Enforces two guards when allow_private is False (the default):
+    Enforces two guards when is_private_allowed is False (the default):
     1. Scheme must be 'https' — plaintext http is rejected.
-    2. Hostname must not resolve to a private, loopback, link-local, CGNAT,
-       or cloud metadata IP address.
+    2. Hostname, if a literal IP address, must not fall in a private, loopback,
+       link-local, CGNAT, or cloud metadata range.
 
-    The hostname check uses getaddrinfo indirectly via ipaddress — it validates
-    the literal hostname/IP only; it does not perform DNS resolution at
-    validation time. DNS-rebinding is a separate concern addressed by network
-    controls outside this application.
+    Limitation: only literal IP addresses are checked. Domain names that resolve
+    to blocked ranges (DNS-rebinding / SSRF via hostname) are not covered. Enforce
+    network-level egress controls to block metadata endpoint access in CI environments
+    where the webhook URL may be influenced by untrusted input.
 
     Args:
         url: The webhook endpoint URL to validate.
-        allow_private: When True, skip the private-IP check (opt-out for
+        is_private_allowed: When True, skip the private-IP check (opt-out for
             self-hosted targets on private networks).
 
     Raises:
@@ -568,12 +573,13 @@ def _validate_webhook_url(url: str, allow_private: bool) -> None:
     parsed = urlparse(url)
     if parsed.scheme != "https":
         raise NotificationError(_WEBHOOK_SCHEME_ERROR.format(url=url, scheme=parsed.scheme))
-    if allow_private:
+    if is_private_allowed:
         return
     hostname = parsed.hostname or ""
     try:
         address = ipaddress.ip_address(hostname)
     except ValueError:
+        _logger.debug(_WEBHOOK_DOMAIN_BYPASS_DEBUG.format(hostname=hostname))
         return
     if any(address in network for network in _BLOCKED_IP_NETWORKS):
         raise NotificationError(_WEBHOOK_PRIVATE_IP_ERROR.format(url=url, address=str(address)))
@@ -714,7 +720,7 @@ def send_webhook_notification(
     """
     if not config.webhook_url:
         raise NotificationError(_NO_WEBHOOK_URL_ERROR)
-    _validate_webhook_url(config.webhook_url, config.allow_private_webhook_urls)
+    _validate_webhook_url(config.webhook_url, config.is_private_webhook_url_allowed)
     payload = _build_webhook_payload(
         config.webhook_type, scan_result, repo, branch, scanner_version
     )

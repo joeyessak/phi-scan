@@ -286,11 +286,11 @@ ai:
 
 ## `notifications` Section
 
-### `allow_private_webhook_urls`
+### `is_private_webhook_url_allowed`
 
 ```yaml
 notifications:
-  allow_private_webhook_urls: false   # default
+  is_private_webhook_url_allowed: false   # default
 ```
 
 Controls whether webhook URLs pointing to private or reserved IP addresses are
@@ -312,11 +312,17 @@ balancer):
 
 ```yaml
 notifications:
-  allow_private_webhook_urls: true   # only for self-hosted private targets
+  is_private_webhook_url_allowed: true   # only for self-hosted private targets
 ```
 
-The HTTPS scheme requirement remains in effect even when `allow_private_webhook_urls`
+The HTTPS scheme requirement remains in effect even when `is_private_webhook_url_allowed`
 is `true`. `http://` URLs are always rejected.
+
+> **Limitation:** The IP block list only covers literal IP addresses in the URL hostname.
+> Domain names that resolve to blocked ranges (DNS rebinding, internal DNS aliases such as
+> `metadata.internal`) are **not** blocked by this check. Enforce network-level egress
+> controls (firewall rules, VPC policies) in CI environments where the webhook URL may
+> be influenced by untrusted input such as pull request metadata.
 
 ---
 

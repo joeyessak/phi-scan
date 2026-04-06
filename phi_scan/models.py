@@ -372,7 +372,7 @@ class NotificationConfig:
         notify_on_violation_only: When True (default), notifications are only
             sent when the scan produced at least one finding. When False, a
             notification is sent for every scan regardless of result.
-        allow_private_webhook_urls: When False (default), webhook URLs pointing
+        is_private_webhook_url_allowed: When False (default), webhook URLs pointing
             to RFC1918 addresses, link-local ranges, or cloud metadata endpoints
             are rejected to prevent SSRF. Set True only for self-hosted targets
             on a private network (e.g., on-premise GitLab, internal Jenkins).
@@ -389,7 +389,7 @@ class NotificationConfig:
     webhook_type: WebhookType = WebhookType.GENERIC
     webhook_retry_count: int = WEBHOOK_DEFAULT_RETRY_COUNT
     notify_on_violation_only: bool = True
-    allow_private_webhook_urls: bool = False
+    is_private_webhook_url_allowed: bool = False
 
 
 @final

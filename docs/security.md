@@ -221,7 +221,7 @@ size check runs.
 ### SSRF Protection
 
 Webhook URLs are validated before any HTTP request is made. Two checks are enforced
-by default (when `allow_private_webhook_urls: false`):
+by default (when `is_private_webhook_url_allowed: false`):
 
 **1. HTTPS scheme required**
 
@@ -252,10 +252,17 @@ internal Jenkins), set:
 
 ```yaml
 notifications:
-  allow_private_webhook_urls: true
+  is_private_webhook_url_allowed: true
 ```
 
 This disables the IP block list check while keeping the HTTPS requirement in place.
+
+**Limitation:** The IP block list covers only literal IP addresses in the URL hostname.
+Domain names that resolve to blocked ranges at runtime (DNS rebinding, internal DNS aliases
+such as `metadata.internal`) bypass this check. In CI environments where the webhook URL
+may be influenced by untrusted input (e.g., a malicious pull request setting an environment
+variable), enforce network-level egress controls — firewall rules or VPC policies — to
+prevent access to cloud metadata endpoints.
 
 ---
 

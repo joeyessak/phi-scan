@@ -495,54 +495,54 @@ def test_notification_config_is_disabled_by_default() -> None:
 
 def test_validate_webhook_url_accepts_https() -> None:
     """_validate_webhook_url must not raise for a valid https URL."""
-    _validate_webhook_url(_SAMPLE_WEBHOOK_URL, allow_private=False)
+    _validate_webhook_url(_SAMPLE_WEBHOOK_URL, is_private_allowed=False)
 
 
 def test_validate_webhook_url_rejects_http_scheme() -> None:
     """_validate_webhook_url must raise NotificationError for http:// URLs."""
     with pytest.raises(NotificationError, match="https"):
-        _validate_webhook_url(_HTTP_WEBHOOK_URL, allow_private=False)
+        _validate_webhook_url(_HTTP_WEBHOOK_URL, is_private_allowed=False)
 
 
 def test_validate_webhook_url_rejects_rfc1918_class_c() -> None:
     """_validate_webhook_url must block 192.168.x.x addresses."""
     with pytest.raises(NotificationError, match="private"):
-        _validate_webhook_url(_PRIVATE_IP_WEBHOOK_URL, allow_private=False)
+        _validate_webhook_url(_PRIVATE_IP_WEBHOOK_URL, is_private_allowed=False)
 
 
 def test_validate_webhook_url_rejects_loopback() -> None:
     """_validate_webhook_url must block loopback 127.x.x.x addresses."""
     with pytest.raises(NotificationError, match="private"):
-        _validate_webhook_url(_LOOPBACK_WEBHOOK_URL, allow_private=False)
+        _validate_webhook_url(_LOOPBACK_WEBHOOK_URL, is_private_allowed=False)
 
 
 def test_validate_webhook_url_rejects_metadata_endpoint() -> None:
     """_validate_webhook_url must block 169.254.169.254 (cloud metadata)."""
     with pytest.raises(NotificationError, match="private"):
-        _validate_webhook_url(_METADATA_WEBHOOK_URL, allow_private=False)
+        _validate_webhook_url(_METADATA_WEBHOOK_URL, is_private_allowed=False)
 
 
 def test_validate_webhook_url_rejects_rfc1918_class_a() -> None:
     """_validate_webhook_url must block 10.x.x.x addresses."""
     with pytest.raises(NotificationError, match="private"):
-        _validate_webhook_url(_RFC1918_CLASS_A_URL, allow_private=False)
+        _validate_webhook_url(_RFC1918_CLASS_A_URL, is_private_allowed=False)
 
 
 def test_validate_webhook_url_rejects_cgnat() -> None:
     """_validate_webhook_url must block 100.64.x.x CGNAT addresses."""
     with pytest.raises(NotificationError, match="private"):
-        _validate_webhook_url(_CGNAT_URL, allow_private=False)
+        _validate_webhook_url(_CGNAT_URL, is_private_allowed=False)
 
 
 def test_validate_webhook_url_allows_private_when_opted_in() -> None:
-    """_validate_webhook_url must skip the IP check when allow_private=True."""
-    _validate_webhook_url(_PRIVATE_IP_WEBHOOK_URL, allow_private=True)
+    """_validate_webhook_url must skip the IP check when is_private_allowed=True."""
+    _validate_webhook_url(_PRIVATE_IP_WEBHOOK_URL, is_private_allowed=True)
 
 
 def test_validate_webhook_url_still_rejects_http_when_opted_in() -> None:
-    """_validate_webhook_url must still reject http:// even when allow_private=True."""
+    """_validate_webhook_url must still reject http:// even when is_private_allowed=True."""
     with pytest.raises(NotificationError, match="https"):
-        _validate_webhook_url(_HTTP_WEBHOOK_URL, allow_private=True)
+        _validate_webhook_url(_HTTP_WEBHOOK_URL, is_private_allowed=True)
 
 
 def test_send_webhook_rejects_http_url() -> None:
