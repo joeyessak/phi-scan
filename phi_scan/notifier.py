@@ -576,9 +576,7 @@ def _validate_webhook_url(url: str, is_private_webhook_url_allowed: bool) -> Non
     parsed = urlparse(url)
     if parsed.scheme != "https":
         raise NotificationError(
-            _WEBHOOK_SCHEME_ERROR.format(
-                url_hash=compute_value_hash(url), scheme=parsed.scheme
-            )
+            _WEBHOOK_SCHEME_ERROR.format(url_hash=compute_value_hash(url), scheme=parsed.scheme)
         )
     if is_private_webhook_url_allowed:
         return
