@@ -197,6 +197,13 @@ _HTTP_TIMEOUT_SECONDS: float = 15.0
 _JSON_CONTENT_TYPE: str = "application/json"
 _AZURE_PATCH_CONTENT_TYPE: str = "application/json-patch+json"
 
+# Bitbucket PR comment body structure keys
+_BITBUCKET_COMMENT_CONTENT_KEY: str = "content"
+_BITBUCKET_COMMENT_RAW_KEY: str = "raw"
+
+# Azure DevOps build tag PUT requires an empty body
+_AZURE_BUILD_TAG_EMPTY_BODY: bytes = b""
+
 # Maximum characters in a PR comment to stay within GitHub's 65536-char limit
 _MAX_COMMENT_LENGTH: int = 60_000
 _MAX_ERROR_RESPONSE_LOG_LENGTH: int = 200
@@ -376,18 +383,18 @@ def _build_request_keyword_arguments(request_config: _HttpRequestConfig) -> dict
         request_config: Populated request configuration.
 
     Returns:
-        Dict ready to unpack into ``httpx.request(..., **request_kwargs)``.
+        Dict ready to unpack into ``httpx.request(..., **request_keyword_arguments)``.
     """
-    request_kwargs: dict[str, Any] = {"timeout": _HTTP_TIMEOUT_SECONDS}
+    request_keyword_arguments: dict[str, Any] = {"timeout": _HTTP_TIMEOUT_SECONDS}
     if request_config.headers is not None:
-        request_kwargs["headers"] = request_config.headers
+        request_keyword_arguments["headers"] = request_config.headers
     if request_config.json_body is not None:
-        request_kwargs["json"] = request_config.json_body
+        request_keyword_arguments["json"] = request_config.json_body
     if request_config.binary_body is not None:
-        request_kwargs["content"] = request_config.binary_body
+        request_keyword_arguments["content"] = request_config.binary_body
     if request_config.auth is not None:
-        request_kwargs["auth"] = request_config.auth
-    return request_kwargs
+        request_keyword_arguments["auth"] = request_config.auth
+    return request_keyword_arguments
 
 
 def _execute_http_request(request_config: _HttpRequestConfig) -> httpx.Response:
@@ -406,9 +413,11 @@ def _execute_http_request(request_config: _HttpRequestConfig) -> httpx.Response:
     Raises:
         CIIntegrationError: On HTTP 4xx/5xx or any network error.
     """
-    request_kwargs = _build_request_keyword_arguments(request_config)
+    request_keyword_arguments = _build_request_keyword_arguments(request_config)
     try:
-        response = httpx.request(request_config.method, request_config.url, **request_kwargs)
+        response = httpx.request(
+            request_config.method, request_config.url, **request_keyword_arguments
+        )
         response.raise_for_status()
     except httpx.HTTPStatusError as status_error:
         raise CIIntegrationError(
@@ -1053,7 +1062,7 @@ def set_azure_build_tag(scan_result: ScanResult, pr_context: PRContext) -> None:
             method=_HttpMethod.PUT,
             url=url,
             operation_label="Azure DevOps build tag",
-            binary_body=b"",
+            binary_body=_AZURE_BUILD_TAG_EMPTY_BODY,
             auth=("", token),
         )
     )
@@ -1661,7 +1670,7 @@ def _post_bitbucket_pr_comment(comment_body: str, pr_context: PRContext) -> None
             url=url,
             operation_label="Bitbucket PR comment",
             headers={"Authorization": f"Bearer {token}", "Content-Type": _JSON_CONTENT_TYPE},
-            json_body={"content": {"raw": comment_body}},
+            json_body={_BITBUCKET_COMMENT_CONTENT_KEY: {_BITBUCKET_COMMENT_RAW_KEY: comment_body}},
         )
     )
 
