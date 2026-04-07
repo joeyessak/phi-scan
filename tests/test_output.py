@@ -1180,7 +1180,7 @@ def test_detect_unicode_support_returns_bool() -> None:
 def test_resolve_symbol_returns_unicode_when_supported(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr("phi_scan.output._UNICODE_SUPPORTED", True)
+    monkeypatch.setattr("phi_scan.output.console._UNICODE_SUPPORTED", True)
     from phi_scan.output import _resolve_symbol
 
     result = _resolve_symbol(_EXPECTED_CLEAN_ICON_UNICODE, "[OK]")
@@ -1191,7 +1191,7 @@ def test_resolve_symbol_returns_unicode_when_supported(
 def test_resolve_symbol_returns_ascii_when_not_supported(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr("phi_scan.output._UNICODE_SUPPORTED", False)
+    monkeypatch.setattr("phi_scan.output.console._UNICODE_SUPPORTED", False)
     from phi_scan.output import _resolve_symbol
 
     result = _resolve_symbol(_EXPECTED_CLEAN_ICON_UNICODE, "[OK]")

@@ -132,6 +132,10 @@ tests/test_notifier.py
 # whose combinations trigger the quasi-identifier and health plan number detectors
 # when scanned as application source.
 tests/test_scanner.py
+# Output unit test file — imports display constants (WATCH_RESULT_CLEAN_TEXT,
+# WatchEvent) and format function names whose surrounding context triggers the
+# quasi-identifier combination detector when scanned as application source.
+tests/test_output.py
 
 # PhiScan project-level documentation and CI configuration.
 # These files are excluded to suppress false positives when phi-scan scans its
