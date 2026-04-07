@@ -384,10 +384,16 @@ _BASELINE_NEW_STYLE: str = "bold red"
 _BASELINE_RESOLVED_STYLE: str = "green"
 _BASELINE_PERSISTING_STYLE: str = "dim"
 
-_BASELINE_NEW_SECTION_HEADER: str = "[bold red]NEW — not in baseline ({count})[/bold red]"
-_BASELINE_RESOLVED_SECTION_HEADER: str = "[green]RESOLVED — no longer detected ({count})[/green]"
+_BASELINE_NEW_SECTION_HEADER: str = (
+    f"[{_BASELINE_NEW_STYLE}]NEW — not in baseline ({{count}})[/{_BASELINE_NEW_STYLE}]"
+)
+_BASELINE_RESOLVED_SECTION_HEADER: str = (
+    f"[{_BASELINE_RESOLVED_STYLE}]RESOLVED — no longer detected ({{count}})"
+    f"[/{_BASELINE_RESOLVED_STYLE}]"
+)
 _BASELINE_PERSISTING_SECTION_HEADER: str = (
-    "[dim]PERSISTING — still present, still baselined ({count})[/dim]"
+    f"[{_BASELINE_PERSISTING_STYLE}]PERSISTING — still present, still baselined ({{count}})"
+    f"[/{_BASELINE_PERSISTING_STYLE}]"
 )
 _BASELINE_DIFF_FINDING_ROW: str = "  {file_path}:{line}  {entity_type}  {severity}"
 _BASELINE_DIFF_ENTRY_ROW: str = "  {file_path}:{line}  {entity_type}  {severity}"
@@ -609,22 +615,22 @@ def _group_findings_by_file(
     return groups
 
 
-def _build_ascii_banner_text() -> str:
-    """Return the PhiScan ASCII art string, falling back to plain text.
+def _build_ascii_banner_text() -> tuple[str, bool]:
+    """Return the PhiScan ASCII art string and whether pyfiglet was available.
 
-    pyfiglet is an optional dependency. When absent, emits a dim console note
-    so operators know the tool is in fallback mode, then returns plain text.
+    pyfiglet is an optional dependency. The caller is responsible for emitting
+    any fallback notice to the console.
 
     Returns:
-        ASCII art string from pyfiglet, or the plain _BANNER_TEXT fallback.
+        Tuple of (banner text, is_pyfiglet_available). When pyfiglet is absent,
+        returns (plain fallback text, False).
     """
     try:
         import pyfiglet  # noqa: PLC0415 — optional dependency, import deferred
 
-        return str(pyfiglet.figlet_format(_BANNER_TEXT, font=_BANNER_FONT))
+        return str(pyfiglet.figlet_format(_BANNER_TEXT, font=_BANNER_FONT)), True
     except ImportError:
-        _rich_console.print(_BANNER_PYFIGLET_MISSING_NOTE, style=_STYLE_DIM)
-        return _BANNER_TEXT
+        return _BANNER_TEXT, False
 
 
 def _build_summary_panel_markup(scan_result: ScanResult) -> str:
@@ -828,7 +834,10 @@ def format_table(scan_result: ScanResult) -> Table:
 
 def display_banner() -> None:
     """Render the PhiScan ASCII art banner with a cyan→blue→magenta gradient, tagline, and rule."""
-    _rich_console.print(_build_banner_gradient_text(_build_ascii_banner_text()))
+    banner_text, is_pyfiglet_available = _build_ascii_banner_text()
+    if not is_pyfiglet_available:
+        _rich_console.print(_BANNER_PYFIGLET_MISSING_NOTE, style=_STYLE_DIM)
+    _rich_console.print(_build_banner_gradient_text(banner_text))
     _rich_console.print(
         _BANNER_TAGLINE_TEMPLATE.format(version=__version__),
         style=_BANNER_TAGLINE_STYLE,
