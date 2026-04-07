@@ -349,11 +349,8 @@ class BaselineComparison:
 class _HttpMethod(enum.StrEnum):
     """HTTP methods used by CI/CD platform API calls in this module."""
 
-    GET = "GET"
     POST = "POST"
     PUT = "PUT"
-    PATCH = "PATCH"
-    DELETE = "DELETE"
 
 
 @dataclass(frozen=True)
