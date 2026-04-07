@@ -56,6 +56,39 @@ make help       Show all targets
 
 ---
 
+## Codebase Overview
+
+| Module | Purpose |
+|---|---|
+| `phi_scan/cli.py` | Typer CLI — all user-facing commands |
+| `phi_scan/scanner.py` | File collection, binary detection, orchestration |
+| `phi_scan/regex_detector.py` | Layer 1 — regex detection engine |
+| `phi_scan/nlp_detector.py` | Layer 2 — Presidio/spaCy NLP (optional) |
+| `phi_scan/fhir_recognizer.py` | Layer 3 — FHIR R4 field-name scanning |
+| `phi_scan/hl7_scanner.py` | Layer 3 — HL7 v2 segment parsing (optional) |
+| `phi_scan/detection_coordinator.py` | Combines layers, deduplicates findings |
+| `phi_scan/output/console.py` | Rich terminal UI — `display_*`, banner, progress |
+| `phi_scan/output/serializers.py` | Pure-data serialisers — JSON, CSV, SARIF, JUnit, GitLab |
+| `phi_scan/output/dashboard.py` | Live dashboard layout builders |
+| `phi_scan/output/watch.py` | File-watcher event UI |
+| `phi_scan/output/__init__.py` | Re-exports all public output symbols |
+| `phi_scan/ci_integration.py` | CI/CD platform integrations (GitHub, GitLab, Azure, Bitbucket) |
+| `phi_scan/baseline.py` | Baseline snapshot create/load/diff |
+| `phi_scan/audit.py` | SQLite audit log |
+| `phi_scan/config.py` | `.phi-scanner.yml` configuration loading |
+| `phi_scan/constants.py` | Enums, exit codes, shared constants |
+| `phi_scan/models.py` | `ScanResult`, `ScanFinding` dataclasses |
+| `phi_scan/exceptions.py` | Domain exception hierarchy |
+
+### Where to Add Things
+
+- **New output format** (JSON, SARIF, etc.): `phi_scan/output/serializers.py` → export from `phi_scan/output/__init__.py` → add to `OutputFormat` in `constants.py` → wire in `cli.py`
+- **New CI/CD platform**: `phi_scan/ci_integration.py` — add a `_HttpRequestConfig`-based call using `_execute_http_request`; wire into `post_pr_comment` and `set_commit_status` dispatch tables
+- **New PHI pattern**: `phi_scan/regex_detector.py` — add pattern + validator; update `PhiCategory` in `constants.py` if a new HIPAA category
+- **New CLI command**: `phi_scan/cli.py` — follow the existing Typer app/sub-app pattern
+
+---
+
 ## Code Standards
 
 These standards are enforced in code review. PRs that violate them will not

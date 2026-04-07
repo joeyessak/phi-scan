@@ -351,3 +351,21 @@ machine-readable output instead.
 | Executive report | `pdf` or `html` |
 
 See `docs/ci-cd-integration.md` for complete pipeline configuration examples.
+
+---
+
+## For Contributors: Adding a New Output Format
+
+Output serialisation lives in `phi_scan/output/serializers.py`. Each format is
+a standalone `format_<name>(scan_result: ScanResult) -> str` function. To add
+a new format:
+
+1. Add the serialiser function to `phi_scan/output/serializers.py`.
+2. Export it from `phi_scan/output/__init__.py`.
+3. Add the format name to `OutputFormat` in `phi_scan/constants.py`.
+4. Wire the new format into the CLI dispatch in `phi_scan/cli.py`.
+5. Add tests in `tests/test_output.py` importing from `phi_scan.output.serializers`.
+
+Terminal UI helpers (`display_*`, banner, progress) belong in
+`phi_scan/output/console.py`. Dashboard and watch-mode UI builders live in
+`phi_scan/output/dashboard.py` and `phi_scan/output/watch.py` respectively.

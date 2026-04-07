@@ -2041,17 +2041,17 @@ Baseline commands repeat similar try/except + exit handling + baseline path reso
 
 #### 7F.4 — Documentation
 
-- [ ] **7F.4a** `docs/detection-layers.md` — update architecture section to reflect
+- [x] **7F.4a** `docs/detection-layers.md` — update architecture section to reflect
   the `phi_scan/output/` package structure; update any references to `output.py`
-- [ ] **7F.4b** `docs/output-formats.md` — add a developer note pointing to the
+- [x] **7F.4b** `docs/output-formats.md` — add a developer note pointing to the
   new module locations (`serializers.py`, `console.py`, etc.) for contributors
   extending output formats
-- [ ] **7F.4c** `CONTRIBUTING.md` — update the module map / codebase overview to
+- [x] **7F.4c** `CONTRIBUTING.md` — update the module map / codebase overview to
   reflect `phi_scan/output/` replacing `output.py`; document where to add new
   output formats and where to add new CI integrations
-- [ ] **7F.4d** `docs/troubleshooting.md` — verify no troubleshooting steps reference
+- [x] **7F.4d** `docs/troubleshooting.md` — verify no troubleshooting steps reference
   `output.py` directly; update any that do to use the new package paths
-- [ ] **7F.4e** `CHANGELOG.md` — add entries under `[Unreleased]` for all 7E and
+- [x] **7F.4e** `CHANGELOG.md` — add entries under `[Unreleased]` for all 7E and
   7F changes as they ship
 
 ### 7F Verification Checklist
@@ -2059,7 +2059,7 @@ Baseline commands repeat similar try/except + exit handling + baseline path reso
 - [x] `output.py` no longer exists as a monolith — replaced by `phi_scan/output/` package
 - [x] All public symbols still importable from `phi_scan.output` (backwards-compatible)
 - [x] `ci_integration.py` HTTP call pattern appears exactly once (in the helper)
-- [ ] All 1694 existing tests pass after each sub-task
+- [x] All 1694 existing tests pass after each sub-task
 - [ ] All doc references to `output.py` updated to `phi_scan/output/`
 - [ ] `CONTRIBUTING.md` module map reflects new package structure
 - [ ] `CHANGELOG.md` updated for all shipped 7E and 7F items

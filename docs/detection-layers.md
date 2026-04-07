@@ -58,6 +58,21 @@ File content
 └─────────────────────────────────────────────────────────────────┘
 ```
 
+### Output Package
+
+Findings flow from the detection layers into the `phi_scan/output/` package,
+which handles all terminal UI and serialisation:
+
+| Module | Responsibility |
+|---|---|
+| `phi_scan/output/console.py` | Rich terminal UI — `display_*` functions, banner, progress |
+| `phi_scan/output/serializers.py` | Pure-data serialisers — JSON, CSV, SARIF, JUnit, GitLab formats |
+| `phi_scan/output/dashboard.py` | Live dashboard layout builders |
+| `phi_scan/output/watch.py` | File-watcher event UI (`WatchEvent`, `build_watch_layout`) |
+| `phi_scan/output/__init__.py` | Re-exports all public symbols for backwards-compatible imports |
+
+All public symbols remain importable from `phi_scan.output` as before.
+
 ---
 
 ## Layer 1 — Regex
