@@ -193,6 +193,10 @@ _COMMIT_STATUS_DESCRIPTION_VIOLATIONS: str = "{count} PHI/PII violation(s) found
 # HTTP timeout for all API calls
 _HTTP_TIMEOUT_SECONDS: float = 15.0
 
+# Content-Type header values used across platform API calls
+_JSON_CONTENT_TYPE: str = "application/json"
+_AZURE_PATCH_CONTENT_TYPE: str = "application/json-patch+json"
+
 # Maximum characters in a PR comment to stay within GitHub's 65536-char limit
 _MAX_COMMENT_LENGTH: int = 60_000
 _MAX_ERROR_RESPONSE_LOG_LENGTH: int = 200
@@ -358,12 +362,12 @@ class _HttpRequestConfig:
     url: str
     operation_label: str
     headers: dict[str, str] | None = None
-    json_body: Any | None = None
-    content: bytes | None = None
+    json_body: dict[str, Any] | list[Any] | None = None
+    binary_body: bytes | None = None
     auth: tuple[str, str] | None = None
 
 
-def _build_httpx_kwargs(request_config: _HttpRequestConfig) -> dict[str, Any]:
+def _build_request_keyword_arguments(request_config: _HttpRequestConfig) -> dict[str, Any]:
     """Build the keyword-argument dict for ``httpx.request`` from a config object.
 
     Omits keys whose config value is ``None`` so httpx uses its own defaults.
@@ -372,15 +376,15 @@ def _build_httpx_kwargs(request_config: _HttpRequestConfig) -> dict[str, Any]:
         request_config: Populated request configuration.
 
     Returns:
-        Dict ready to unpack into ``httpx.request(..., **kwargs)``.
+        Dict ready to unpack into ``httpx.request(..., **request_kwargs)``.
     """
     request_kwargs: dict[str, Any] = {"timeout": _HTTP_TIMEOUT_SECONDS}
     if request_config.headers is not None:
         request_kwargs["headers"] = request_config.headers
     if request_config.json_body is not None:
         request_kwargs["json"] = request_config.json_body
-    if request_config.content is not None:
-        request_kwargs["content"] = request_config.content
+    if request_config.binary_body is not None:
+        request_kwargs["content"] = request_config.binary_body
     if request_config.auth is not None:
         request_kwargs["auth"] = request_config.auth
     return request_kwargs
@@ -402,7 +406,7 @@ def _execute_http_request(request_config: _HttpRequestConfig) -> httpx.Response:
     Raises:
         CIIntegrationError: On HTTP 4xx/5xx or any network error.
     """
-    request_kwargs = _build_httpx_kwargs(request_config)
+    request_kwargs = _build_request_keyword_arguments(request_config)
     try:
         response = httpx.request(request_config.method, request_config.url, **request_kwargs)
         response.raise_for_status()
@@ -924,7 +928,7 @@ def post_bitbucket_code_insights(scan_result: ScanResult, pr_context: PRContext)
 
     headers = {
         "Authorization": f"Bearer {token}",
-        "Content-Type": "application/json",
+        "Content-Type": _JSON_CONTENT_TYPE,
     }
     report_url = _BITBUCKET_API_BASE_URL + _BITBUCKET_REPORTS_PATH.format(
         workspace=workspace,
@@ -1042,7 +1046,7 @@ def set_azure_build_tag(scan_result: ScanResult, pr_context: PRContext) -> None:
         method=_HttpMethod.PUT,
         url=url,
         operation_label="Azure DevOps build tag",
-        content=b"",
+        binary_body=b"",
         auth=("", token),
     ))
 
@@ -1186,7 +1190,7 @@ def create_azure_boards_work_item(scan_result: ScanResult, pr_context: PRContext
         method=_HttpMethod.POST,
         url=url,
         operation_label="Azure Boards work item",
-        headers={"Content-Type": "application/json-patch+json"},
+        headers={"Content-Type": _AZURE_PATCH_CONTENT_TYPE},
         json_body=patch_payload,
         auth=("", token),
     ))
@@ -1537,7 +1541,7 @@ def _post_gitlab_mr_comment(comment_body: str, pr_context: PRContext) -> None:
         project_id=project_id,
         mr_iid=mr_iid,
     )
-    headers = {"PRIVATE-TOKEN": token, "Content-Type": "application/json"}
+    headers = {"PRIVATE-TOKEN": token, "Content-Type": _JSON_CONTENT_TYPE}
     payload = {"body": comment_body}
 
     _execute_http_request(_HttpRequestConfig(
@@ -1639,7 +1643,7 @@ def _post_bitbucket_pr_comment(comment_body: str, pr_context: PRContext) -> None
         method=_HttpMethod.POST,
         url=url,
         operation_label="Bitbucket PR comment",
-        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+        headers={"Authorization": f"Bearer {token}", "Content-Type": _JSON_CONTENT_TYPE},
         json_body={"content": {"raw": comment_body}},
     ))
 
@@ -1906,7 +1910,7 @@ def _set_bitbucket_commit_status(scan_result: ScanResult, pr_context: PRContext)
         method=_HttpMethod.POST,
         url=url,
         operation_label="Bitbucket commit status",
-        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
+        headers={"Authorization": f"Bearer {token}", "Content-Type": _JSON_CONTENT_TYPE},
         json_body=payload,
     ))
 
