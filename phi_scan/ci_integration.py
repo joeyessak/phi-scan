@@ -360,6 +360,10 @@ class _HttpRequestConfig:
     Bundles all variable parts of the ``httpx.METHOD → raise_for_status →
     HTTPStatusError → RequestError → CIIntegrationError`` pattern so that
     ``_execute_http_request`` can centralise the try/except scaffolding.
+
+    The ``timeout_seconds`` field defaults to ``_HTTP_TIMEOUT_SECONDS`` so
+    callers do not need to supply it in normal use, but can override it for
+    testing or platform-specific requirements.
     """
 
     method: _HttpMethod
@@ -369,11 +373,13 @@ class _HttpRequestConfig:
     json_body: dict[str, Any] | list[Any] | None = None
     binary_body: bytes | None = None
     auth: tuple[str, str] | None = None
+    timeout_seconds: float = _HTTP_TIMEOUT_SECONDS
 
 
 def _build_request_keyword_arguments(request_config: _HttpRequestConfig) -> dict[str, Any]:
     """Build the keyword-argument dict for ``httpx.request`` from a config object.
 
+    All values, including timeout, come exclusively from ``request_config``.
     Omits keys whose config value is ``None`` so httpx uses its own defaults.
 
     Args:
@@ -382,7 +388,7 @@ def _build_request_keyword_arguments(request_config: _HttpRequestConfig) -> dict
     Returns:
         Dict ready to unpack into ``httpx.request(..., **request_keyword_arguments)``.
     """
-    request_keyword_arguments: dict[str, Any] = {"timeout": _HTTP_TIMEOUT_SECONDS}
+    request_keyword_arguments: dict[str, Any] = {"timeout": request_config.timeout_seconds}
     if request_config.headers is not None:
         request_keyword_arguments["headers"] = request_config.headers
     if request_config.json_body is not None:
