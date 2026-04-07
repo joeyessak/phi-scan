@@ -33,10 +33,11 @@ This section is placed at the top of the module so it remains visible within
 GitHub's 30,000-character diff truncation limit. All claims are machine-verified
 by tests in ``tests/test_ci_integration_remaining.py``.
 
-**Exception handling** — all 12 ``httpx.HTTPStatusError`` handlers re-raise as
-``CIIntegrationError``. None swallow. Verify: ``grep -c HTTPStatusError
-phi_scan/ci_integration.py`` == 12; ``grep -c "raise CIIntegrationError"
-phi_scan/ci_integration.py`` >= 12. Sentinel tests confirm error messages never
+**Exception handling** — all 12 outbound HTTP calls go through
+``_execute_http_request``, which re-raises both ``httpx.HTTPStatusError`` and
+``httpx.RequestError`` as ``CIIntegrationError``. None swallow. Verify:
+``grep -c "raise_for_status" phi_scan/ci_integration.py`` == 2 (one in the
+helper body, one in the docstring). Sentinel tests confirm error messages never
 include ``response.text``:
   - ``test_upload_sarif_http_error_excludes_response_body``
   - ``test_set_azure_build_tag_http_error_excludes_response_body``
@@ -44,7 +45,7 @@ include ``response.text``:
   - ``test_post_bitbucket_code_insights_http_error_excludes_response_body``
 
 **SARIF message text** — ``format_sarif`` delegates to
-``_build_sarif_finding_message`` (``phi_scan/output.py``). That function uses
+``_build_sarif_finding_message`` (``phi_scan/output/serializers.py``). That function uses
 only ``hipaa_category.value`` (enum label), ``detection_layer.value`` (enum
 label), ``confidence`` (float), and ``remediation_hint`` (pre-canned guidance
 string). Raw entity values, ``code_context``, and ``value_hash`` are explicitly
@@ -192,6 +193,17 @@ _COMMIT_STATUS_DESCRIPTION_VIOLATIONS: str = "{count} PHI/PII violation(s) found
 # HTTP timeout for all API calls
 _HTTP_TIMEOUT_SECONDS: float = 15.0
 
+# Content-Type header values used across platform API calls
+_JSON_CONTENT_TYPE: str = "application/json"
+_AZURE_PATCH_CONTENT_TYPE: str = "application/json-patch+json"
+
+# Bitbucket PR comment body structure keys
+_BITBUCKET_COMMENT_CONTENT_KEY: str = "content"
+_BITBUCKET_COMMENT_RAW_KEY: str = "raw"
+
+# Azure DevOps build tag PUT requires an empty body
+_AZURE_BUILD_TAG_EMPTY_BODY: bytes = b""
+
 # Maximum characters in a PR comment to stay within GitHub's 65536-char limit
 _MAX_COMMENT_LENGTH: int = 60_000
 _MAX_ERROR_RESPONSE_LOG_LENGTH: int = 200
@@ -327,6 +339,100 @@ class BaselineComparison:
     new_findings_count: int
     baselined_count: int
     resolved_count: int
+
+
+# ---------------------------------------------------------------------------
+# HTTP helper — shared request/error pattern
+# ---------------------------------------------------------------------------
+
+
+class _HttpMethod(enum.StrEnum):
+    """HTTP methods used by CI/CD platform API calls in this module."""
+
+    POST = "POST"
+    PUT = "PUT"
+
+
+@dataclass(frozen=True)
+class _HttpRequestConfig:
+    """Parameters for a single outbound HTTP request.
+
+    Bundles all variable parts of the ``httpx.METHOD → raise_for_status →
+    HTTPStatusError → RequestError → CIIntegrationError`` pattern so that
+    ``_execute_http_request`` can centralise the try/except scaffolding.
+
+    The ``timeout_seconds`` field defaults to ``_HTTP_TIMEOUT_SECONDS`` so
+    callers do not need to supply it in normal use, but can override it for
+    testing or platform-specific requirements.
+    """
+
+    method: _HttpMethod
+    url: str
+    operation_label: str
+    headers: dict[str, str] | None = None
+    json_body: dict[str, Any] | list[Any] | None = None
+    binary_body: bytes | None = None
+    auth: tuple[str, str] | None = None
+    timeout_seconds: float = _HTTP_TIMEOUT_SECONDS
+
+
+def _build_request_keyword_arguments(request_config: _HttpRequestConfig) -> dict[str, Any]:
+    """Build the keyword-argument dict for ``httpx.request`` from a config object.
+
+    All values, including timeout, come exclusively from ``request_config``.
+    Omits keys whose config value is ``None`` so httpx uses its own defaults.
+
+    Args:
+        request_config: Populated request configuration.
+
+    Returns:
+        Dict ready to unpack into ``httpx.request(..., **request_keyword_arguments)``.
+    """
+    request_keyword_arguments: dict[str, Any] = {"timeout": request_config.timeout_seconds}
+    if request_config.headers is not None:
+        request_keyword_arguments["headers"] = request_config.headers
+    if request_config.json_body is not None:
+        request_keyword_arguments["json"] = request_config.json_body
+    if request_config.binary_body is not None:
+        request_keyword_arguments["content"] = request_config.binary_body
+    if request_config.auth is not None:
+        request_keyword_arguments["auth"] = request_config.auth
+    return request_keyword_arguments
+
+
+def _execute_http_request(request_config: _HttpRequestConfig) -> httpx.Response:
+    """Execute one HTTP request and translate httpx errors to CIIntegrationError.
+
+    Centralises the 12 identical try/except blocks scattered across the module.
+    The caller builds an ``_HttpRequestConfig`` with the platform-specific URL,
+    headers, payload, and a short ``operation_label`` used in the error message.
+
+    Args:
+        request_config: All parameters for the HTTP call.
+
+    Returns:
+        The successful ``httpx.Response``.
+
+    Raises:
+        CIIntegrationError: On HTTP 4xx/5xx or any network error.
+    """
+    request_keyword_arguments = _build_request_keyword_arguments(request_config)
+    try:
+        response = httpx.request(
+            request_config.method, request_config.url, **request_keyword_arguments
+        )
+        response.raise_for_status()
+    except httpx.HTTPStatusError as status_error:
+        raise CIIntegrationError(
+            f"{request_config.operation_label} failed "
+            f"(HTTP {status_error.response.status_code} "
+            f"{status_error.response.reason_phrase})"
+        ) from status_error
+    except httpx.RequestError as request_error:
+        raise CIIntegrationError(
+            f"{request_config.operation_label} request failed: {request_error}"
+        ) from request_error
+    return response
 
 
 # ---------------------------------------------------------------------------
@@ -786,27 +892,19 @@ def upload_sarif_to_github(scan_result: ScanResult, pr_context: PRContext) -> No
         "tool_name": "phi-scan",
     }
 
-    try:
-        response = httpx.post(
-            url,
-            json=sarif_upload_payload,
+    _execute_http_request(
+        _HttpRequestConfig(
+            method=_HttpMethod.POST,
+            url=url,
+            operation_label="GitHub SARIF upload",
             headers={
                 "Authorization": f"Bearer {token}",
                 "Accept": "application/vnd.github+json",
                 "X-GitHub-Api-Version": "2022-11-28",
             },
-            timeout=_HTTP_TIMEOUT_SECONDS,
+            json_body=sarif_upload_payload,
         )
-        response.raise_for_status()
-    except httpx.HTTPStatusError as status_error:
-        raise CIIntegrationError(
-            f"GitHub SARIF upload failed (HTTP {status_error.response.status_code} "
-            f"{status_error.response.reason_phrase})"
-        ) from status_error
-    except httpx.RequestError as request_error:
-        raise CIIntegrationError(
-            f"GitHub SARIF upload request failed: {request_error}"
-        ) from request_error
+    )
 
     _LOG.debug("GitHub: SARIF uploaded to Code Scanning for %s", sha[:8])
 
@@ -844,7 +942,7 @@ def post_bitbucket_code_insights(scan_result: ScanResult, pr_context: PRContext)
 
     headers = {
         "Authorization": f"Bearer {token}",
-        "Content-Type": "application/json",
+        "Content-Type": _JSON_CONTENT_TYPE,
     }
     report_url = _BITBUCKET_API_BASE_URL + _BITBUCKET_REPORTS_PATH.format(
         workspace=workspace,
@@ -870,23 +968,15 @@ def post_bitbucket_code_insights(scan_result: ScanResult, pr_context: PRContext)
         ],
     }
 
-    try:
-        response = httpx.put(
-            report_url,
-            json=report_payload,
+    _execute_http_request(
+        _HttpRequestConfig(
+            method=_HttpMethod.PUT,
+            url=report_url,
+            operation_label="Bitbucket Code Insights report",
             headers=headers,
-            timeout=_HTTP_TIMEOUT_SECONDS,
+            json_body=report_payload,
         )
-        response.raise_for_status()
-    except httpx.HTTPStatusError as status_error:
-        raise CIIntegrationError(
-            f"Bitbucket Code Insights report failed (HTTP {status_error.response.status_code} "
-            f"{status_error.response.reason_phrase})"
-        ) from status_error
-    except httpx.RequestError as request_error:
-        raise CIIntegrationError(
-            f"Bitbucket Code Insights report request failed: {request_error}"
-        ) from request_error
+    )
 
     if not scan_result.findings:
         return
@@ -913,24 +1003,15 @@ def post_bitbucket_code_insights(scan_result: ScanResult, pr_context: PRContext)
         for idx, finding in enumerate(scan_result.findings[:1000])
     ]
 
-    try:
-        response = httpx.post(
-            annotations_url,
-            json=annotations,
+    _execute_http_request(
+        _HttpRequestConfig(
+            method=_HttpMethod.POST,
+            url=annotations_url,
+            operation_label="Bitbucket Code Insights annotations",
             headers=headers,
-            timeout=_HTTP_TIMEOUT_SECONDS,
+            json_body=annotations,
         )
-        response.raise_for_status()
-    except httpx.HTTPStatusError as status_error:
-        raise CIIntegrationError(
-            f"Bitbucket Code Insights annotations failed "
-            f"(HTTP {status_error.response.status_code} "
-            f"{status_error.response.reason_phrase})"
-        ) from status_error
-    except httpx.RequestError as request_error:
-        raise CIIntegrationError(
-            f"Bitbucket Code Insights annotations request failed: {request_error}"
-        ) from request_error
+    )
 
     _LOG.debug(
         "Bitbucket: Code Insights report + %d annotation(s) posted for %s",
@@ -979,23 +1060,15 @@ def set_azure_build_tag(scan_result: ScanResult, pr_context: PRContext) -> None:
         api_version=_AZURE_API_VERSION,
     )
 
-    try:
-        response = httpx.put(
-            url,
-            content=b"",
+    _execute_http_request(
+        _HttpRequestConfig(
+            method=_HttpMethod.PUT,
+            url=url,
+            operation_label="Azure DevOps build tag",
+            binary_body=_AZURE_BUILD_TAG_EMPTY_BODY,
             auth=("", token),
-            timeout=_HTTP_TIMEOUT_SECONDS,
         )
-        response.raise_for_status()
-    except httpx.HTTPStatusError as status_error:
-        raise CIIntegrationError(
-            f"Azure DevOps build tag failed (HTTP {status_error.response.status_code} "
-            f"{status_error.response.reason_phrase})"
-        ) from status_error
-    except httpx.RequestError as request_error:
-        raise CIIntegrationError(
-            f"Azure DevOps build tag request failed: {request_error}"
-        ) from request_error
+    )
 
     _LOG.debug("Azure DevOps: build tagged with %s", tag)
 
@@ -1050,23 +1123,15 @@ def set_azure_pr_status(scan_result: ScanResult, pr_context: PRContext) -> None:
         },
     }
 
-    try:
-        response = httpx.post(
-            url,
-            json=payload,
+    _execute_http_request(
+        _HttpRequestConfig(
+            method=_HttpMethod.POST,
+            url=url,
+            operation_label="Azure DevOps PR status",
+            json_body=payload,
             auth=("", token),
-            timeout=_HTTP_TIMEOUT_SECONDS,
         )
-        response.raise_for_status()
-    except httpx.HTTPStatusError as status_error:
-        raise CIIntegrationError(
-            f"Azure DevOps PR status failed (HTTP {status_error.response.status_code} "
-            f"{status_error.response.reason_phrase})"
-        ) from status_error
-    except httpx.RequestError as request_error:
-        raise CIIntegrationError(
-            f"Azure DevOps PR status request failed: {request_error}"
-        ) from request_error
+    )
 
     _LOG.debug("Azure DevOps: PR status set to %s for PR #%s", state, pr_id)
 
@@ -1143,26 +1208,16 @@ def create_azure_boards_work_item(scan_result: ScanResult, pr_context: PRContext
         {"op": "add", "path": "/fields/System.Tags", "value": "phi-scan;security;phi-pii"},
     ]
 
-    try:
-        response = httpx.post(
-            url,
-            json=patch_payload,
-            headers={
-                "Content-Type": "application/json-patch+json",
-            },
+    _execute_http_request(
+        _HttpRequestConfig(
+            method=_HttpMethod.POST,
+            url=url,
+            operation_label="Azure Boards work item",
+            headers={"Content-Type": _AZURE_PATCH_CONTENT_TYPE},
+            json_body=patch_payload,
             auth=("", token),
-            timeout=_HTTP_TIMEOUT_SECONDS,
         )
-        response.raise_for_status()
-    except httpx.HTTPStatusError as status_error:
-        raise CIIntegrationError(
-            f"Azure Boards work item failed (HTTP {status_error.response.status_code} "
-            f"{status_error.response.reason_phrase})"
-        ) from status_error
-    except httpx.RequestError as request_error:
-        raise CIIntegrationError(
-            f"Azure Boards work item request failed: {request_error}"
-        ) from request_error
+    )
 
     _LOG.debug(
         "Azure Boards: work item created for PR #%s (%d HIGH findings)",
@@ -1510,26 +1565,18 @@ def _post_gitlab_mr_comment(comment_body: str, pr_context: PRContext) -> None:
         project_id=project_id,
         mr_iid=mr_iid,
     )
-    headers = {"PRIVATE-TOKEN": token, "Content-Type": "application/json"}
+    headers = {"PRIVATE-TOKEN": token, "Content-Type": _JSON_CONTENT_TYPE}
     payload = {"body": comment_body}
 
-    try:
-        response = httpx.post(
-            url,
+    _execute_http_request(
+        _HttpRequestConfig(
+            method=_HttpMethod.POST,
+            url=url,
+            operation_label="GitLab MR comment",
             headers=headers,
-            json=payload,
-            timeout=_HTTP_TIMEOUT_SECONDS,
+            json_body=payload,
         )
-        response.raise_for_status()
-    except httpx.HTTPStatusError as status_error:
-        raise CIIntegrationError(
-            f"GitLab MR comment failed (HTTP {status_error.response.status_code} "
-            f"{status_error.response.reason_phrase})"
-        ) from status_error
-    except httpx.RequestError as request_error:
-        raise CIIntegrationError(
-            f"GitLab MR comment request failed: {request_error}"
-        ) from request_error
+    )
 
     _LOG.debug("GitLab: MR note posted to !%s", mr_iid)
 
@@ -1576,23 +1623,15 @@ def _post_azure_pr_comment(comment_body: str, pr_context: PRContext) -> None:
         "status": "active",
     }
 
-    try:
-        response = httpx.post(
-            url,
-            json=payload,
+    _execute_http_request(
+        _HttpRequestConfig(
+            method=_HttpMethod.POST,
+            url=url,
+            operation_label="Azure DevOps PR comment",
+            json_body=payload,
             auth=("", token),
-            timeout=_HTTP_TIMEOUT_SECONDS,
         )
-        response.raise_for_status()
-    except httpx.HTTPStatusError as status_error:
-        raise CIIntegrationError(
-            f"Azure DevOps PR comment failed (HTTP {status_error.response.status_code} "
-            f"{status_error.response.reason_phrase})"
-        ) from status_error
-    except httpx.RequestError as request_error:
-        raise CIIntegrationError(
-            f"Azure DevOps PR comment request failed: {request_error}"
-        ) from request_error
+    )
 
     _LOG.debug("Azure DevOps: PR thread comment posted to PR #%s", pr_id)
 
@@ -1628,23 +1667,15 @@ def _post_bitbucket_pr_comment(comment_body: str, pr_context: PRContext) -> None
         pr_id=pr_id,
     )
 
-    try:
-        response = httpx.post(
-            url,
-            json={"content": {"raw": comment_body}},
-            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
-            timeout=_HTTP_TIMEOUT_SECONDS,
+    _execute_http_request(
+        _HttpRequestConfig(
+            method=_HttpMethod.POST,
+            url=url,
+            operation_label="Bitbucket PR comment",
+            headers={"Authorization": f"Bearer {token}", "Content-Type": _JSON_CONTENT_TYPE},
+            json_body={_BITBUCKET_COMMENT_CONTENT_KEY: {_BITBUCKET_COMMENT_RAW_KEY: comment_body}},
         )
-        response.raise_for_status()
-    except httpx.HTTPStatusError as status_error:
-        raise CIIntegrationError(
-            f"Bitbucket PR comment failed (HTTP {status_error.response.status_code} "
-            f"{status_error.response.reason_phrase})"
-        ) from status_error
-    except httpx.RequestError as request_error:
-        raise CIIntegrationError(
-            f"Bitbucket PR comment request failed: {request_error}"
-        ) from request_error
+    )
 
     _LOG.debug("Bitbucket: PR comment posted to PR #%s", pr_id)
 
@@ -1803,27 +1834,19 @@ def _set_github_commit_status(scan_result: ScanResult, pr_context: PRContext) ->
         "context": _COMMIT_STATUS_CONTEXT,
     }
 
-    try:
-        response = httpx.post(
-            url,
-            json=payload,
+    _execute_http_request(
+        _HttpRequestConfig(
+            method=_HttpMethod.POST,
+            url=url,
+            operation_label="GitHub commit status",
             headers={
                 "Authorization": f"Bearer {token}",
                 "Accept": "application/vnd.github+json",
                 "X-GitHub-Api-Version": "2022-11-28",
             },
-            timeout=_HTTP_TIMEOUT_SECONDS,
+            json_body=payload,
         )
-        response.raise_for_status()
-    except httpx.HTTPStatusError as status_error:
-        raise CIIntegrationError(
-            f"GitHub commit status failed (HTTP {status_error.response.status_code} "
-            f"{status_error.response.reason_phrase})"
-        ) from status_error
-    except httpx.RequestError as request_error:
-        raise CIIntegrationError(
-            f"GitHub commit status request failed: {request_error}"
-        ) from request_error
+    )
 
     _LOG.debug("GitHub: commit status set to %s for %s", github_state, sha[:8])
 
@@ -1865,23 +1888,15 @@ def _set_gitlab_commit_status(scan_result: ScanResult, pr_context: PRContext) ->
         ),
     }
 
-    try:
-        response = httpx.post(
-            url,
-            json=payload,
+    _execute_http_request(
+        _HttpRequestConfig(
+            method=_HttpMethod.POST,
+            url=url,
+            operation_label="GitLab commit status",
             headers={"PRIVATE-TOKEN": token},
-            timeout=_HTTP_TIMEOUT_SECONDS,
+            json_body=payload,
         )
-        response.raise_for_status()
-    except httpx.HTTPStatusError as status_error:
-        raise CIIntegrationError(
-            f"GitLab commit status failed (HTTP {status_error.response.status_code} "
-            f"{status_error.response.reason_phrase})"
-        ) from status_error
-    except httpx.RequestError as request_error:
-        raise CIIntegrationError(
-            f"GitLab commit status request failed: {request_error}"
-        ) from request_error
+    )
 
     _LOG.debug("GitLab: commit status set to %s for %s", state, sha[:8])
 
@@ -1925,23 +1940,15 @@ def _set_bitbucket_commit_status(scan_result: ScanResult, pr_context: PRContext)
         ),
     }
 
-    try:
-        response = httpx.post(
-            url,
-            json=payload,
-            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
-            timeout=_HTTP_TIMEOUT_SECONDS,
+    _execute_http_request(
+        _HttpRequestConfig(
+            method=_HttpMethod.POST,
+            url=url,
+            operation_label="Bitbucket commit status",
+            headers={"Authorization": f"Bearer {token}", "Content-Type": _JSON_CONTENT_TYPE},
+            json_body=payload,
         )
-        response.raise_for_status()
-    except httpx.HTTPStatusError as status_error:
-        raise CIIntegrationError(
-            f"Bitbucket commit status failed (HTTP {status_error.response.status_code} "
-            f"{status_error.response.reason_phrase})"
-        ) from status_error
-    except httpx.RequestError as request_error:
-        raise CIIntegrationError(
-            f"Bitbucket commit status request failed: {request_error}"
-        ) from request_error
+    )
 
     _LOG.debug("Bitbucket: commit status set to %s for %s", state, sha[:8])
 
