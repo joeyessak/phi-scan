@@ -49,6 +49,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   backward compatibility but will be removed in a future release.
 - Per-provider token cost rates replace the single Anthropic rate. Cost estimates in the audit
   log now reflect the selected provider's published pricing.
+- **`phi_scan/output/` package (7F.1):** `phi_scan/output.py` (2339 LOC) split into four
+  focused submodules — `console.py` (Rich terminal UI), `serializers.py` (pure-data format
+  functions), `dashboard.py` (live dashboard builders), `watch.py` (file-watcher event UI).
+  All public symbols remain importable from `phi_scan.output` unchanged.
+- **CI HTTP scaffolding deduplication (7F.2):** The `httpx → raise_for_status →
+  HTTPStatusError → RequestError → CIIntegrationError` pattern that appeared verbatim 12
+  times in `ci_integration.py` is replaced by a single `_execute_http_request` helper backed
+  by `_HttpRequestConfig` and `_build_request_keyword_arguments`. No behaviour change.
+- **Baseline CLI error handling deduplication (7F.3):** `_load_baseline_or_exit` and
+  `_write_baseline_or_exit` helpers extracted from `cli.py`; replace repeated
+  `try/except BaselineError → echo + raise typer.Exit` blocks in `baseline show`,
+  `baseline diff`, `baseline create`, and `baseline update`.
 
 ## [0.5.0] - 2026-04-04
 
