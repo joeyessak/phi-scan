@@ -476,7 +476,7 @@ def test_display_file_tree_handles_findings_across_multiple_files() -> None:
 def test_build_count_bar_raises_value_error_when_max_count_is_zero() -> None:
     import pytest
 
-    from phi_scan.output import _build_count_bar
+    from phi_scan.output.console import _build_count_bar
 
     with pytest.raises(ValueError):
         _build_count_bar(count=1, max_count=0)
@@ -520,7 +520,7 @@ _NO_EXTENSION_PATH: Path = Path("Makefile")
 
 
 def test_count_files_by_extension_groups_by_suffix() -> None:
-    from phi_scan.output import _count_files_by_extension
+    from phi_scan.output.console import _count_files_by_extension
 
     counts = _count_files_by_extension([_PY_PATH, _JSON_PATH, _ANOTHER_PY_PATH])
 
@@ -529,7 +529,10 @@ def test_count_files_by_extension_groups_by_suffix() -> None:
 
 
 def test_count_files_by_extension_uses_other_label_for_no_extension() -> None:
-    from phi_scan.output import _FILE_TYPE_SUMMARY_OTHER_LABEL, _count_files_by_extension
+    from phi_scan.output.console import (
+        _FILE_TYPE_SUMMARY_OTHER_LABEL,
+        _count_files_by_extension,
+    )
 
     counts = _count_files_by_extension([_NO_EXTENSION_PATH])
 
@@ -537,7 +540,7 @@ def test_count_files_by_extension_uses_other_label_for_no_extension() -> None:
 
 
 def test_count_files_by_extension_returns_empty_dict_for_empty_list() -> None:
-    from phi_scan.output import _count_files_by_extension
+    from phi_scan.output.console import _count_files_by_extension
 
     counts = _count_files_by_extension([])
 
@@ -612,7 +615,10 @@ def test_display_clean_summary_panel_does_not_raise() -> None:
 
 
 def test_build_clean_summary_panel_markup_contains_status_label() -> None:
-    from phi_scan.output import _CLEAN_SUMMARY_STATUS_LABEL, _build_clean_summary_panel_markup
+    from phi_scan.output.console import (
+        _CLEAN_SUMMARY_STATUS_LABEL,
+        _build_clean_summary_panel_markup,
+    )
 
     markup = _build_clean_summary_panel_markup(_make_clean_result())
 
@@ -620,7 +626,7 @@ def test_build_clean_summary_panel_markup_contains_status_label() -> None:
 
 
 def test_build_clean_summary_panel_markup_contains_files_scanned() -> None:
-    from phi_scan.output import _build_clean_summary_panel_markup
+    from phi_scan.output.console import _build_clean_summary_panel_markup
 
     markup = _build_clean_summary_panel_markup(_make_clean_result())
 
@@ -646,7 +652,7 @@ def test_display_exit_code_message_does_not_raise_for_violation() -> None:
 
 
 def test_build_violation_alert_text_contains_finding_count() -> None:
-    from phi_scan.output import _build_violation_alert_text
+    from phi_scan.output.console import _build_violation_alert_text
 
     finding = _make_finding()
     result = _make_dirty_result(finding)
@@ -656,7 +662,10 @@ def test_build_violation_alert_text_contains_finding_count() -> None:
 
 
 def test_build_violation_alert_text_contains_icon() -> None:
-    from phi_scan.output import _VIOLATION_ALERT_ICON, _build_violation_alert_text
+    from phi_scan.output.console import (
+        _VIOLATION_ALERT_ICON,
+        _build_violation_alert_text,
+    )
 
     result = _make_dirty_result(_make_finding())
     text = _build_violation_alert_text(result)
@@ -683,7 +692,7 @@ def test_display_severity_inline_does_not_raise() -> None:
 
 
 def test_build_severity_inline_text_omits_zero_count_levels() -> None:
-    from phi_scan.output import _build_severity_inline_text
+    from phi_scan.output.console import _build_severity_inline_text
 
     result = _make_dirty_result(_make_finding(severity=SeverityLevel.HIGH))
     inline = _build_severity_inline_text(result.severity_counts)
@@ -702,7 +711,10 @@ def test_display_file_tree_with_findings_does_not_raise() -> None:
 
 
 def test_highest_severity_icon_returns_red_for_high() -> None:
-    from phi_scan.output import _SEVERITY_ICON, _highest_severity_icon
+    from phi_scan.output.console import (
+        _SEVERITY_ICON,
+        _highest_severity_icon,
+    )
 
     findings = [_make_finding(severity=SeverityLevel.HIGH)]
     icon = _highest_severity_icon(findings)
@@ -729,7 +741,7 @@ def test_display_violation_summary_panel_does_not_raise() -> None:
 
 
 def test_build_violation_summary_panel_markup_contains_status_label() -> None:
-    from phi_scan.output import (
+    from phi_scan.output.console import (
         _VIOLATION_SUMMARY_STATUS_LABEL,
         _build_violation_summary_panel_markup,
     )
@@ -760,19 +772,19 @@ _DASHBOARD_VIOLATION_SCAN_ROW: dict[str, object] = {
 
 
 def test_build_dashboard_top_panel_no_history_does_not_raise() -> None:
-    from phi_scan.output import _build_dashboard_top_panel
+    from phi_scan.output.dashboard import _build_dashboard_top_panel
 
     _build_dashboard_top_panel(None)
 
 
 def test_build_dashboard_top_panel_clean_scan_does_not_raise() -> None:
-    from phi_scan.output import _build_dashboard_top_panel
+    from phi_scan.output.dashboard import _build_dashboard_top_panel
 
     _build_dashboard_top_panel(_DASHBOARD_CLEAN_SCAN_ROW)
 
 
 def test_build_dashboard_top_panel_violation_scan_does_not_raise() -> None:
-    from phi_scan.output import _build_dashboard_top_panel
+    from phi_scan.output.dashboard import _build_dashboard_top_panel
 
     _build_dashboard_top_panel(_DASHBOARD_VIOLATION_SCAN_ROW)
 
@@ -780,7 +792,7 @@ def test_build_dashboard_top_panel_violation_scan_does_not_raise() -> None:
 def test_build_dashboard_top_panel_no_history_contains_no_history_text() -> None:
     from rich.panel import Panel
 
-    from phi_scan.output import (
+    from phi_scan.output.dashboard import (
         _DASHBOARD_NO_HISTORY_TEXT,
         _build_dashboard_top_panel,
     )
@@ -792,7 +804,7 @@ def test_build_dashboard_top_panel_no_history_contains_no_history_text() -> None
 
 
 def test_build_dashboard_top_panel_clean_contains_clean_status() -> None:
-    from phi_scan.output import (
+    from phi_scan.output.dashboard import (
         _DASHBOARD_HISTORY_CLEAN_STATUS,
         _build_dashboard_top_panel,
     )
@@ -803,7 +815,7 @@ def test_build_dashboard_top_panel_clean_contains_clean_status() -> None:
 
 
 def test_build_dashboard_top_panel_violation_contains_violation_status() -> None:
-    from phi_scan.output import (
+    from phi_scan.output.dashboard import (
         _DASHBOARD_HISTORY_VIOLATION_STATUS,
         _build_dashboard_top_panel,
     )
@@ -819,21 +831,19 @@ def test_build_dashboard_top_panel_violation_contains_violation_status() -> None
 
 
 def test_build_dashboard_history_table_empty_list_does_not_raise() -> None:
-    from phi_scan.output import _build_dashboard_history_table
+    from phi_scan.output.dashboard import _build_dashboard_history_table
 
     _build_dashboard_history_table([])
 
 
 def test_build_dashboard_history_table_non_empty_does_not_raise() -> None:
-    from phi_scan.output import _build_dashboard_history_table
+    from phi_scan.output.dashboard import _build_dashboard_history_table
 
     _build_dashboard_history_table([_DASHBOARD_CLEAN_SCAN_ROW, _DASHBOARD_VIOLATION_SCAN_ROW])
 
 
 def test_build_dashboard_history_table_empty_shows_no_history_text() -> None:
-    from phi_scan.output import (
-        _build_dashboard_history_table,
-    )
+    from phi_scan.output.dashboard import _build_dashboard_history_table
 
     table = _build_dashboard_history_table([])
 
@@ -843,7 +853,7 @@ def test_build_dashboard_history_table_empty_shows_no_history_text() -> None:
 
 
 def test_build_dashboard_history_table_non_empty_has_correct_row_count() -> None:
-    from phi_scan.output import _build_dashboard_history_table
+    from phi_scan.output.dashboard import _build_dashboard_history_table
 
     scans = [_DASHBOARD_CLEAN_SCAN_ROW, _DASHBOARD_VIOLATION_SCAN_ROW]
     table = _build_dashboard_history_table(scans)
@@ -852,7 +862,7 @@ def test_build_dashboard_history_table_non_empty_has_correct_row_count() -> None
 
 
 def test_build_dashboard_history_table_has_five_columns() -> None:
-    from phi_scan.output import _build_dashboard_history_table
+    from phi_scan.output.dashboard import _build_dashboard_history_table
 
     expected_column_count: int = 5
     table = _build_dashboard_history_table([])
@@ -869,19 +879,19 @@ _DASHBOARD_CATEGORY_TOTALS_SAMPLE: dict[str, int] = {"SSN": 3, "EMAIL": 2}
 
 
 def test_build_dashboard_category_table_empty_does_not_raise() -> None:
-    from phi_scan.output import _build_dashboard_category_table
+    from phi_scan.output.dashboard import _build_dashboard_category_table
 
     _build_dashboard_category_table(_DASHBOARD_CATEGORY_TOTALS_EMPTY)
 
 
 def test_build_dashboard_category_table_non_empty_does_not_raise() -> None:
-    from phi_scan.output import _build_dashboard_category_table
+    from phi_scan.output.dashboard import _build_dashboard_category_table
 
     _build_dashboard_category_table(_DASHBOARD_CATEGORY_TOTALS_SAMPLE)
 
 
 def test_build_dashboard_category_table_empty_has_one_placeholder_row() -> None:
-    from phi_scan.output import _build_dashboard_category_table
+    from phi_scan.output.dashboard import _build_dashboard_category_table
 
     table = _build_dashboard_category_table(_DASHBOARD_CATEGORY_TOTALS_EMPTY)
 
@@ -889,7 +899,7 @@ def test_build_dashboard_category_table_empty_has_one_placeholder_row() -> None:
 
 
 def test_build_dashboard_category_table_non_empty_has_correct_row_count() -> None:
-    from phi_scan.output import _build_dashboard_category_table
+    from phi_scan.output.dashboard import _build_dashboard_category_table
 
     table = _build_dashboard_category_table(_DASHBOARD_CATEGORY_TOTALS_SAMPLE)
 
@@ -897,7 +907,7 @@ def test_build_dashboard_category_table_non_empty_has_correct_row_count() -> Non
 
 
 def test_build_dashboard_category_table_has_two_columns() -> None:
-    from phi_scan.output import _build_dashboard_category_table
+    from phi_scan.output.dashboard import _build_dashboard_category_table
 
     expected_column_count: int = 2
     table = _build_dashboard_category_table(_DASHBOARD_CATEGORY_TOTALS_EMPTY)
@@ -966,7 +976,7 @@ def test_build_watch_layout_with_events_does_not_raise(
 
 
 def test_build_watch_header_panel_contains_path(tmp_path: Path) -> None:
-    from phi_scan.output import _build_watch_header_panel
+    from phi_scan.output.watch import _build_watch_header_panel
 
     panel = _build_watch_header_panel(tmp_path)
 
@@ -974,7 +984,10 @@ def test_build_watch_header_panel_contains_path(tmp_path: Path) -> None:
 
 
 def test_build_watch_event_table_empty_shows_waiting_text() -> None:
-    from phi_scan.output import _WATCH_NO_EVENTS_TEXT, _build_watch_event_table
+    from phi_scan.output.watch import (
+        _WATCH_NO_EVENTS_TEXT,
+        _build_watch_event_table,
+    )
 
     table = _build_watch_event_table([])
 
@@ -985,7 +998,7 @@ def test_build_watch_event_table_empty_shows_waiting_text() -> None:
 
 
 def test_build_watch_event_table_has_three_columns() -> None:
-    from phi_scan.output import (
+    from phi_scan.output.watch import (
         _WATCH_COL_FILE,
         _WATCH_COL_RESULT,
         _WATCH_COL_TIME,
@@ -1001,7 +1014,7 @@ def test_build_watch_event_table_has_three_columns() -> None:
 def test_build_watch_event_table_non_empty_has_correct_row_count(
     watch_sample_events: list[WatchEvent],
 ) -> None:
-    from phi_scan.output import _build_watch_event_table
+    from phi_scan.output.watch import _build_watch_event_table
 
     table = _build_watch_event_table(watch_sample_events)
 
@@ -1021,43 +1034,43 @@ _EXPECTED_PHASE_SEPARATOR_STYLE: str = "bold cyan"
 
 
 def test_severity_style_maps_high_to_bold_red() -> None:
-    from phi_scan.output import _SEVERITY_STYLE
+    from phi_scan.output.console import _SEVERITY_STYLE
 
     assert _SEVERITY_STYLE[SeverityLevel.HIGH] == _EXPECTED_HIGH_STYLE
 
 
 def test_severity_style_maps_medium_to_yellow() -> None:
-    from phi_scan.output import _SEVERITY_STYLE
+    from phi_scan.output.console import _SEVERITY_STYLE
 
     assert _SEVERITY_STYLE[SeverityLevel.MEDIUM] == _EXPECTED_MEDIUM_STYLE
 
 
 def test_severity_style_maps_low_to_green() -> None:
-    from phi_scan.output import _SEVERITY_STYLE
+    from phi_scan.output.console import _SEVERITY_STYLE
 
     assert _SEVERITY_STYLE[SeverityLevel.LOW] == _EXPECTED_LOW_STYLE
 
 
 def test_watch_result_clean_style_is_bold_green() -> None:
-    from phi_scan.output import _WATCH_RESULT_CLEAN_STYLE
+    from phi_scan.output.watch import _WATCH_RESULT_CLEAN_STYLE
 
     assert _WATCH_RESULT_CLEAN_STYLE == _EXPECTED_CLEAN_STYLE
 
 
 def test_watch_result_violation_style_is_bold_red() -> None:
-    from phi_scan.output import _WATCH_RESULT_VIOLATION_STYLE
+    from phi_scan.output.watch import _WATCH_RESULT_VIOLATION_STYLE
 
     assert _WATCH_RESULT_VIOLATION_STYLE == _EXPECTED_HIGH_STYLE
 
 
 def test_panel_border_style_is_cyan() -> None:
-    from phi_scan.output import _PANEL_BORDER_STYLE
+    from phi_scan.output.console import _PANEL_BORDER_STYLE
 
     assert _PANEL_BORDER_STYLE == _EXPECTED_PANEL_BORDER_STYLE
 
 
 def test_phase_separator_style_is_bold_cyan() -> None:
-    from phi_scan.output import _PHASE_SEPARATOR_STYLE
+    from phi_scan.output.console import _PHASE_SEPARATOR_STYLE
 
     assert _PHASE_SEPARATOR_STYLE == _EXPECTED_PHASE_SEPARATOR_STYLE
 
@@ -1084,8 +1097,8 @@ _EXPECTED_FILLED_AT_THREE_FIFTHS: int = 3
 def test_clean_result_icon_contains_checkmark_on_utf8_terminal(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr("phi_scan.output._UNICODE_SUPPORTED", True)
-    from phi_scan.output import _resolve_symbol
+    monkeypatch.setattr("phi_scan.output.console._UNICODE_SUPPORTED", True)
+    from phi_scan.output.console import _resolve_symbol
 
     icon = _resolve_symbol(_EXPECTED_CLEAN_ICON_UNICODE, "[OK]")
 
@@ -1095,8 +1108,8 @@ def test_clean_result_icon_contains_checkmark_on_utf8_terminal(
 def test_violation_alert_icon_contains_warning_on_utf8_terminal(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr("phi_scan.output._UNICODE_SUPPORTED", True)
-    from phi_scan.output import _resolve_symbol
+    monkeypatch.setattr("phi_scan.output.console._UNICODE_SUPPORTED", True)
+    from phi_scan.output.console import _resolve_symbol
 
     icon = _resolve_symbol(_EXPECTED_VIOLATION_ICON_UNICODE, "[!]")
 
@@ -1104,31 +1117,35 @@ def test_violation_alert_icon_contains_warning_on_utf8_terminal(
 
 
 def test_code_context_arrow_unicode_raw_value_is_correct() -> None:
-    from phi_scan.output import _UNICODE_CODE_CONTEXT_ARROW
+    from phi_scan.output.console import _UNICODE_CODE_CONTEXT_ARROW
 
     assert _UNICODE_CODE_CONTEXT_ARROW == _EXPECTED_CONTEXT_ARROW_UNICODE
 
 
 def test_code_context_arrow_ascii_fallback_is_correct() -> None:
-    from phi_scan.output import _ASCII_CODE_CONTEXT_ARROW
+    from phi_scan.output.console import _ASCII_CODE_CONTEXT_ARROW
 
     assert _ASCII_CODE_CONTEXT_ARROW == _EXPECTED_CONTEXT_ARROW_ASCII
 
 
 def test_folder_icon_unicode_raw_value_is_correct() -> None:
-    from phi_scan.output import _UNICODE_ICON_FOLDER
+    from phi_scan.output.console import _UNICODE_ICON_FOLDER
 
     assert _UNICODE_ICON_FOLDER == _EXPECTED_FOLDER_ICON_UNICODE
 
 
 def test_folder_icon_ascii_fallback_is_correct() -> None:
-    from phi_scan.output import _ASCII_ICON_FOLDER
+    from phi_scan.output.console import _ASCII_ICON_FOLDER
 
     assert _ASCII_ICON_FOLDER == _EXPECTED_FOLDER_ICON_ASCII
 
 
 def test_build_confidence_dots_all_empty_for_zero() -> None:
-    from phi_scan.output import _CONFIDENCE_DOT_COUNT, _CONFIDENCE_DOT_EMPTY, _build_confidence_dots
+    from phi_scan.output.console import (
+        _CONFIDENCE_DOT_COUNT,
+        _CONFIDENCE_DOT_EMPTY,
+        _build_confidence_dots,
+    )
 
     dots = _build_confidence_dots(_CONFIDENCE_ZERO)
 
@@ -1136,7 +1153,7 @@ def test_build_confidence_dots_all_empty_for_zero() -> None:
 
 
 def test_build_confidence_dots_all_filled_for_one() -> None:
-    from phi_scan.output import (
+    from phi_scan.output.console import (
         _CONFIDENCE_DOT_COUNT,
         _CONFIDENCE_DOT_FILLED,
         _build_confidence_dots,
@@ -1148,7 +1165,7 @@ def test_build_confidence_dots_all_filled_for_one() -> None:
 
 
 def test_build_confidence_dots_partial_for_mid_confidence() -> None:
-    from phi_scan.output import (
+    from phi_scan.output.console import (
         _CONFIDENCE_DOT_COUNT,
         _CONFIDENCE_DOT_EMPTY,
         _CONFIDENCE_DOT_FILLED,
@@ -1170,7 +1187,7 @@ def test_build_confidence_dots_partial_for_mid_confidence() -> None:
 
 
 def test_detect_unicode_support_returns_bool() -> None:
-    from phi_scan.output import _detect_unicode_support
+    from phi_scan.output.console import _detect_unicode_support
 
     is_unicode_supported = _detect_unicode_support()
 
@@ -1181,7 +1198,7 @@ def test_resolve_symbol_returns_unicode_when_supported(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr("phi_scan.output.console._UNICODE_SUPPORTED", True)
-    from phi_scan.output import _resolve_symbol
+    from phi_scan.output.console import _resolve_symbol
 
     result = _resolve_symbol(_EXPECTED_CLEAN_ICON_UNICODE, "[OK]")
 
@@ -1192,7 +1209,7 @@ def test_resolve_symbol_returns_ascii_when_not_supported(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr("phi_scan.output.console._UNICODE_SUPPORTED", False)
-    from phi_scan.output import _resolve_symbol
+    from phi_scan.output.console import _resolve_symbol
 
     result = _resolve_symbol(_EXPECTED_CLEAN_ICON_UNICODE, "[OK]")
 
