@@ -67,6 +67,26 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Verify compensating controls for glob ignore rules
+        shell: bash
+        run: |
+          # .phi-scanignore uses tests/test_*.py to exclude all test files from
+          # full-repo push scans. The stated compensating control is that every PR
+          # scan is diff-based (diff_ref: origin/main), so new test files are scanned
+          # before they reach main. This step enforces that invariant: if a glob
+          # exclusion covering test files is present, diff_ref must be configured.
+          # Fail fast here rather than silently missing PHI in new test files.
+          if grep -qE '^tests/test_\*\.py' .phi-scanignore; then
+            if ! grep -qE 'diff_ref.*origin/main' .github/workflows/ci.yml; then
+              echo "ERROR: .phi-scanignore excludes tests/test_*.py via glob but"
+              echo "ci.yml does not configure diff_ref: origin/main for pull_request"
+              echo "events. The compensating control is missing — either restore"
+              echo "explicit per-file entries in .phi-scanignore or re-add diff_ref."
+              exit 1
+            fi
+            echo "OK: diff_ref: origin/main compensating control is present in ci.yml"
+          fi
+
       - name: Scan for PHI/PII
         uses: joeyessak/phi-scan-action@b17418799d4cf730cf57676b49d4828a579930ed  # v0.1.0
         with:
