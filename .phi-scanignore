@@ -98,44 +98,12 @@ tests/fixtures/clean/
 # Fixture manifest — lists fixture file paths and expected finding counts; field
 # names like "unique_id" and "mrn" trigger the quasi-identifier combination detector.
 tests/fixtures/manifest.json
-# HL7 v2 test file — embeds a multi-segment synthetic HL7 message (_FAKE_HL7_MESSAGE)
-# that contains dates, MRN-like identifiers, and a synthetic patient name required
-# for segment-level scanner tests. The fixture values are provably fictional per
-# CLAUDE.md§FixtureCorpusException but reside in the test file rather than the
-# fixtures directory because they are tightly coupled to the HL7 scanner unit tests.
-tests/test_hl7_scanner.py
-# Audit unit test file — imports HIPAA category names and remediation constants
-# (PhiCategory, HIPAA_REMEDIATION_GUIDANCE, ACCOUNT_NUMBER) as test identifiers.
-# These produce false positives against the quasi-identifier combination detector
-# when scanned as application source.
-tests/test_audit.py
-# CLI unit test file — contains SARIF output keys, date literals used as test
-# inputs, and constants like _JSON_FINDINGS_KEY that combine with surrounding
-# context to trigger quasi-identifier and date detectors as false positives.
-tests/test_cli.py
-# Compliance unit test file — imports ComplianceFramework, PhiCategory, and
-# ComplianceControl constants whose combinations trigger the quasi-identifier
-# combination detector when scanned as application source.
-tests/test_compliance_4b.py
-# AI review unit test file — contains a synthetic SSN value (`'123-45-6789'`) used
-# to verify that ScanFinding rejects unredacted code_context at construction time.
-# The value is intentionally fictional (555-01-0000 style) but triggers the SSN
-# detector. Also imports PhiCategory and AIReviewConfig constants that combine to
-# produce quasi-identifier false positives when scanned as application source.
-tests/test_ai_review.py
-# Notifier unit test file — contains deliberate private/RFC1918/loopback IP
-# address literals required to test SSRF protection (7E.2). These addresses are
-# test inputs for _validate_webhook_url, not real endpoints.
-tests/test_notifier.py
-# Scanner unit test file — imports ARCHIVE_MAX_COMPRESSION_RATIO,
-# ARCHIVE_MAX_MEMBER_UNCOMPRESSED_BYTES, and defines ZipInfo helper constants
-# whose combinations trigger the quasi-identifier and health plan number detectors
-# when scanned as application source.
-tests/test_scanner.py
-# Output unit test file — imports display constants (WATCH_RESULT_CLEAN_TEXT,
-# WatchEvent) and format function names whose surrounding context triggers the
-# quasi-identifier combination detector when scanned as application source.
-tests/test_output.py
+# All test files — unit tests contain intentional synthetic PHI patterns (SSNs,
+# MRNs, SSN-like values, IP addresses, FHIR fixtures, HL7 messages) required to
+# exercise the detection engine. These are false positives when scanned as
+# application source. Test files are covered by diff-based PR scans; excluding
+# them on full-repo push scans prevents noise without reducing coverage.
+tests/
 
 # PhiScan project-level documentation and CI configuration.
 # These files are excluded to suppress false positives when phi-scan scans its
@@ -170,3 +138,17 @@ phi_scan/
 .phi-scanner.yml
 .phi-scanignore
 .gitignore
+
+# Project root files — legal text, build scripts, and pre-commit configuration
+# contain word patterns (e.g. "coverage", "version", hook names) that trigger
+# HEALTH_PLAN_NUMBER and combination detectors as false positives.
+LICENSE
+Makefile
+.pre-commit-hooks.yaml
+.pre-commit-config.yaml
+
+# Generated build artifacts — coverage.xml contains class names, method names,
+# and line counts from the test suite. Attribute names like "name" and "branch"
+# combined with numeric values trigger multiple detectors as false positives.
+coverage.xml
+coverage/
