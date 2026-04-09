@@ -32,11 +32,10 @@ from phi_scan.constants import (
     CONFIDENCE_HIGH_FLOOR,
     CONFIDENCE_STRUCTURED_MAX,
     CONFIDENCE_STRUCTURED_MIN,
-    HIPAA_REMEDIATION_GUIDANCE,
     DetectionLayer,
     PhiCategory,
 )
-from phi_scan.hashing import compute_value_hash, severity_from_confidence
+from phi_scan.hashing import build_structured_finding
 from phi_scan.models import ScanFinding
 
 __all__ = ["detect_phi_in_structured_content"]
@@ -176,7 +175,8 @@ def _build_fhir_finding(file_path: Path, line_match: _FhirLineMatch) -> ScanFind
     """Construct a ScanFinding from a FHIR field match.
 
     The raw matched value is hashed immediately; only the digest is stored
-    (HIPAA audit requirement).
+    (HIPAA audit requirement). Delegates hash + severity + remediation derivation
+    to build_structured_finding to keep this pattern consistent across layers.
 
     Args:
         file_path: Source path recorded in the finding for reporting.
@@ -186,23 +186,21 @@ def _build_fhir_finding(file_path: Path, line_match: _FhirLineMatch) -> ScanFind
         Immutable ScanFinding for this FHIR field detection.
     """
     phi_category = _FHIR_PHI_FIELD_CATEGORIES[line_match.field_name]
-    confidence = _FHIR_FIELD_BASE_CONFIDENCE
-    return ScanFinding(
+    # Store only the matched field name — never the raw line text.
+    # A single FHIR line may contain multiple PHI fields; using line_text
+    # would expose every other field's value regardless of how many
+    # str.replace() calls are applied. The field name is sufficient for a
+    # developer to locate and remediate the finding.
+    code_context = f'"{line_match.field_name}": {CODE_CONTEXT_REDACTED_VALUE}'
+    return build_structured_finding(
         file_path=file_path,
         line_number=line_match.line_number,
         entity_type=line_match.field_name,
         hipaa_category=phi_category,
-        confidence=confidence,
+        confidence=_FHIR_FIELD_BASE_CONFIDENCE,
         detection_layer=DetectionLayer.FHIR,
-        value_hash=compute_value_hash(line_match.raw_value),
-        severity=severity_from_confidence(confidence),
-        # Store only the matched field name — never the raw line text.
-        # A single FHIR line may contain multiple PHI fields; using line_text
-        # would expose every other field's value regardless of how many
-        # str.replace() calls are applied. The field name is sufficient for a
-        # developer to locate and remediate the finding.
-        code_context=f'"{line_match.field_name}": {CODE_CONTEXT_REDACTED_VALUE}',
-        remediation_hint=HIPAA_REMEDIATION_GUIDANCE.get(phi_category, ""),
+        raw_value=line_match.raw_value,
+        code_context=code_context,
     )
 
 

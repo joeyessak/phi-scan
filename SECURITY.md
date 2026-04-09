@@ -74,7 +74,11 @@ remains in `.phi-scanignore`.
 PhiScan is designed to handle sensitive data environments. Key security properties:
 
 - **Local execution only:** all scanning runs locally within your CI/CD pipeline
-  runner. No PHI or PII is ever transmitted to an external API or third-party service.
+  runner. No PHI or PII is ever transmitted to an external API or third-party
+  service by default. The optional AI confidence review layer
+  (`ai.enable_ai_review`, disabled by default) sends redacted code structure
+  only — never raw PHI values — to the configured AI provider when explicitly
+  enabled. Raw PHI never leaves the local runner under any configuration.
 - **No raw PHI in logs:** audit logs store SHA-256 hashes of detected values, never
   the raw values themselves.
 - **Immutable audit trail:** audit log entries are append-only (INSERT only, never

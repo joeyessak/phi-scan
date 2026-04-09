@@ -32,12 +32,11 @@ from phi_scan.constants import (
     CONFIDENCE_HIGH_FLOOR,
     CONFIDENCE_STRUCTURED_MAX,
     CONFIDENCE_STRUCTURED_MIN,
-    HIPAA_REMEDIATION_GUIDANCE,
     DetectionLayer,
     PhiCategory,
 )
 from phi_scan.exceptions import MissingOptionalDependencyError
-from phi_scan.hashing import compute_value_hash, severity_from_confidence
+from phi_scan.hashing import build_structured_finding
 from phi_scan.models import Hl7ScanContext, ScanFinding
 
 __all__ = [
@@ -156,7 +155,9 @@ def _build_hl7_finding(
     """Construct a ScanFinding from a single HL7 field match.
 
     The raw field value is hashed immediately; only the digest is stored
-    (HIPAA audit requirement).
+    (HIPAA audit requirement). Delegates hash + severity + remediation
+    derivation to build_structured_finding to keep this pattern consistent
+    across layers.
 
     Args:
         field_value: Raw string content of the HL7 field.
@@ -166,19 +167,15 @@ def _build_hl7_finding(
     Returns:
         Immutable ScanFinding for this HL7 field detection.
     """
-    confidence = _HL7_FIELD_BASE_CONFIDENCE
-    line_number = context.segment_index + _LINE_NUMBER_START
-    return ScanFinding(
+    return build_structured_finding(
         file_path=context.file_path,
-        line_number=line_number,
+        line_number=context.segment_index + _LINE_NUMBER_START,
         entity_type=phi_category.value,
         hipaa_category=phi_category,
-        confidence=confidence,
+        confidence=_HL7_FIELD_BASE_CONFIDENCE,
         detection_layer=DetectionLayer.HL7,
-        value_hash=compute_value_hash(field_value),
-        severity=severity_from_confidence(confidence),
+        raw_value=field_value,
         code_context=f"{context.segment_type}: {CODE_CONTEXT_REDACTED_VALUE}",
-        remediation_hint=HIPAA_REMEDIATION_GUIDANCE.get(phi_category, ""),
     )
 
 

@@ -34,6 +34,7 @@ import logging
 import os
 import smtplib
 import socket
+from dataclasses import dataclass
 from email.mime.application import MIMEApplication
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -215,6 +216,60 @@ _SLACK_COLOR_GOOD: str = "good"
 _TEAMS_THEME_COLOR_RED: str = "FF0000"
 _TEAMS_THEME_COLOR_GREEN: str = "00AA00"
 _MAX_FINDINGS_IN_NOTIFICATION: int = 20  # prevent oversized payloads
+
+# ---------------------------------------------------------------------------
+# Webhook scan summary model
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class _WebhookScanSummary:
+    """Pre-computed scan metadata shared by all webhook payload builders.
+
+    Constructed once by _build_webhook_scan_summary and passed to each
+    builder, eliminating duplicate derivation across Slack, Teams, and
+    generic payload formats.
+    """
+
+    is_clean: bool
+    risk_level_label: str
+    findings_count: int
+    files_scanned: int
+    scan_duration: float
+    action_taken: str
+    repo: str
+    branch: str
+    scanner_version: str
+
+
+def _build_webhook_scan_summary(
+    scan_result: ScanResult,
+    repo: str,
+    branch: str,
+    scanner_version: str,
+) -> _WebhookScanSummary:
+    """Derive all shared webhook metadata from a completed scan result.
+
+    Args:
+        scan_result: Completed scan result.
+        repo: Repository identifier.
+        branch: Branch name.
+        scanner_version: phi-scan version string.
+
+    Returns:
+        Immutable summary of scan metadata for use by payload builders.
+    """
+    return _WebhookScanSummary(
+        is_clean=scan_result.is_clean,
+        risk_level_label=scan_result.risk_level.value.upper(),
+        findings_count=len(scan_result.findings),
+        files_scanned=scan_result.files_scanned,
+        scan_duration=scan_result.scan_duration,
+        action_taken=ACTION_TAKEN_PASS if scan_result.is_clean else ACTION_TAKEN_FAIL,
+        repo=repo,
+        branch=branch,
+        scanner_version=scanner_version,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -407,27 +462,20 @@ def _deliver_via_smtp(
 # ---------------------------------------------------------------------------
 
 
-def _build_slack_payload(
-    scan_result: ScanResult, repo: str, branch: str, scanner_version: str
-) -> dict[str, Any]:
+def _build_slack_payload(summary: _WebhookScanSummary) -> dict[str, Any]:
     """Build a Slack Block Kit message payload.
 
     Args:
-        scan_result: Completed scan result.
-        repo: Repository identifier.
-        branch: Branch name.
-        scanner_version: phi-scan version string.
+        summary: Pre-computed scan metadata from _build_webhook_scan_summary.
 
     Returns:
         Slack Block Kit payload dict ready for JSON serialisation.
     """
-    is_clean = scan_result.is_clean
-    color = _SLACK_COLOR_GOOD if is_clean else _SLACK_COLOR_DANGER
+    color = _SLACK_COLOR_GOOD if summary.is_clean else _SLACK_COLOR_DANGER
     status_text = (
         "*CLEAN* — no PHI detected"
-        if is_clean
-        else f"*{scan_result.risk_level.value.upper()}* — "
-        f"{len(scan_result.findings)} finding(s) detected"
+        if summary.is_clean
+        else f"*{summary.risk_level_label}* — {summary.findings_count} finding(s) detected"
     )
     return {
         "attachments": [
@@ -439,10 +487,10 @@ def _build_slack_payload(
                         "text": {
                             "type": "mrkdwn",
                             "text": (
-                                f":shield: *phi-scan Alert* | {repo}/{branch}\n"
+                                f":shield: *phi-scan Alert* | {summary.repo}/{summary.branch}\n"
                                 f"{status_text}\n"
-                                f"Files scanned: {scan_result.files_scanned} | "
-                                f"Scanner: {scanner_version}"
+                                f"Files scanned: {summary.files_scanned} | "
+                                f"Scanner: {summary.scanner_version}"
                             ),
                         },
                     }
@@ -452,27 +500,20 @@ def _build_slack_payload(
     }
 
 
-def _build_teams_payload(
-    scan_result: ScanResult, repo: str, branch: str, scanner_version: str
-) -> dict[str, Any]:
+def _build_teams_payload(summary: _WebhookScanSummary) -> dict[str, Any]:
     """Build a Microsoft Teams Adaptive Card payload.
 
     Args:
-        scan_result: Completed scan result.
-        repo: Repository identifier.
-        branch: Branch name.
-        scanner_version: phi-scan version string.
+        summary: Pre-computed scan metadata from _build_webhook_scan_summary.
 
     Returns:
         Teams connector card payload dict ready for JSON serialisation.
     """
-    is_clean = scan_result.is_clean
-    theme_color = _TEAMS_THEME_COLOR_GREEN if is_clean else _TEAMS_THEME_COLOR_RED
+    theme_color = _TEAMS_THEME_COLOR_GREEN if summary.is_clean else _TEAMS_THEME_COLOR_RED
     status_text = (
         "CLEAN — no PHI detected"
-        if is_clean
-        else f"{scan_result.risk_level.value.upper()} — "
-        f"{len(scan_result.findings)} finding(s) detected"
+        if summary.is_clean
+        else f"{summary.risk_level_label} — {summary.findings_count} finding(s) detected"
     )
     return {
         "@type": "MessageCard",
@@ -481,14 +522,14 @@ def _build_teams_payload(
         "summary": f"phi-scan {status_text}",
         "sections": [
             {
-                "activityTitle": f"phi-scan Alert — {repo}/{branch}",
+                "activityTitle": f"phi-scan Alert — {summary.repo}/{summary.branch}",
                 "activitySubtitle": status_text,
                 "facts": [
-                    {"name": "Risk Level", "value": scan_result.risk_level.value},
+                    {"name": "Risk Level", "value": summary.risk_level_label},
                     # phi-scan:ignore-next-line
-                    {"name": "Findings", "value": str(len(scan_result.findings))},
-                    {"name": "Files Scanned", "value": str(scan_result.files_scanned)},
-                    {"name": "Scanner Version", "value": scanner_version},
+                    {"name": "Findings", "value": str(summary.findings_count)},
+                    {"name": "Files Scanned", "value": str(summary.files_scanned)},
+                    {"name": "Scanner Version", "value": summary.scanner_version},
                 ],
             }
         ],
@@ -496,7 +537,8 @@ def _build_teams_payload(
 
 
 def _build_generic_payload(
-    scan_result: ScanResult, repo: str, branch: str, scanner_version: str
+    summary: _WebhookScanSummary,
+    scan_result: ScanResult,
 ) -> dict[str, Any]:
     """Build a generic JSON webhook payload.
 
@@ -505,10 +547,8 @@ def _build_generic_payload(
     digest of the detected value; it cannot be reversed to recover the PHI.
 
     Args:
-        scan_result: Completed scan result.
-        repo: Repository identifier.
-        branch: Branch name.
-        scanner_version: phi-scan version string.
+        summary: Pre-computed scan metadata from _build_webhook_scan_summary.
+        scan_result: Completed scan result (used for the per-finding list only).
 
     Returns:
         Generic JSON payload dict.
@@ -527,15 +567,15 @@ def _build_generic_payload(
     ]
     return {
         "event": "phi_scan_complete",
-        "scanner_version": scanner_version,
-        "repository": repo,
-        "branch": branch,
-        "risk_level": scan_result.risk_level.value,
-        "is_clean": scan_result.is_clean,
-        "findings_count": len(scan_result.findings),
-        "files_scanned": scan_result.files_scanned,
-        "scan_duration": scan_result.scan_duration,
-        "action_taken": ACTION_TAKEN_PASS if scan_result.is_clean else ACTION_TAKEN_FAIL,
+        "scanner_version": summary.scanner_version,
+        "repository": summary.repo,
+        "branch": summary.branch,
+        "risk_level": summary.risk_level_label,
+        "is_clean": summary.is_clean,
+        "findings_count": summary.findings_count,
+        "files_scanned": summary.files_scanned,
+        "scan_duration": summary.scan_duration,
+        "action_taken": summary.action_taken,
         "findings": findings_payload,
     }
 
@@ -559,11 +599,12 @@ def _build_webhook_payload(
     Returns:
         Payload dict appropriate for the webhook_type.
     """
+    summary = _build_webhook_scan_summary(scan_result, repo, branch, scanner_version)
     if webhook_type is WebhookType.SLACK:
-        return _build_slack_payload(scan_result, repo, branch, scanner_version)
+        return _build_slack_payload(summary)
     if webhook_type is WebhookType.TEAMS:
-        return _build_teams_payload(scan_result, repo, branch, scanner_version)
-    return _build_generic_payload(scan_result, repo, branch, scanner_version)
+        return _build_teams_payload(summary)
+    return _build_generic_payload(summary, scan_result)
 
 
 def _resolve_hostname_addresses(  # phi-scan:ignore
