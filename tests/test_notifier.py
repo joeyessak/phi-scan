@@ -315,7 +315,7 @@ def test_generic_payload_contains_event_field() -> None:
     summary = _build_webhook_scan_summary(
         scan_result, _SAMPLE_REPO, _SAMPLE_BRANCH, _SAMPLE_SCANNER_VERSION
     )
-    payload = _build_generic_payload(summary, scan_result)
+    payload = _build_generic_payload(summary)
     assert "event" in payload
 
 
@@ -325,7 +325,7 @@ def test_generic_payload_contains_findings_count() -> None:
     summary = _build_webhook_scan_summary(
         scan_result, _SAMPLE_REPO, _SAMPLE_BRANCH, _SAMPLE_SCANNER_VERSION
     )
-    payload = _build_generic_payload(summary, scan_result)
+    payload = _build_generic_payload(summary)
     assert payload["findings_count"] == len(scan_result.findings)
 
 
@@ -335,7 +335,7 @@ def test_generic_payload_no_raw_phi_values() -> None:
     summary = _build_webhook_scan_summary(
         scan_result, _SAMPLE_REPO, _SAMPLE_BRANCH, _SAMPLE_SCANNER_VERSION
     )
-    payload = _build_generic_payload(summary, scan_result)
+    payload = _build_generic_payload(summary)
     for finding_payload in payload.get("findings", []):
         assert "code_context" not in finding_payload
         assert "remediation_hint" not in finding_payload
@@ -347,7 +347,7 @@ def test_generic_payload_contains_value_hash_not_raw_value() -> None:
     summary = _build_webhook_scan_summary(
         scan_result, _SAMPLE_REPO, _SAMPLE_BRANCH, _SAMPLE_SCANNER_VERSION
     )
-    payload = _build_generic_payload(summary, scan_result)
+    payload = _build_generic_payload(summary)
     for finding_payload in payload.get("findings", []):
         assert "value_hash" in finding_payload
 
@@ -378,6 +378,7 @@ def test_build_webhook_scan_summary_derives_fields_correctly() -> None:
     )
     assert summary.is_clean == scan_result.is_clean
     assert summary.risk_level_label == scan_result.risk_level.value.upper()
+    assert summary.risk_level_value == scan_result.risk_level.value
     assert summary.findings_count == len(scan_result.findings)
     assert summary.files_scanned == scan_result.files_scanned
     assert summary.repo == _SAMPLE_REPO

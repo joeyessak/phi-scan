@@ -27,7 +27,11 @@ from phi_scan.fhir_recognizer import (  # type: ignore[attr-defined]
     _is_null_or_empty_fhir_value,
     detect_phi_in_structured_content,
 )
-from phi_scan.hashing import build_structured_finding, severity_from_confidence
+from phi_scan.hashing import (
+    StructuredFindingRequest,
+    build_structured_finding,
+    severity_from_confidence,
+)
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -370,14 +374,16 @@ def test_build_structured_finding_hashes_raw_value() -> None:
 
     raw = _FAKE_FAMILY_NAME
     finding = build_structured_finding(
-        file_path=_FAKE_FILE_PATH,
-        line_number=1,
-        entity_type="family",
-        hipaa_category=PhiCategory.NAME,
-        confidence=_FHIR_FIELD_BASE_CONFIDENCE,
-        detection_layer=DetectionLayer.FHIR,
-        raw_value=raw,
-        code_context=f'"family": {CODE_CONTEXT_REDACTED_VALUE}',
+        StructuredFindingRequest(
+            file_path=_FAKE_FILE_PATH,
+            line_number=1,
+            entity_type="family",
+            hipaa_category=PhiCategory.NAME,
+            confidence=_FHIR_FIELD_BASE_CONFIDENCE,
+            detection_layer=DetectionLayer.FHIR,
+            raw_value=raw,
+            code_context=f'"family": {CODE_CONTEXT_REDACTED_VALUE}',
+        )
     )
     assert finding.value_hash == hashlib.sha256(raw.encode()).hexdigest()
 
@@ -385,14 +391,16 @@ def test_build_structured_finding_hashes_raw_value() -> None:
 def test_build_structured_finding_derives_severity_from_confidence() -> None:
     """build_structured_finding severity must match severity_from_confidence."""
     finding = build_structured_finding(
-        file_path=_FAKE_FILE_PATH,
-        line_number=1,
-        entity_type="family",
-        hipaa_category=PhiCategory.NAME,
-        confidence=_FHIR_FIELD_BASE_CONFIDENCE,
-        detection_layer=DetectionLayer.FHIR,
-        raw_value=_FAKE_FAMILY_NAME,
-        code_context=f'"family": {CODE_CONTEXT_REDACTED_VALUE}',
+        StructuredFindingRequest(
+            file_path=_FAKE_FILE_PATH,
+            line_number=1,
+            entity_type="family",
+            hipaa_category=PhiCategory.NAME,
+            confidence=_FHIR_FIELD_BASE_CONFIDENCE,
+            detection_layer=DetectionLayer.FHIR,
+            raw_value=_FAKE_FAMILY_NAME,
+            code_context=f'"family": {CODE_CONTEXT_REDACTED_VALUE}',
+        )
     )
     assert finding.severity == severity_from_confidence(_FHIR_FIELD_BASE_CONFIDENCE)
 
@@ -402,13 +410,15 @@ def test_build_structured_finding_populates_remediation_hint() -> None:
     from phi_scan.constants import HIPAA_REMEDIATION_GUIDANCE
 
     finding = build_structured_finding(
-        file_path=_FAKE_FILE_PATH,
-        line_number=1,
-        entity_type="family",
-        hipaa_category=PhiCategory.NAME,
-        confidence=_FHIR_FIELD_BASE_CONFIDENCE,
-        detection_layer=DetectionLayer.FHIR,
-        raw_value=_FAKE_FAMILY_NAME,
-        code_context=f'"family": {CODE_CONTEXT_REDACTED_VALUE}',
+        StructuredFindingRequest(
+            file_path=_FAKE_FILE_PATH,
+            line_number=1,
+            entity_type="family",
+            hipaa_category=PhiCategory.NAME,
+            confidence=_FHIR_FIELD_BASE_CONFIDENCE,
+            detection_layer=DetectionLayer.FHIR,
+            raw_value=_FAKE_FAMILY_NAME,
+            code_context=f'"family": {CODE_CONTEXT_REDACTED_VALUE}',
+        )
     )
     assert finding.remediation_hint == HIPAA_REMEDIATION_GUIDANCE.get(PhiCategory.NAME, "")

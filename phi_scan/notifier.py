@@ -233,6 +233,7 @@ class _WebhookScanSummary:
 
     is_clean: bool
     risk_level_label: str
+    risk_level_value: str
     findings_count: int
     files_scanned: int
     scan_duration: float
@@ -240,6 +241,7 @@ class _WebhookScanSummary:
     repo: str
     branch: str
     scanner_version: str
+    truncated_findings: tuple[dict[str, Any], ...]
 
 
 def _build_webhook_scan_summary(
@@ -259,9 +261,22 @@ def _build_webhook_scan_summary(
     Returns:
         Immutable summary of scan metadata for use by payload builders.
     """
+    truncated_findings = tuple(
+        {
+            "file_path": str(f.file_path),
+            "line_number": f.line_number,
+            "entity_type": f.entity_type,
+            "hipaa_category": f.hipaa_category.value,
+            "severity": f.severity.value,
+            "confidence": f.confidence,
+            "value_hash": f.value_hash,
+        }
+        for f in scan_result.findings[:_MAX_FINDINGS_IN_NOTIFICATION]
+    )
     return _WebhookScanSummary(
         is_clean=scan_result.is_clean,
         risk_level_label=scan_result.risk_level.value.upper(),
+        risk_level_value=scan_result.risk_level.value,
         findings_count=len(scan_result.findings),
         files_scanned=scan_result.files_scanned,
         scan_duration=scan_result.scan_duration,
@@ -269,6 +284,7 @@ def _build_webhook_scan_summary(
         repo=repo,
         branch=branch,
         scanner_version=scanner_version,
+        truncated_findings=truncated_findings,
     )
 
 
@@ -536,10 +552,7 @@ def _build_teams_payload(summary: _WebhookScanSummary) -> dict[str, Any]:
     }
 
 
-def _build_generic_payload(
-    summary: _WebhookScanSummary,
-    scan_result: ScanResult,
-) -> dict[str, Any]:
+def _build_generic_payload(summary: _WebhookScanSummary) -> dict[str, Any]:
     """Build a generic JSON webhook payload.
 
     The payload includes only hashed metadata — no raw PHI values or
@@ -548,35 +561,22 @@ def _build_generic_payload(
 
     Args:
         summary: Pre-computed scan metadata from _build_webhook_scan_summary.
-        scan_result: Completed scan result (used for the per-finding list only).
 
     Returns:
         Generic JSON payload dict.
     """
-    findings_payload = [
-        {
-            "file_path": str(f.file_path),
-            "line_number": f.line_number,
-            "entity_type": f.entity_type,
-            "hipaa_category": f.hipaa_category.value,
-            "severity": f.severity.value,
-            "confidence": f.confidence,
-            "value_hash": f.value_hash,
-        }
-        for f in scan_result.findings[:_MAX_FINDINGS_IN_NOTIFICATION]
-    ]
     return {
         "event": "phi_scan_complete",
         "scanner_version": summary.scanner_version,
         "repository": summary.repo,
         "branch": summary.branch,
-        "risk_level": summary.risk_level_label,
+        "risk_level": summary.risk_level_value,
         "is_clean": summary.is_clean,
         "findings_count": summary.findings_count,
         "files_scanned": summary.files_scanned,
         "scan_duration": summary.scan_duration,
         "action_taken": summary.action_taken,
-        "findings": findings_payload,
+        "findings": list(summary.truncated_findings),
     }
 
 
@@ -604,7 +604,7 @@ def _build_webhook_payload(
         return _build_slack_payload(summary)
     if webhook_type is WebhookType.TEAMS:
         return _build_teams_payload(summary)
-    return _build_generic_payload(summary, scan_result)
+    return _build_generic_payload(summary)
 
 
 def _resolve_hostname_addresses(  # phi-scan:ignore
