@@ -14,11 +14,11 @@ from phi_scan.output.console import (
     _BASELINE_DRIFT_TITLE,
     _BASELINE_ENTRIES_LABEL,
     _BASELINE_ENTRY_LABEL,
-    _BASELINE_NEW_SECTION_HEADER,
+    _BASELINE_NEW_SECTION_HEADER_FORMAT,
     _BASELINE_NOTICE_BORDER_STYLE,
     _BASELINE_NOTICE_TITLE,
-    _BASELINE_PERSISTING_SECTION_HEADER,
-    _BASELINE_RESOLVED_SECTION_HEADER,
+    _BASELINE_PERSISTING_SECTION_HEADER_FORMAT,
+    _BASELINE_RESOLVED_SECTION_HEADER_FORMAT,
     _BASELINE_SCAN_CLEAN_MESSAGE,
     _BASELINE_SCAN_NOTICE_MESSAGE,
     _BASELINE_SUMMARY_BORDER_STYLE,
@@ -78,7 +78,7 @@ def display_baseline_diff(diff: BaselineDiff) -> None:
         diff: Computed diff between the baseline and the current scan.
     """
     lines: list[str] = [
-        _BASELINE_NEW_SECTION_HEADER.format(count=len(diff.new_findings)),
+        _BASELINE_NEW_SECTION_HEADER_FORMAT.format(count=len(diff.new_findings)),
     ]
     for finding in diff.new_findings:
         lines.append(
@@ -91,7 +91,7 @@ def display_baseline_diff(diff: BaselineDiff) -> None:
         )
     lines += [
         "",
-        _BASELINE_RESOLVED_SECTION_HEADER.format(count=len(diff.resolved_entries)),
+        _BASELINE_RESOLVED_SECTION_HEADER_FORMAT.format(count=len(diff.resolved_entries)),
     ]
     for entry in diff.resolved_entries:
         lines.append(
@@ -104,7 +104,7 @@ def display_baseline_diff(diff: BaselineDiff) -> None:
         )
     lines += [
         "",
-        _BASELINE_PERSISTING_SECTION_HEADER.format(count=len(diff.persisting_findings)),
+        _BASELINE_PERSISTING_SECTION_HEADER_FORMAT.format(count=len(diff.persisting_findings)),
     ]
     get_console().print(Panel("\n".join(lines), title=_BASELINE_DIFF_TITLE))
 

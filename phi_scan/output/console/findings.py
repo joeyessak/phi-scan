@@ -105,12 +105,12 @@ def _group_findings_by_file(
     Returns:
         Dict mapping each affected file path to its list of findings.
     """
-    groups: dict[Path, list[ScanFinding]] = {}
+    findings_by_file: dict[Path, list[ScanFinding]] = {}
     for finding in findings:
-        if finding.file_path not in groups:
-            groups[finding.file_path] = []
-        groups[finding.file_path].append(finding)
-    return groups
+        if finding.file_path not in findings_by_file:
+            findings_by_file[finding.file_path] = []
+        findings_by_file[finding.file_path].append(finding)
+    return findings_by_file
 
 
 def _highest_severity_icon(file_findings: list[ScanFinding]) -> str:
