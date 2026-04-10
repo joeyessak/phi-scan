@@ -15,6 +15,7 @@ extracted here.
 from __future__ import annotations
 
 import hashlib
+import string
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -39,6 +40,7 @@ __all__ = [
 ]
 
 _NO_REMEDIATION_HINT: str = ""
+_SHA256_HEX_DIGEST_LENGTH: int = 64
 
 
 @dataclass(frozen=True)
@@ -59,6 +61,19 @@ class StructuredFindingRequest:
     detection_layer: DetectionLayer
     value_hash: str
     code_context: str
+
+    def __post_init__(self) -> None:
+        """Reject value_hash that is not a valid SHA-256 hex digest.
+
+        Raises:
+            ValueError: If value_hash is not exactly 64 lowercase hex characters.
+        """
+        is_valid_length = len(self.value_hash) == _SHA256_HEX_DIGEST_LENGTH
+        is_valid_hex = all(character in string.hexdigits for character in self.value_hash)
+        if not is_valid_length or not is_valid_hex:
+            raise ValueError(
+                f"value_hash must be a 64-character hex digest; got length {len(self.value_hash)}"
+            )
 
 
 def compute_value_hash(text: str) -> str:

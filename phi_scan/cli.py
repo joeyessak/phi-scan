@@ -850,11 +850,11 @@ def _dispatch_notifications(
         return []
     from phi_scan.audit import _get_current_branch, _get_current_repository_path
 
-    repo = _get_current_repository_path()
+    repository = _get_current_repository_path()
     branch = _get_current_branch()
     notification_request = NotificationRequest(
         scan_result=scan_result,
-        repository=repo,
+        repository=repository,
         branch=branch,
         scanner_version=__version__,
         report_path=report_path,
