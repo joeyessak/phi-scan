@@ -2292,21 +2292,21 @@ backwards-compatible CLI surface.
 | `phi_scan/cli_config.py` | `config_app` Typer + `init` handler | ~130 |
 | `phi_scan/cli.py` (retained) | `app` wiring, `scan`, `report`, `history`, `fix`, `dashboard`, `install-hook`, `uninstall-hook`, `init`, `setup`, all shared orchestration helpers | ~1840 |
 
-- [ ] **7I.1** `phi_scan/cli_explain.py` — Move `explain_app` Typer
+- [x] **7I.1** `phi_scan/cli_explain.py` — Move `explain_app` Typer
   definition and all 11 `@explain_app.command` handlers; import and re-export
   `explain_app` from `phi_scan/cli.py` via `from phi_scan.cli_explain import
   explain_app`; no other change to `cli.py`
-- [ ] **7I.2** `phi_scan/cli_baseline.py` — Move `baseline_app` Typer
+- [x] **7I.2** `phi_scan/cli_baseline.py` — Move `baseline_app` Typer
   definition, `_load_baseline_or_exit`, `_write_baseline_or_exit`, and all
   five `@baseline_app.command` handlers; update imports in the new module
   to cover `BaselineError`, `ScanConfig`, `display_baseline_*`, etc.;
   import `baseline_app` in `cli.py`
-- [ ] **7I.3** `phi_scan/cli_config.py` — Move `config_app` Typer definition
+- [x] **7I.3** `phi_scan/cli_config.py` — Move `config_app` Typer definition
   and `@config_app.command("init")` handler; import `config_app` in `cli.py`
-- [ ] **7I.4** `CONTRIBUTING.md` — Update module map to reflect
+- [x] **7I.4** `CONTRIBUTING.md` — Update module map to reflect
   `cli_explain.py`, `cli_baseline.py`, `cli_config.py`; update
   "Where to Add Things" section for new explain/baseline/config commands
-- [ ] **7I.5** `CHANGELOG.md` — Add entry under `[Unreleased]` for 7I
+- [x] **7I.5** `CHANGELOG.md` — Add entry under `[Unreleased]` for 7I
 
 ### 7I Verification Checklist
 
