@@ -38,7 +38,7 @@ from phi_scan.notifier import (
     _build_email_html_body,  # noqa: PLC2701
     _build_email_subject,
     _build_generic_payload,
-    _build_pinned_request_args,  # noqa: PLC2701
+    _build_pinned_request_arguments,  # noqa: PLC2701
     _build_pinned_url,  # noqa: PLC2701
     _build_slack_payload,
     _build_teams_payload,
@@ -810,16 +810,16 @@ def test_build_pinned_url_replaces_hostname_with_ip() -> None:
     assert _DOMAIN_WEBHOOK_HOST not in pinned
 
 
-def test_build_pinned_request_args_sets_host_header() -> None:
-    """_build_pinned_request_args must set Host header to the original hostname."""
-    request_args = _build_pinned_request_args(_HOOKS_WEBHOOK_URL, _TEST_PINNED_IP)
+def test_build_pinned_request_arguments_sets_host_header() -> None:
+    """_build_pinned_request_arguments must set Host header to the original hostname."""
+    request_args = _build_pinned_request_arguments(_HOOKS_WEBHOOK_URL, _TEST_PINNED_IP)
     assert request_args.headers.get("Host") == _DOMAIN_WEBHOOK_HOST
     assert _TEST_PINNED_IP in request_args.target_url
 
 
-def test_build_pinned_request_args_returns_original_url_when_no_pin() -> None:
-    """_build_pinned_request_args must return the original URL unchanged when pinned_ip is None."""
-    request_args = _build_pinned_request_args(_HOOKS_WEBHOOK_URL, None)
+def test_build_pinned_request_arguments_returns_original_url_when_no_pin() -> None:
+    """_build_pinned_request_arguments must return original URL unchanged when pinned_ip is None."""
+    request_args = _build_pinned_request_arguments(_HOOKS_WEBHOOK_URL, None)
     assert request_args.target_url == _HOOKS_WEBHOOK_URL
     assert "Host" not in request_args.headers
 
