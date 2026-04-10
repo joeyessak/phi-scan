@@ -20,6 +20,7 @@ from phi_scan.baseline import (
 from phi_scan.cli_scan_config import load_scan_config
 from phi_scan.constants import (
     BASELINE_DRIFT_WARNING_PERCENT,
+    BASELINE_LOAD_ERROR_MESSAGE,
     DEFAULT_BASELINE_FILENAME,
     DEFAULT_BASELINE_MAX_AGE_DAYS,
     DEFAULT_IGNORE_FILENAME,
@@ -66,7 +67,7 @@ _BASELINE_NOT_FOUND_MESSAGE: str = "No baseline file found at {path!r} — nothi
 _BASELINE_CLEAR_CONFIRM_PROMPT: str = "This will remove the baseline at {path!r}. Continue? [y/N]"
 _BASELINE_CLEAR_ABORTED_MESSAGE: str = "Baseline clear aborted."
 _BASELINE_ERROR_MESSAGE: str = "Baseline error: {error}"
-_BASELINE_LOAD_ERROR_MESSAGE: str = "Could not load baseline: {error}"
+
 _BASELINE_CONFIRM_YES: str = "y"
 _ENTRY_LABEL_SINGULAR: str = "entry"
 _ENTRY_LABEL_PLURAL: str = "entries"
@@ -95,8 +96,8 @@ def _load_baseline_or_exit(baseline_path: Path) -> BaselineSnapshot:
     """
     try:
         snapshot = load_baseline(baseline_path=baseline_path)
-    except BaselineError as error:
-        typer.echo(_BASELINE_ERROR_MESSAGE.format(error=error), err=True)
+    except BaselineError as baseline_load_error:
+        typer.echo(_BASELINE_ERROR_MESSAGE.format(error=baseline_load_error), err=True)
         raise typer.Exit(code=EXIT_CODE_ERROR)
     if snapshot is None:
         typer.echo(_BASELINE_NO_FILE_WARNING.format(path=baseline_path), err=True)
@@ -115,8 +116,8 @@ def _load_optional_baseline(baseline_path: Path) -> BaselineSnapshot | None:
     """
     try:
         return load_baseline(baseline_path=baseline_path)
-    except BaselineError as error:
-        typer.echo(_BASELINE_LOAD_ERROR_MESSAGE.format(error=error), err=True)
+    except BaselineError as baseline_load_error:
+        typer.echo(BASELINE_LOAD_ERROR_MESSAGE.format(error=baseline_load_error), err=True)
         return None
 
 
@@ -143,8 +144,8 @@ def _write_baseline_or_exit(
     """
     try:
         return create_baseline(scan_result, max_age_days, baseline_path=baseline_path)
-    except BaselineError as error:
-        typer.echo(_BASELINE_ERROR_MESSAGE.format(error=error), err=True)
+    except BaselineError as baseline_load_error:
+        typer.echo(_BASELINE_ERROR_MESSAGE.format(error=baseline_load_error), err=True)
         raise typer.Exit(code=EXIT_CODE_ERROR)
 
 

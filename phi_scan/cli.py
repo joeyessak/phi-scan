@@ -55,6 +55,7 @@ from phi_scan.compliance import (
     parse_framework_flag,
 )
 from phi_scan.constants import (
+    BASELINE_LOAD_ERROR_MESSAGE,
     DEFAULT_BASELINE_FILENAME,
     DEFAULT_DATABASE_PATH,
     DEFAULT_IGNORE_FILENAME,
@@ -218,7 +219,6 @@ _REPORT_PATH_WRITE_ERROR: str = "Failed to write report to {path!r}: {error}"
 _REPORT_PATH_WRITTEN_MESSAGE: str = "Report written to {path}"
 _VERBOSE_TIMESTAMP_FORMAT: str = "%Y-%m-%d %H:%M:%S"
 _VERBOSE_PHASE_PREFIX: str = "[{timestamp}] Phase: {message}"
-_BASELINE_LOAD_ERROR_MESSAGE: str = "Could not load baseline: {error}"
 _VERBOSE_PHASE_COLLECTING: str = "collecting scan targets"
 _VERBOSE_PHASE_SCANNING: str = "scanning {count} file(s)"
 _VERBOSE_PHASE_AUDIT: str = "writing audit record"
@@ -1007,6 +1007,22 @@ def _emit_scan_output(scan_result: ScanResult, options: _ScanOutputOptions) -> N
 # ---------------------------------------------------------------------------
 
 
+def _load_optional_baseline(baseline_path: Path) -> BaselineSnapshot | None:
+    """Load a baseline snapshot, returning None and printing a warning on failure.
+
+    Args:
+        baseline_path: Path to the .phi-scanbaseline file.
+
+    Returns:
+        Loaded snapshot, or None when the file is missing or unreadable.
+    """
+    try:
+        return load_baseline(baseline_path=baseline_path)
+    except BaselineError as baseline_load_error:
+        typer.echo(BASELINE_LOAD_ERROR_MESSAGE.format(error=baseline_load_error), err=True)
+        return None
+
+
 def _emit_scan_output_with_baseline(
     scan_result: ScanResult, output_options: _ScanOutputOptions
 ) -> NoReturn:
@@ -1022,11 +1038,7 @@ def _emit_scan_output_with_baseline(
         output_options: Output format, rich-mode flag, and report path.
     """
     baseline_path = Path(DEFAULT_BASELINE_FILENAME)
-    try:
-        snapshot: BaselineSnapshot | None = load_baseline(baseline_path=baseline_path)
-    except BaselineError as error:
-        typer.echo(_BASELINE_LOAD_ERROR_MESSAGE.format(error=error), err=True)
-        snapshot = None
+    snapshot = _load_optional_baseline(baseline_path)
     if snapshot is None:
         _emit_scan_output(scan_result, output_options)
         raise typer.Exit(code=EXIT_CODE_CLEAN if scan_result.is_clean else EXIT_CODE_VIOLATION)
