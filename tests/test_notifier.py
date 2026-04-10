@@ -87,7 +87,7 @@ _SMTP_ENV_USER: str = "PHI_SCAN_SMTP_USER"
 _SMTP_ENV_PASSWORD: str = "PHI_SCAN_SMTP_PASSWORD"
 _TEST_PINNED_IP: str = "93.184.216.34"  # example.com public IP — safe for test use
 _DOMAIN_WEBHOOK_HOST: str = "hooks.example.com"
-_HOOKS_WEBHOOK_URL: str = f"https://{_DOMAIN_WEBHOOK_HOST}/notify"
+_DOMAIN_WEBHOOK_URL: str = f"https://{_DOMAIN_WEBHOOK_HOST}/notify"
 
 
 # ---------------------------------------------------------------------------
@@ -745,9 +745,6 @@ def test_validate_webhook_url_private_ip_error_does_not_expose_raw_url() -> None
 # _reject_ssrf_resolved_addresses
 # ---------------------------------------------------------------------------
 
-_DOMAIN_WEBHOOK_URL: str = "https://internal.example.com/hook"
-
-
 def test_validate_webhook_url_blocks_hostname_resolving_to_loopback() -> None:
     """_validate_webhook_url must block a hostname that resolves to 127.0.0.1."""
     with patch("phi_scan.notifier._resolve_hostname_addresses") as stub_resolve:
@@ -805,22 +802,22 @@ def test_validate_webhook_url_returns_none_when_private_allowed() -> None:
 
 def test_build_pinned_url_replaces_hostname_with_ip() -> None:
     """_build_pinned_url must substitute the hostname with the pinned IP."""
-    pinned = _build_pinned_url(_HOOKS_WEBHOOK_URL, _TEST_PINNED_IP)
+    pinned = _build_pinned_url(_DOMAIN_WEBHOOK_URL, _TEST_PINNED_IP)
     assert _TEST_PINNED_IP in pinned
     assert _DOMAIN_WEBHOOK_HOST not in pinned
 
 
 def test_build_pinned_request_arguments_sets_host_header() -> None:
     """_build_pinned_request_arguments must set Host header to the original hostname."""
-    request_args = _build_pinned_request_arguments(_HOOKS_WEBHOOK_URL, _TEST_PINNED_IP)
+    request_args = _build_pinned_request_arguments(_DOMAIN_WEBHOOK_URL, _TEST_PINNED_IP)
     assert request_args.headers.get("Host") == _DOMAIN_WEBHOOK_HOST
     assert _TEST_PINNED_IP in request_args.target_url
 
 
 def test_build_pinned_request_arguments_returns_original_url_when_no_pin() -> None:
     """_build_pinned_request_arguments must return original URL unchanged when pinned_ip is None."""
-    request_args = _build_pinned_request_arguments(_HOOKS_WEBHOOK_URL, None)
-    assert request_args.target_url == _HOOKS_WEBHOOK_URL
+    request_args = _build_pinned_request_arguments(_DOMAIN_WEBHOOK_URL, None)
+    assert request_args.target_url == _DOMAIN_WEBHOOK_URL
     assert "Host" not in request_args.headers
 
 
@@ -836,7 +833,7 @@ def test_post_with_retry_pins_connection_to_resolved_ip() -> None:
 
     with patch("phi_scan.notifier.httpx.post", side_effect=stub_post):
         _post_with_retry(
-            _HOOKS_WEBHOOK_URL,
+            _DOMAIN_WEBHOOK_URL,
             payload={"text": "test"},
             retry_count=1,
             pinned_ip=_TEST_PINNED_IP,
@@ -846,6 +843,25 @@ def test_post_with_retry_pins_connection_to_resolved_ip() -> None:
     assert _TEST_PINNED_IP in str(captured_calls[0]["url"])
     assert _DOMAIN_WEBHOOK_HOST not in str(captured_calls[0]["url"])
     assert captured_calls[0]["headers"].get("Host") == _DOMAIN_WEBHOOK_HOST
+
+
+def test_build_pinned_url_raises_when_hostname_is_missing() -> None:
+    """_build_pinned_url must raise NotificationError for a URL with no parseable hostname."""
+    with pytest.raises(NotificationError):
+        _build_pinned_url("file:///local/path", _TEST_PINNED_IP)
+
+
+_TEST_IPV6_HOST: str = "2001:db8::1"
+_TEST_IPV6_WEBHOOK_URL: str = f"https://[{_TEST_IPV6_HOST}]:8443/notify"
+_TEST_IPV4_PINNED_IP: str = "93.184.216.34"
+
+
+def test_build_pinned_url_handles_ipv6_url() -> None:
+    """_build_pinned_url must produce a valid URL when pinning an IPv6 address."""
+    pinned = _build_pinned_url(_TEST_IPV6_WEBHOOK_URL, _TEST_IPV4_PINNED_IP)
+    assert _TEST_IPV4_PINNED_IP in pinned
+    assert _TEST_IPV6_HOST not in pinned
+    assert ":8443" in pinned
 
 
 def test_resolve_hostname_addresses_raises_on_gaierror() -> None:

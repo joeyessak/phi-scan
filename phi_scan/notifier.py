@@ -113,8 +113,10 @@ _WEBHOOK_DNS_BLOCKED_ADDRESS_ERROR: str = (
 # SSRF validation, preventing DNS rebinding between validation and request.
 _PINNED_HOST_HEADER: str = "Host"
 _CONTENT_TYPE_HEADER: str = "Content-Type"
-_EMPTY_HOSTNAME: str = ""
 _SINGLE_HOSTNAME_REPLACEMENT_COUNT: int = 1
+_MISSING_HOSTNAME_ERROR_MESSAGE: str = "cannot pin request: URL has no parseable hostname"
+_IPV6_ADDRESS_COLON: str = ":"
+_IPV6_NETLOC_BRACKET_TEMPLATE: str = "[{hostname}]"
 
 # IP networks blocked by SSRF protection when is_private_webhook_url_allowed=False.
 # Covers RFC1918 private ranges, link-local, loopback, CGNAT, cloud metadata,
@@ -779,7 +781,24 @@ class _PinnedRequestArguments:
     """
 
     target_url: str
-    headers: dict[str, str]
+    headers: MappingProxyType[str, str]
+
+
+def _netloc_host_segment(hostname: str) -> str:
+    """Return hostname as it appears in a URL netloc.
+
+    IPv6 addresses must be bracketed in netloc (e.g. ``[2001:db8::1]``);
+    IPv4 addresses and DNS names are used as-is.
+
+    Args:
+        hostname: Bare hostname or IP address string (no brackets).
+
+    Returns:
+        Hostname ready for insertion into a netloc string.
+    """
+    if _IPV6_ADDRESS_COLON in hostname:
+        return _IPV6_NETLOC_BRACKET_TEMPLATE.format(hostname=hostname)
+    return hostname
 
 
 def _build_pinned_url(url: str, pinned_ip: str) -> str:
@@ -789,24 +808,26 @@ def _build_pinned_url(url: str, pinned_ip: str) -> str:
     pre-resolved IP, preventing DNS rebinding between SSRF validation and
     delivery. The original hostname travels in the Host header (see
     ``_build_pinned_request_arguments``) so TLS SNI and server routing are preserved.
-
-    Note: IPv6 literal addresses in the URL (e.g. ``[::1]:443``) are out of
-    scope — SSRF validation blocks all private/loopback addresses before this
-    function is reached, so a valid pinned_ip will always be a public IPv4 address.
+    Both IPv4 and IPv6 pinned addresses are handled: IPv6 addresses are
+    bracketed in the netloc (e.g. ``[2001:db8::1]``).
 
     Args:
         url: Original webhook URL.
         pinned_ip: IP address string returned by ``_validate_webhook_url``.
 
     Returns:
-        URL with hostname replaced by ``pinned_ip``, or ``url`` unchanged if
-        the URL has no parseable hostname.
+        URL with hostname replaced by ``pinned_ip``.
+
+    Raises:
+        NotificationError: If the URL has no parseable hostname.
     """
     parsed = urlparse(url)
     if not parsed.hostname:
-        return url
+        raise NotificationError(_MISSING_HOSTNAME_ERROR_MESSAGE)
+    original_netloc_host = _netloc_host_segment(parsed.hostname)
+    pinned_netloc_host = _netloc_host_segment(pinned_ip)
     pinned_netloc = parsed.netloc.replace(
-        parsed.hostname, pinned_ip, _SINGLE_HOSTNAME_REPLACEMENT_COUNT
+        original_netloc_host, pinned_netloc_host, _SINGLE_HOSTNAME_REPLACEMENT_COUNT
     )
     return urlunparse(parsed._replace(netloc=pinned_netloc))
 
@@ -824,19 +845,25 @@ def _build_pinned_request_arguments(url: str, pinned_ip: str | None) -> _PinnedR
 
     Returns:
         ``_PinnedRequestArguments`` with target_url and headers ready for httpx.
+
+    Raises:
+        NotificationError: If pinned_ip is set but the URL has no parseable hostname.
     """
     if pinned_ip is None:
         return _PinnedRequestArguments(
             target_url=url,
-            headers={_CONTENT_TYPE_HEADER: _WEBHOOK_CONTENT_TYPE},
+            headers=MappingProxyType({_CONTENT_TYPE_HEADER: _WEBHOOK_CONTENT_TYPE}),
         )
     parsed = urlparse(url)
+    original_hostname = parsed.hostname
+    if not original_hostname:
+        raise NotificationError(_MISSING_HOSTNAME_ERROR_MESSAGE)
     return _PinnedRequestArguments(
         target_url=_build_pinned_url(url, pinned_ip),
-        headers={
+        headers=MappingProxyType({
             _CONTENT_TYPE_HEADER: _WEBHOOK_CONTENT_TYPE,
-            _PINNED_HOST_HEADER: parsed.hostname or _EMPTY_HOSTNAME,
-        },
+            _PINNED_HOST_HEADER: original_hostname,
+        }),
     )
 
 
