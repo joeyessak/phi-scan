@@ -69,10 +69,11 @@ class StructuredFindingRequest:
             ValueError: If value_hash is not exactly 64 lowercase hex characters.
         """
         is_valid_length = len(self.value_hash) == _SHA256_HEX_DIGEST_LENGTH
-        is_valid_hex = all(character in string.hexdigits for character in self.value_hash)
+        is_valid_hex = all(character in string.hexdigits.lower() for character in self.value_hash)
         if not is_valid_length or not is_valid_hex:
             raise ValueError(
-                f"value_hash must be a 64-character hex digest; got length {len(self.value_hash)}"
+                "value_hash must be a 64-character lowercase hex digest; "
+                f"got length {len(self.value_hash)}"
             )
 
 

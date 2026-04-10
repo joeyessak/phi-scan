@@ -109,6 +109,9 @@ _WEBHOOK_DNS_BLOCKED_ADDRESS_ERROR: str = (
     "ranges are blocked by default. "
     "Set is_private_webhook_url_allowed=True in NotificationConfig to allow self-hosted targets."
 )
+# Transport URL format used to pin the TCP connection to the IP resolved during
+# SSRF validation, preventing DNS rebinding between validation and request.
+_PINNED_TRANSPORT_URL: str = "https://{pinned_ip}"
 
 # IP networks blocked by SSRF protection when is_private_webhook_url_allowed=False.
 # Covers RFC1918 private ranges, link-local, loopback, CGNAT, cloud metadata,
@@ -705,8 +708,11 @@ def _reject_ssrf_resolved_addresses(  # phi-scan:ignore
             )
 
 
-def _validate_webhook_url(url: str, is_private_webhook_url_allowed: bool) -> None:
-    """Raise NotificationError if the webhook URL fails SSRF safety checks.
+def _validate_webhook_url(
+    url: str,
+    is_private_webhook_url_allowed: bool,
+) -> str | None:
+    """Validate the webhook URL against SSRF safety checks and return a pinned IP.
 
     Enforces four guards (1–2 always, 3–4 when is_private_webhook_url_allowed is False):
     1. Scheme must be 'https' — plaintext http is rejected.
@@ -716,11 +722,19 @@ def _validate_webhook_url(url: str, is_private_webhook_url_allowed: bool) -> Non
     4. Hostname, if a domain name, is resolved via DNS and every returned address
        is validated against the same blocked ranges (closes DNS-rebinding bypass).
 
+    Returns the first resolved IP address as a string so the caller can pin the
+    TCP connection to it, preventing DNS rebinding between validation and delivery.
+    Returns None when the hostname is already a literal IP (no resolution needed).
+
     Args:
         url: The webhook endpoint URL to validate.
         is_private_webhook_url_allowed: When True, skip both the literal-IP check
             and the DNS resolution check (opt-out for self-hosted targets on private
             networks).
+
+    Returns:
+        Pinned IP string to connect to, or None when is_private_webhook_url_allowed
+        is True or the hostname is already a literal IP address.
 
     Raises:
         NotificationError: If the URL fails any enabled check.
@@ -737,46 +751,75 @@ def _validate_webhook_url(url: str, is_private_webhook_url_allowed: bool) -> Non
             _WEBHOOK_MISSING_HOSTNAME_ERROR.format(url_hash=compute_value_hash(url))
         )
     if is_private_webhook_url_allowed:
-        return
+        return None
     try:
         address = ipaddress.ip_address(hostname)  # phi-scan:ignore
     except ValueError:
         resolved_addresses = _resolve_hostname_addresses(hostname)  # phi-scan:ignore
         _reject_ssrf_resolved_addresses(hostname, resolved_addresses)
-        return
+        return str(resolved_addresses[0])  # phi-scan:ignore
     if any(address in network for network in _BLOCKED_IP_NETWORKS):  # phi-scan:ignore
         raise NotificationError(
             _WEBHOOK_PRIVATE_IP_ERROR.format(
                 url_hash=compute_value_hash(url), address_hash=compute_value_hash(str(address))
             )
         )
+    return None
 
 
 def _post_with_retry(
     url: str,
     payload: dict[str, Any],
     retry_count: int,
+    pinned_ip: str | None = None,
 ) -> None:
     """POST a JSON payload to a URL with linear retry on failure.
 
     Uses ``httpx`` sync client. Retries on HTTP 4xx/5xx and on network errors.
     The final attempt raises ``NotificationError`` if still failing.
 
+    When ``pinned_ip`` is provided, the TCP connection is made directly to that
+    IP address with the original hostname in the Host header. This prevents DNS
+    rebinding between the SSRF validation step and the actual HTTP request
+    (TOCTOU mitigation).
+
     Args:
         url: The webhook endpoint URL.
         payload: JSON-serialisable payload dict.
         retry_count: Total number of attempts (1 = no retry).
+        pinned_ip: Pre-resolved IP to connect to directly. When None, httpx
+            resolves the hostname normally (used when is_private_webhook_url_allowed
+            is True or the hostname was already a literal IP).
 
     Raises:
         NotificationError: If all attempts fail.
     """
+    parsed = urlparse(url)
+    if pinned_ip is not None:
+        # Replace the hostname in the URL with the pre-resolved IP so httpx
+        # connects to the exact address validated during SSRF checks, preventing
+        # DNS rebinding between validation and delivery (TOCTOU mitigation).
+        # The original hostname is preserved in the Host header so TLS SNI and
+        # server-side routing continue to work correctly.
+        pinned_url = url.replace(
+            f"{parsed.scheme}://{parsed.hostname}",
+            _PINNED_TRANSPORT_URL.format(pinned_ip=pinned_ip),
+            1,
+        )
+        request_headers: dict[str, str] = {
+            "Content-Type": _WEBHOOK_CONTENT_TYPE,
+            "Host": parsed.hostname or "",
+        }
+    else:
+        pinned_url = url
+        request_headers = {"Content-Type": _WEBHOOK_CONTENT_TYPE}
     last_error: Exception | None = None
     for attempt in range(1, retry_count + 1):
         try:
             response = httpx.post(
-                url,
+                pinned_url,
                 json=payload,
-                headers={"Content-Type": _WEBHOOK_CONTENT_TYPE},
+                headers=request_headers,
                 timeout=WEBHOOK_DEFAULT_TIMEOUT_SECONDS,
             )
             if response.is_success:
@@ -873,9 +916,9 @@ def send_webhook_notification(
     """
     if not config.webhook_url:
         raise NotificationError(_NO_WEBHOOK_URL_ERROR)
-    _validate_webhook_url(config.webhook_url, config.is_private_webhook_url_allowed)
+    pinned_ip = _validate_webhook_url(config.webhook_url, config.is_private_webhook_url_allowed)
     payload = _build_webhook_payload(config.webhook_type, request)
-    _post_with_retry(config.webhook_url, payload, config.webhook_retry_count)
+    _post_with_retry(config.webhook_url, payload, config.webhook_retry_count, pinned_ip)
     _logger.info(
         "Webhook notification delivered to %r (%s) for %s/%s",
         config.webhook_url,

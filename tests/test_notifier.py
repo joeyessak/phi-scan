@@ -43,6 +43,7 @@ from phi_scan.notifier import (
     _build_webhook_payload,
     _derive_webhook_scan_summary,  # noqa: PLC2701
     _get_smtp_credentials,
+    _post_with_retry,  # noqa: PLC2701
     _reject_ssrf_resolved_addresses,  # noqa: PLC2701
     _resolve_hostname_addresses,  # noqa: PLC2701
     _validate_webhook_url,  # noqa: PLC2701
@@ -778,6 +779,47 @@ def test_validate_webhook_url_skips_dns_when_private_allowed() -> None:
     with patch("phi_scan.notifier._resolve_hostname_addresses") as stub_resolve:
         _validate_webhook_url(_DOMAIN_WEBHOOK_URL, is_private_webhook_url_allowed=True)
         stub_resolve.assert_not_called()
+
+
+def test_validate_webhook_url_returns_pinned_ip_for_domain() -> None:
+    """_validate_webhook_url must return the first resolved IP for TOCTOU pinning."""
+    resolved_ip = ipaddress.ip_address("93.184.216.34")
+    with patch(
+        "phi_scan.notifier._resolve_hostname_addresses",
+        return_value=[resolved_ip],
+    ):
+        pinned_ip = _validate_webhook_url(_DOMAIN_WEBHOOK_URL, is_private_webhook_url_allowed=False)
+    assert pinned_ip == str(resolved_ip)
+
+
+def test_validate_webhook_url_returns_none_when_private_allowed() -> None:
+    """_validate_webhook_url must return None when SSRF checks are skipped."""
+    pinned_ip = _validate_webhook_url(_PRIVATE_IP_WEBHOOK_URL, is_private_webhook_url_allowed=True)
+    assert pinned_ip is None
+
+
+def test_post_with_retry_pins_connection_to_resolved_ip() -> None:
+    """_post_with_retry must rewrite the URL to the pinned IP and set the Host header."""
+    captured_calls: list[dict[str, object]] = []
+
+    def stub_post(url: str, **kwargs: object) -> object:
+        captured_calls.append({"url": url, "headers": kwargs.get("headers", {})})
+        mock_response = MagicMock()
+        mock_response.is_success = True
+        return mock_response
+
+    with patch("phi_scan.notifier.httpx.post", side_effect=stub_post):
+        _post_with_retry(
+            "https://hooks.example.com/notify",
+            payload={"text": "test"},
+            retry_count=1,
+            pinned_ip="93.184.216.34",
+        )
+
+    assert len(captured_calls) == 1
+    assert "93.184.216.34" in str(captured_calls[0]["url"])
+    assert "hooks.example.com" not in str(captured_calls[0]["url"])
+    assert captured_calls[0]["headers"].get("Host") == "hooks.example.com"
 
 
 def test_resolve_hostname_addresses_raises_on_gaierror() -> None:
