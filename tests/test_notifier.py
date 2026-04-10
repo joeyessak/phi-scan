@@ -38,6 +38,8 @@ from phi_scan.notifier import (
     _build_email_html_body,  # noqa: PLC2701
     _build_email_subject,
     _build_generic_payload,
+    _build_pinned_request_args,  # noqa: PLC2701
+    _build_pinned_url,  # noqa: PLC2701
     _build_slack_payload,
     _build_teams_payload,
     _build_webhook_payload,
@@ -83,6 +85,8 @@ _ZERO_FINDINGS: int = 0
 _ONE_FINDING: int = 1
 _SMTP_ENV_USER: str = "PHI_SCAN_SMTP_USER"
 _SMTP_ENV_PASSWORD: str = "PHI_SCAN_SMTP_PASSWORD"
+_TEST_PINNED_IP: str = "93.184.216.34"  # example.com public IP — safe for test use
+_DOMAIN_WEBHOOK_HOST: str = "hooks.example.com"
 
 
 # ---------------------------------------------------------------------------
@@ -550,7 +554,7 @@ def test_send_webhook_succeeds_on_http_200() -> None:
     with (
         patch(
             "phi_scan.notifier._resolve_hostname_addresses",
-            return_value=[ipaddress.ip_address("93.184.216.34")],
+            return_value=[ipaddress.ip_address(_TEST_PINNED_IP)],
         ),
         patch("httpx.post", return_value=mock_response),
     ):
@@ -609,7 +613,7 @@ def test_send_webhook_retries_on_failure() -> None:
     with (
         patch(
             "phi_scan.notifier._resolve_hostname_addresses",
-            return_value=[ipaddress.ip_address("93.184.216.34")],
+            return_value=[ipaddress.ip_address(_TEST_PINNED_IP)],
         ),
         patch("httpx.post", return_value=mock_response) as mock_post,
     ):
@@ -653,7 +657,7 @@ def test_validate_webhook_url_accepts_https() -> None:
     """_validate_webhook_url must not raise for a valid https URL with a public IP."""
     with patch(
         "phi_scan.notifier._resolve_hostname_addresses",
-        return_value=[ipaddress.ip_address("93.184.216.34")],
+        return_value=[ipaddress.ip_address(_TEST_PINNED_IP)],
     ):
         _validate_webhook_url(_SAMPLE_WEBHOOK_URL, is_private_webhook_url_allowed=False)
 
@@ -783,7 +787,7 @@ def test_validate_webhook_url_skips_dns_when_private_allowed() -> None:
 
 def test_validate_webhook_url_returns_pinned_ip_for_domain() -> None:
     """_validate_webhook_url must return the first resolved IP for TOCTOU pinning."""
-    resolved_ip = ipaddress.ip_address("93.184.216.34")
+    resolved_ip = ipaddress.ip_address(_TEST_PINNED_IP)
     with patch(
         "phi_scan.notifier._resolve_hostname_addresses",
         return_value=[resolved_ip],
@@ -798,6 +802,30 @@ def test_validate_webhook_url_returns_none_when_private_allowed() -> None:
     assert pinned_ip is None
 
 
+def test_build_pinned_url_replaces_hostname_with_ip() -> None:
+    """_build_pinned_url must substitute the hostname with the pinned IP."""
+    original_url = f"https://{_DOMAIN_WEBHOOK_HOST}/notify"
+    pinned = _build_pinned_url(original_url, _TEST_PINNED_IP)
+    assert _TEST_PINNED_IP in pinned
+    assert _DOMAIN_WEBHOOK_HOST not in pinned
+
+
+def test_build_pinned_request_args_sets_host_header() -> None:
+    """_build_pinned_request_args must set Host header to the original hostname."""
+    original_url = f"https://{_DOMAIN_WEBHOOK_HOST}/notify"
+    request_args = _build_pinned_request_args(original_url, _TEST_PINNED_IP)
+    assert request_args.headers.get("Host") == _DOMAIN_WEBHOOK_HOST
+    assert _TEST_PINNED_IP in request_args.target_url
+
+
+def test_build_pinned_request_args_returns_original_url_when_no_pin() -> None:
+    """_build_pinned_request_args must return the original URL unchanged when pinned_ip is None."""
+    original_url = f"https://{_DOMAIN_WEBHOOK_HOST}/notify"
+    request_args = _build_pinned_request_args(original_url, None)
+    assert request_args.target_url == original_url
+    assert "Host" not in request_args.headers
+
+
 def test_post_with_retry_pins_connection_to_resolved_ip() -> None:
     """_post_with_retry must rewrite the URL to the pinned IP and set the Host header."""
     captured_calls: list[dict[str, object]] = []
@@ -810,16 +838,16 @@ def test_post_with_retry_pins_connection_to_resolved_ip() -> None:
 
     with patch("phi_scan.notifier.httpx.post", side_effect=stub_post):
         _post_with_retry(
-            "https://hooks.example.com/notify",
+            f"https://{_DOMAIN_WEBHOOK_HOST}/notify",
             payload={"text": "test"},
             retry_count=1,
-            pinned_ip="93.184.216.34",
+            pinned_ip=_TEST_PINNED_IP,
         )
 
     assert len(captured_calls) == 1
-    assert "93.184.216.34" in str(captured_calls[0]["url"])
-    assert "hooks.example.com" not in str(captured_calls[0]["url"])
-    assert captured_calls[0]["headers"].get("Host") == "hooks.example.com"
+    assert _TEST_PINNED_IP in str(captured_calls[0]["url"])
+    assert _DOMAIN_WEBHOOK_HOST not in str(captured_calls[0]["url"])
+    assert captured_calls[0]["headers"].get("Host") == _DOMAIN_WEBHOOK_HOST
 
 
 def test_resolve_hostname_addresses_raises_on_gaierror() -> None:
@@ -831,7 +859,7 @@ def test_resolve_hostname_addresses_raises_on_gaierror() -> None:
 
 def test_reject_ssrf_resolved_addresses_passes_for_public_ip() -> None:
     """_reject_ssrf_resolved_addresses must not raise for a public IP address."""
-    _reject_ssrf_resolved_addresses("example.com", [ipaddress.ip_address("93.184.216.34")])
+    _reject_ssrf_resolved_addresses("example.com", [ipaddress.ip_address(_TEST_PINNED_IP)])
 
 
 def test_reject_ssrf_resolved_addresses_blocks_private_ip() -> None:

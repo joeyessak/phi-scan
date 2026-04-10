@@ -111,7 +111,8 @@ _WEBHOOK_DNS_BLOCKED_ADDRESS_ERROR: str = (
 )
 # Transport URL format used to pin the TCP connection to the IP resolved during
 # SSRF validation, preventing DNS rebinding between validation and request.
-_PINNED_TRANSPORT_URL: str = "https://{pinned_ip}"
+_PINNED_HOST_HEADER: str = "Host"
+_PINNED_URL_SCHEME_HOST_TEMPLATE: str = "{scheme}://{hostname}"
 
 # IP networks blocked by SSRF protection when is_private_webhook_url_allowed=False.
 # Covers RFC1918 private ranges, link-local, loopback, CGNAT, cloud metadata,
@@ -767,6 +768,72 @@ def _validate_webhook_url(
     return None
 
 
+@dataclass(frozen=True)
+class _PinnedRequestArgs:
+    """Pre-computed URL and headers for a TOCTOU-safe webhook POST.
+
+    Produced by ``_build_pinned_request_args`` and consumed by ``_post_with_retry``
+    so that URL rewriting and header construction are isolated from the retry loop.
+    """
+
+    target_url: str
+    headers: dict[str, str]
+
+
+def _build_pinned_url(url: str, pinned_ip: str) -> str:
+    """Rewrite ``url`` replacing its hostname with ``pinned_ip``.
+
+    Substitutes the scheme://hostname prefix so httpx connects to the
+    pre-resolved IP, preventing DNS rebinding between SSRF validation and
+    delivery. The original hostname travels in the Host header (see
+    ``_build_pinned_request_args``) so TLS SNI and server routing are preserved.
+
+    Args:
+        url: Original webhook URL.
+        pinned_ip: IP address string returned by ``_validate_webhook_url``.
+
+    Returns:
+        URL with hostname replaced by ``pinned_ip``.
+    """
+    parsed = urlparse(url)
+    original_prefix = _PINNED_URL_SCHEME_HOST_TEMPLATE.format(
+        scheme=parsed.scheme, hostname=parsed.hostname
+    )
+    pinned_prefix = _PINNED_URL_SCHEME_HOST_TEMPLATE.format(
+        scheme=parsed.scheme, hostname=pinned_ip
+    )
+    return url.replace(original_prefix, pinned_prefix, 1)
+
+
+def _build_pinned_request_args(url: str, pinned_ip: str | None) -> _PinnedRequestArgs:
+    """Build the target URL and headers for a webhook POST.
+
+    When ``pinned_ip`` is provided, rewrites the URL to connect to the
+    pre-resolved IP and adds a Host header with the original hostname (TOCTOU
+    mitigation). When None, the URL and headers are used as-is.
+
+    Args:
+        url: Webhook endpoint URL.
+        pinned_ip: IP returned by ``_validate_webhook_url``, or None.
+
+    Returns:
+        ``_PinnedRequestArgs`` with target_url and headers ready for httpx.
+    """
+    if pinned_ip is None:
+        return _PinnedRequestArgs(
+            target_url=url,
+            headers={"Content-Type": _WEBHOOK_CONTENT_TYPE},
+        )
+    parsed = urlparse(url)
+    return _PinnedRequestArgs(
+        target_url=_build_pinned_url(url, pinned_ip),
+        headers={
+            "Content-Type": _WEBHOOK_CONTENT_TYPE,
+            _PINNED_HOST_HEADER: parsed.hostname or "",
+        },
+    )
+
+
 def _post_with_retry(
     url: str,
     payload: dict[str, Any],
@@ -778,48 +845,25 @@ def _post_with_retry(
     Uses ``httpx`` sync client. Retries on HTTP 4xx/5xx and on network errors.
     The final attempt raises ``NotificationError`` if still failing.
 
-    When ``pinned_ip`` is provided, the TCP connection is made directly to that
-    IP address with the original hostname in the Host header. This prevents DNS
-    rebinding between the SSRF validation step and the actual HTTP request
-    (TOCTOU mitigation).
-
     Args:
         url: The webhook endpoint URL.
         payload: JSON-serialisable payload dict.
         retry_count: Total number of attempts (1 = no retry).
-        pinned_ip: Pre-resolved IP to connect to directly. When None, httpx
-            resolves the hostname normally (used when is_private_webhook_url_allowed
-            is True or the hostname was already a literal IP).
+        pinned_ip: Pre-resolved IP from ``_validate_webhook_url``. When set,
+            the TCP connection is pinned to this IP to prevent DNS rebinding
+            (TOCTOU mitigation). When None, httpx resolves the hostname normally.
 
     Raises:
         NotificationError: If all attempts fail.
     """
-    parsed = urlparse(url)
-    if pinned_ip is not None:
-        # Replace the hostname in the URL with the pre-resolved IP so httpx
-        # connects to the exact address validated during SSRF checks, preventing
-        # DNS rebinding between validation and delivery (TOCTOU mitigation).
-        # The original hostname is preserved in the Host header so TLS SNI and
-        # server-side routing continue to work correctly.
-        pinned_url = url.replace(
-            f"{parsed.scheme}://{parsed.hostname}",
-            _PINNED_TRANSPORT_URL.format(pinned_ip=pinned_ip),
-            1,
-        )
-        request_headers: dict[str, str] = {
-            "Content-Type": _WEBHOOK_CONTENT_TYPE,
-            "Host": parsed.hostname or "",
-        }
-    else:
-        pinned_url = url
-        request_headers = {"Content-Type": _WEBHOOK_CONTENT_TYPE}
+    request_args = _build_pinned_request_args(url, pinned_ip)
     last_error: Exception | None = None
     for attempt in range(1, retry_count + 1):
         try:
             response = httpx.post(
-                pinned_url,
+                request_args.target_url,
                 json=payload,
-                headers=request_headers,
+                headers=request_args.headers,
                 timeout=WEBHOOK_DEFAULT_TIMEOUT_SECONDS,
             )
             if response.is_success:

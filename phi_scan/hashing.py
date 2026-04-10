@@ -41,6 +41,9 @@ __all__ = [
 
 _NO_REMEDIATION_HINT: str = ""
 _SHA256_HEX_DIGEST_LENGTH: int = 64
+# Computed once at import time — avoids repeated str.lower() calls inside the
+# all() check in StructuredFindingRequest.__post_init__.
+_LOWERCASE_HEX_DIGITS: frozenset[str] = frozenset(string.hexdigits.lower())
 
 
 @dataclass(frozen=True)
@@ -69,7 +72,7 @@ class StructuredFindingRequest:
             ValueError: If value_hash is not exactly 64 lowercase hex characters.
         """
         is_valid_length = len(self.value_hash) == _SHA256_HEX_DIGEST_LENGTH
-        is_valid_hex = all(character in string.hexdigits.lower() for character in self.value_hash)
+        is_valid_hex = all(character in _LOWERCASE_HEX_DIGITS for character in self.value_hash)
         if not is_valid_length or not is_valid_hex:
             raise ValueError(
                 "value_hash must be a 64-character lowercase hex digest; "
