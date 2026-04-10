@@ -28,7 +28,9 @@ from phi_scan.audit import (
     verify_audit_chain,
 )
 from phi_scan.baseline import (
+    BaselineSnapshot,
     filter_baselined_findings,
+    load_baseline,
 )
 from phi_scan.ci_integration import (
     CIIntegrationError,
@@ -42,7 +44,7 @@ from phi_scan.ci_integration import (
     set_commit_status,
     upload_sarif_to_github,
 )
-from phi_scan.cli_baseline import baseline_app, load_optional_baseline
+from phi_scan.cli_baseline import baseline_app
 from phi_scan.cli_config import config_app
 from phi_scan.cli_explain import explain_app
 from phi_scan.cli_scan_config import load_scan_config
@@ -68,6 +70,7 @@ from phi_scan.diff import get_changed_files_from_diff
 from phi_scan.exceptions import (
     AuditKeyMissingError,
     AuditLogError,
+    BaselineError,
     MissingOptionalDependencyError,
     NotificationError,
 )
@@ -215,6 +218,7 @@ _REPORT_PATH_WRITE_ERROR: str = "Failed to write report to {path!r}: {error}"
 _REPORT_PATH_WRITTEN_MESSAGE: str = "Report written to {path}"
 _VERBOSE_TIMESTAMP_FORMAT: str = "%Y-%m-%d %H:%M:%S"
 _VERBOSE_PHASE_PREFIX: str = "[{timestamp}] Phase: {message}"
+_BASELINE_LOAD_ERROR_MESSAGE: str = "Could not load baseline: {error}"
 _VERBOSE_PHASE_COLLECTING: str = "collecting scan targets"
 _VERBOSE_PHASE_SCANNING: str = "scanning {count} file(s)"
 _VERBOSE_PHASE_AUDIT: str = "writing audit record"
@@ -1018,7 +1022,11 @@ def _emit_scan_output_with_baseline(
         output_options: Output format, rich-mode flag, and report path.
     """
     baseline_path = Path(DEFAULT_BASELINE_FILENAME)
-    snapshot = load_optional_baseline(baseline_path)
+    try:
+        snapshot: BaselineSnapshot | None = load_baseline(baseline_path=baseline_path)
+    except BaselineError as error:
+        typer.echo(_BASELINE_LOAD_ERROR_MESSAGE.format(error=error), err=True)
+        snapshot = None
     if snapshot is None:
         _emit_scan_output(scan_result, output_options)
         raise typer.Exit(code=EXIT_CODE_CLEAN if scan_result.is_clean else EXIT_CODE_VIOLATION)
