@@ -40,7 +40,7 @@ from phi_scan.notifier import (
     _build_slack_payload,
     _build_teams_payload,
     _build_webhook_payload,
-    _build_webhook_scan_summary,  # noqa: PLC2701
+    _derive_webhook_scan_summary,  # noqa: PLC2701
     _get_smtp_credentials,
     _reject_ssrf_resolved_addresses,  # noqa: PLC2701
     _resolve_hostname_addresses,  # noqa: PLC2701
@@ -170,26 +170,54 @@ def _make_webhook_config(
 
 def test_email_subject_contains_risk_level() -> None:
     """Email subject must include the risk level in uppercase."""
-    subject = _build_email_subject(_make_dirty_result(), _SAMPLE_REPO, _SAMPLE_BRANCH)
+    subject = _build_email_subject(
+        NotificationRequest(
+            scan_result=_make_dirty_result(),
+            repository=_SAMPLE_REPO,
+            branch=_SAMPLE_BRANCH,
+            scanner_version=_SAMPLE_SCANNER_VERSION,
+        )
+    )
     assert "HIGH" in subject
 
 
 def test_email_subject_contains_findings_count() -> None:
     """Email subject must include the findings count."""
-    subject = _build_email_subject(_make_dirty_result(), _SAMPLE_REPO, _SAMPLE_BRANCH)
+    subject = _build_email_subject(
+        NotificationRequest(
+            scan_result=_make_dirty_result(),
+            repository=_SAMPLE_REPO,
+            branch=_SAMPLE_BRANCH,
+            scanner_version=_SAMPLE_SCANNER_VERSION,
+        )
+    )
     assert str(_ONE_FINDING) in subject
 
 
 def test_email_subject_contains_repo_and_branch() -> None:
     """Email subject must include the repository and branch."""
-    subject = _build_email_subject(_make_dirty_result(), _SAMPLE_REPO, _SAMPLE_BRANCH)
+    subject = _build_email_subject(
+        NotificationRequest(
+            scan_result=_make_dirty_result(),
+            repository=_SAMPLE_REPO,
+            branch=_SAMPLE_BRANCH,
+            scanner_version=_SAMPLE_SCANNER_VERSION,
+        )
+    )
     assert _SAMPLE_REPO in subject
     assert _SAMPLE_BRANCH in subject
 
 
 def test_email_subject_phi_alert_prefix() -> None:
     """Email subject must begin with the [PHI ALERT] prefix."""
-    subject = _build_email_subject(_make_dirty_result(), _SAMPLE_REPO, _SAMPLE_BRANCH)
+    subject = _build_email_subject(
+        NotificationRequest(
+            scan_result=_make_dirty_result(),
+            repository=_SAMPLE_REPO,
+            branch=_SAMPLE_BRANCH,
+            scanner_version=_SAMPLE_SCANNER_VERSION,
+        )
+    )
     assert subject.startswith("[PHI ALERT]")
 
 
@@ -341,7 +369,7 @@ def test_get_smtp_credentials_reads_from_env(monkeypatch: pytest.MonkeyPatch) ->
 def test_generic_payload_contains_event_field() -> None:
     """Generic webhook payload must include an 'event' field."""
     scan_result = _make_dirty_result()
-    summary = _build_webhook_scan_summary(
+    scan_summary = _derive_webhook_scan_summary(
         NotificationRequest(
             scan_result=scan_result,
             repository=_SAMPLE_REPO,
@@ -349,14 +377,14 @@ def test_generic_payload_contains_event_field() -> None:
             scanner_version=_SAMPLE_SCANNER_VERSION,
         )
     )
-    payload = _build_generic_payload(summary)
+    payload = _build_generic_payload(scan_summary)
     assert "event" in payload
 
 
 def test_generic_payload_contains_findings_count() -> None:
     """Generic webhook payload findings_count must match scan result."""
     scan_result = _make_dirty_result()
-    summary = _build_webhook_scan_summary(
+    scan_summary = _derive_webhook_scan_summary(
         NotificationRequest(
             scan_result=scan_result,
             repository=_SAMPLE_REPO,
@@ -364,14 +392,14 @@ def test_generic_payload_contains_findings_count() -> None:
             scanner_version=_SAMPLE_SCANNER_VERSION,
         )
     )
-    payload = _build_generic_payload(summary)
+    payload = _build_generic_payload(scan_summary)
     assert payload["findings_count"] == len(scan_result.findings)
 
 
 def test_generic_payload_no_raw_phi_values() -> None:
     """Generic payload findings must not include code_context or remediation_hint."""
     scan_result = _make_dirty_result()
-    summary = _build_webhook_scan_summary(
+    scan_summary = _derive_webhook_scan_summary(
         NotificationRequest(
             scan_result=scan_result,
             repository=_SAMPLE_REPO,
@@ -379,7 +407,7 @@ def test_generic_payload_no_raw_phi_values() -> None:
             scanner_version=_SAMPLE_SCANNER_VERSION,
         )
     )
-    payload = _build_generic_payload(summary)
+    payload = _build_generic_payload(scan_summary)
     for finding_payload in payload.get("findings", []):
         assert "code_context" not in finding_payload
         assert "remediation_hint" not in finding_payload
@@ -388,7 +416,7 @@ def test_generic_payload_no_raw_phi_values() -> None:
 def test_generic_payload_contains_value_hash_not_raw_value() -> None:
     """Generic payload findings must contain value_hash (not the raw PHI value)."""
     scan_result = _make_dirty_result()
-    summary = _build_webhook_scan_summary(
+    scan_summary = _derive_webhook_scan_summary(
         NotificationRequest(
             scan_result=scan_result,
             repository=_SAMPLE_REPO,
@@ -396,14 +424,14 @@ def test_generic_payload_contains_value_hash_not_raw_value() -> None:
             scanner_version=_SAMPLE_SCANNER_VERSION,
         )
     )
-    payload = _build_generic_payload(summary)
+    payload = _build_generic_payload(scan_summary)
     for finding_payload in payload.get("findings", []):
         assert "value_hash" in finding_payload
 
 
 def test_slack_payload_has_attachments_key() -> None:
     """Slack payload must use the 'attachments' key for Block Kit compatibility."""
-    summary = _build_webhook_scan_summary(
+    scan_summary = _derive_webhook_scan_summary(
         NotificationRequest(
             scan_result=_make_dirty_result(),
             repository=_SAMPLE_REPO,
@@ -411,13 +439,13 @@ def test_slack_payload_has_attachments_key() -> None:
             scanner_version=_SAMPLE_SCANNER_VERSION,
         )
     )
-    payload = _build_slack_payload(summary)
+    payload = _build_slack_payload(scan_summary)
     assert "attachments" in payload
 
 
 def test_teams_payload_has_message_card_type() -> None:
     """Teams payload must have '@type': 'MessageCard'."""
-    summary = _build_webhook_scan_summary(
+    scan_summary = _derive_webhook_scan_summary(
         NotificationRequest(
             scan_result=_make_dirty_result(),
             repository=_SAMPLE_REPO,
@@ -425,14 +453,14 @@ def test_teams_payload_has_message_card_type() -> None:
             scanner_version=_SAMPLE_SCANNER_VERSION,
         )
     )
-    payload = _build_teams_payload(summary)
+    payload = _build_teams_payload(scan_summary)
     assert payload.get("@type") == "MessageCard"
 
 
-def test_build_webhook_scan_summary_derives_fields_correctly() -> None:
-    """_build_webhook_scan_summary must derive all metadata fields from ScanResult."""
+def test_derive_webhook_scan_summary_derives_fields_correctly() -> None:
+    """_derive_webhook_scan_summary must derive all metadata fields from ScanResult."""
     scan_result = _make_dirty_result()
-    summary = _build_webhook_scan_summary(
+    scan_summary = _derive_webhook_scan_summary(
         NotificationRequest(
             scan_result=scan_result,
             repository=_SAMPLE_REPO,
@@ -440,14 +468,14 @@ def test_build_webhook_scan_summary_derives_fields_correctly() -> None:
             scanner_version=_SAMPLE_SCANNER_VERSION,
         )
     )
-    assert summary.is_clean == scan_result.is_clean
-    assert summary.risk_level_label == scan_result.risk_level.value.upper()
-    assert summary.risk_level_value == scan_result.risk_level.value
-    assert summary.findings_count == len(scan_result.findings)
-    assert summary.files_scanned == scan_result.files_scanned
-    assert summary.repository == _SAMPLE_REPO
-    assert summary.branch == _SAMPLE_BRANCH
-    assert summary.scanner_version == _SAMPLE_SCANNER_VERSION
+    assert scan_summary.is_clean == scan_result.is_clean
+    assert scan_summary.risk_level_label == scan_result.risk_level.value.upper()
+    assert scan_summary.risk_level_value == scan_result.risk_level.value
+    assert scan_summary.findings_count == len(scan_result.findings)
+    assert scan_summary.files_scanned == scan_result.files_scanned
+    assert scan_summary.repository == _SAMPLE_REPO
+    assert scan_summary.branch == _SAMPLE_BRANCH
+    assert scan_summary.scanner_version == _SAMPLE_SCANNER_VERSION
 
 
 def test_build_webhook_payload_dispatches_slack() -> None:
