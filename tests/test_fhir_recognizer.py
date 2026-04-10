@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import logging
 from pathlib import Path
 
@@ -13,6 +12,7 @@ from phi_scan.constants import (
     CONFIDENCE_MEDIUM_FLOOR,
     CONFIDENCE_STRUCTURED_MAX,
     CONFIDENCE_STRUCTURED_MIN,
+    HIPAA_REMEDIATION_GUIDANCE,
     DetectionLayer,
     PhiCategory,
     SeverityLevel,
@@ -27,7 +27,12 @@ from phi_scan.fhir_recognizer import (  # type: ignore[attr-defined]
     _is_null_or_empty_fhir_value,
     detect_phi_in_structured_content,
 )
-from phi_scan.hashing import severity_from_confidence
+from phi_scan.hashing import (
+    StructuredFindingRequest,
+    build_structured_finding,
+    compute_value_hash,
+    severity_from_confidence,
+)
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -37,8 +42,8 @@ _FAKE_FILE_PATH: Path = Path("fake/test_patient.json")
 _FAKE_FAMILY_NAME: str = "TestFamilyName"
 _FAKE_BIRTH_DATE: str = "1990-01-01"
 _FAKE_CITY_NAME: str = "TestCity"
-_EXPECTED_FAMILY_HASH: str = hashlib.sha256(_FAKE_FAMILY_NAME.encode()).hexdigest()
-_EXPECTED_BIRTH_DATE_HASH: str = hashlib.sha256(_FAKE_BIRTH_DATE.encode()).hexdigest()
+_EXPECTED_FAMILY_HASH: str = compute_value_hash(_FAKE_FAMILY_NAME)
+_EXPECTED_BIRTH_DATE_HASH: str = compute_value_hash(_FAKE_BIRTH_DATE)
 
 _JSON_FAMILY_LINE: str = f'  "family": "{_FAKE_FAMILY_NAME}"'
 _XML_ATTR_BIRTH_DATE_LINE: str = f'  <birthDate value="{_FAKE_BIRTH_DATE}"/>'
@@ -357,3 +362,60 @@ def test_detect_phi_in_structured_content_logs_warning_and_returns_empty_when_hl
 
 def test_fhir_field_base_confidence_is_within_layer_three_range():
     assert CONFIDENCE_STRUCTURED_MIN <= _FHIR_FIELD_BASE_CONFIDENCE <= CONFIDENCE_STRUCTURED_MAX
+
+
+# ---------------------------------------------------------------------------
+# build_structured_finding factory
+# ---------------------------------------------------------------------------
+
+
+def test_build_structured_finding_stores_provided_value_hash() -> None:
+    """build_structured_finding must store the caller-supplied value_hash unchanged."""
+    expected_hash = compute_value_hash(_FAKE_FAMILY_NAME)
+    finding = build_structured_finding(
+        StructuredFindingRequest(
+            file_path=_FAKE_FILE_PATH,
+            line_number=1,
+            entity_type="family",
+            hipaa_category=PhiCategory.NAME,
+            confidence=_FHIR_FIELD_BASE_CONFIDENCE,
+            detection_layer=DetectionLayer.FHIR,
+            value_hash=expected_hash,
+            code_context=f'"family": {CODE_CONTEXT_REDACTED_VALUE}',
+        )
+    )
+    assert finding.value_hash == expected_hash
+
+
+def test_build_structured_finding_derives_severity_from_confidence() -> None:
+    """build_structured_finding severity must match severity_from_confidence."""
+    finding = build_structured_finding(
+        StructuredFindingRequest(
+            file_path=_FAKE_FILE_PATH,
+            line_number=1,
+            entity_type="family",
+            hipaa_category=PhiCategory.NAME,
+            confidence=_FHIR_FIELD_BASE_CONFIDENCE,
+            detection_layer=DetectionLayer.FHIR,
+            value_hash=compute_value_hash(_FAKE_FAMILY_NAME),
+            code_context=f'"family": {CODE_CONTEXT_REDACTED_VALUE}',
+        )
+    )
+    assert finding.severity == severity_from_confidence(_FHIR_FIELD_BASE_CONFIDENCE)
+
+
+def test_build_structured_finding_populates_remediation_hint() -> None:
+    """build_structured_finding must look up remediation_hint from HIPAA guidance."""
+    finding = build_structured_finding(
+        StructuredFindingRequest(
+            file_path=_FAKE_FILE_PATH,
+            line_number=1,
+            entity_type="family",
+            hipaa_category=PhiCategory.NAME,
+            confidence=_FHIR_FIELD_BASE_CONFIDENCE,
+            detection_layer=DetectionLayer.FHIR,
+            value_hash=compute_value_hash(_FAKE_FAMILY_NAME),
+            code_context=f'"family": {CODE_CONTEXT_REDACTED_VALUE}',
+        )
+    )
+    assert finding.remediation_hint == HIPAA_REMEDIATION_GUIDANCE.get(PhiCategory.NAME, "")

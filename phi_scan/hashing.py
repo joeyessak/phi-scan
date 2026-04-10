@@ -1,9 +1,10 @@
-"""Shared PHI detection utilities: value hashing and severity scoring.
+"""Shared PHI detection utilities: value hashing, severity scoring, and finding construction.
 
-Both functions are used by every detection layer (regex, NLP, FHIR, HL7) to
-build ``ScanFinding`` objects. Centralising them here ensures the
-HIPAA-critical hash function has a single implementation and that severity
-bands stay consistent across all layers.
+All three functions are used by every detection layer (regex, NLP, FHIR, HL7) to
+build ``ScanFinding`` objects. Centralising them here ensures the HIPAA-critical
+hash function has a single implementation, severity bands stay consistent across
+all layers, and the structured-finding construction pattern (hash + severity +
+remediation lookup) cannot diverge between FHIR and HL7.
 
 This module is an intentional exception to the "no premature abstraction"
 rule — the identical functions existed verbatim in four detection modules
@@ -14,6 +15,9 @@ extracted here.
 from __future__ import annotations
 
 import hashlib
+import string
+from dataclasses import dataclass
+from pathlib import Path
 
 from phi_scan.constants import (
     CONFIDENCE_HIGH_FLOOR,
@@ -21,10 +25,55 @@ from phi_scan.constants import (
     CONFIDENCE_MEDIUM_FLOOR,
     CONFIDENCE_SCORE_MAXIMUM,
     CONFIDENCE_SCORE_MINIMUM,
+    HIPAA_REMEDIATION_GUIDANCE,
+    DetectionLayer,
+    PhiCategory,
     SeverityLevel,
 )
+from phi_scan.models import ScanFinding
 
-__all__ = ["compute_value_hash", "severity_from_confidence"]
+__all__ = [
+    "StructuredFindingRequest",
+    "build_structured_finding",
+    "compute_value_hash",
+    "severity_from_confidence",
+]
+
+_NO_REMEDIATION_HINT: str = ""
+_SHA256_HEX_DIGEST_LENGTH: int = 64
+
+
+@dataclass(frozen=True)
+class StructuredFindingRequest:
+    """Input bundle for build_structured_finding.
+
+    Groups the 7 layer-specific inputs required to construct a ScanFinding,
+    satisfying the ≤3 argument rule for build_structured_finding.
+    Callers must call compute_value_hash() before constructing this object —
+    raw PHI must never be stored in a field.
+    """
+
+    file_path: Path
+    line_number: int
+    entity_type: str
+    hipaa_category: PhiCategory
+    confidence: float
+    detection_layer: DetectionLayer
+    value_hash: str
+    code_context: str
+
+    def __post_init__(self) -> None:
+        """Reject value_hash that is not a valid SHA-256 hex digest.
+
+        Raises:
+            ValueError: If value_hash is not exactly 64 lowercase hex characters.
+        """
+        is_valid_length = len(self.value_hash) == _SHA256_HEX_DIGEST_LENGTH
+        is_valid_hex = all(character in string.hexdigits for character in self.value_hash)
+        if not is_valid_length or not is_valid_hex:
+            raise ValueError(
+                f"value_hash must be a 64-character hex digest; got length {len(self.value_hash)}"
+            )
 
 
 def compute_value_hash(text: str) -> str:
@@ -78,3 +127,33 @@ def severity_from_confidence(confidence: float) -> SeverityLevel:
     if confidence >= CONFIDENCE_LOW_FLOOR:
         return SeverityLevel.LOW
     return SeverityLevel.INFO
+
+
+def build_structured_finding(request: StructuredFindingRequest) -> ScanFinding:
+    """Construct a ScanFinding for structured detectors (FHIR, HL7).
+
+    Centralises severity + remediation-hint derivation so the HIPAA-critical
+    operations cannot diverge between FHIR and HL7 layers. The caller is
+    responsible for hashing the raw PHI value before constructing the request.
+
+    Args:
+        request: All layer-specific inputs bundled as a StructuredFindingRequest.
+
+    Returns:
+        Immutable ScanFinding with severity and remediation_hint derived from
+        the request.
+    """
+    return ScanFinding(
+        file_path=request.file_path,
+        line_number=request.line_number,
+        entity_type=request.entity_type,
+        hipaa_category=request.hipaa_category,
+        confidence=request.confidence,
+        detection_layer=request.detection_layer,
+        value_hash=request.value_hash,
+        severity=severity_from_confidence(request.confidence),
+        code_context=request.code_context,
+        remediation_hint=HIPAA_REMEDIATION_GUIDANCE.get(
+            request.hipaa_category, _NO_REMEDIATION_HINT
+        ),
+    )
