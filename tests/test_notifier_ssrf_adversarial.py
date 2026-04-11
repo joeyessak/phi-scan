@@ -35,11 +35,14 @@ would introduce.
 
 from __future__ import annotations
 
+import ast
 import ipaddress
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
 
+import phi_scan.notifier as notifier_module
 from phi_scan.exceptions import NotificationError
 from phi_scan.notifier import (
     _build_pinned_webhook_request,  # noqa: PLC2701
@@ -79,16 +82,69 @@ _PUBLIC_IPV6_URL: str = "https://[2001:4860:4860::8888]/webhook"
 _DOMAIN_URL: str = "https://hooks.example.com/notify"
 _DOMAIN_HOST: str = "hooks.example.com"
 
-# Individual address literals used as resolver return values.
+# Individual address literals used as resolver return values and as
+# parametrize inputs. Every literal that appears in test logic is hoisted
+# here so no raw IP strings live inside test bodies or parametrize lists.
 _PUBLIC_IPV4_ADDRESS: str = "8.8.8.8"
+_ALTERNATE_PUBLIC_IPV4_ADDRESS: str = "1.1.1.1"
 _PUBLIC_IPV6_ADDRESS: str = "2001:4860:4860::8888"
+_ALTERNATE_PUBLIC_IPV6_ADDRESS: str = "2606:4700:4700::1111"
+
 _PRIVATE_IPV4_ADDRESS: str = "10.0.0.1"
+_RFC1918_CLASS_C_IPV4_ADDRESS: str = "192.168.1.1"
+_CGNAT_IPV4_ADDRESS: str = "100.64.0.1"
 _LOOPBACK_IPV4_ADDRESS: str = "127.0.0.1"
 _METADATA_IPV4_ADDRESS: str = "169.254.169.254"
+_UNSPECIFIED_IPV4_ADDRESS: str = "0.0.0.0"  # noqa: S104 — test fixture, never bound
+_MULTICAST_IPV4_ADDRESS: str = "224.0.0.1"
+_BROADCAST_IPV4_ADDRESS: str = "255.255.255.255"
+_RESERVED_CLASS_E_IPV4_ADDRESS: str = "240.0.0.1"
+
+_LOOPBACK_IPV6_ADDRESS: str = "::1"
+_UNSPECIFIED_IPV6_ADDRESS: str = "::"
+_LINK_LOCAL_IPV6_ADDRESS: str = "fe80::1"
+_UNIQUE_LOCAL_IPV6_ADDRESS: str = "fc00::1"
+_MULTICAST_IPV6_ADDRESS: str = "ff02::1"
+
 _IPV4_MAPPED_LOOPBACK_ADDRESS: str = "::ffff:127.0.0.1"
 _IPV4_MAPPED_PUBLIC_ADDRESS: str = "::ffff:8.8.8.8"
+
 _REBIND_FIRST_IP: str = _PUBLIC_IPV4_ADDRESS
 _REBIND_SECOND_IP: str = _LOOPBACK_IPV4_ADDRESS
+
+# Structural-safety constants for threat-model row N-6 (P1, DNS rebind via
+# HTTP redirect). httpx defaults to ``follow_redirects=False``; the
+# notifier must never opt in, because a redirect to a private IP would
+# defeat the SSRF checks performed at validation time. The test below
+# parses ``phi_scan/notifier.py`` and fails on any explicit
+# ``follow_redirects=True`` keyword argument.
+_NOTIFIER_MODULE_PATH: Path = Path(notifier_module.__file__)
+_SOURCE_FILE_ENCODING: str = "utf-8"
+_BANNED_FOLLOW_REDIRECTS_KEYWORD: str = "follow_redirects"
+
+# Parametrize fixtures for the _is_ip_address_blocked classifier test.
+_BLOCKED_ADVERSARIAL_ADDRESSES: tuple[str, ...] = (
+    _LOOPBACK_IPV4_ADDRESS,
+    _PRIVATE_IPV4_ADDRESS,
+    _RFC1918_CLASS_C_IPV4_ADDRESS,
+    _METADATA_IPV4_ADDRESS,
+    _CGNAT_IPV4_ADDRESS,
+    _UNSPECIFIED_IPV4_ADDRESS,
+    _MULTICAST_IPV4_ADDRESS,
+    _BROADCAST_IPV4_ADDRESS,
+    _RESERVED_CLASS_E_IPV4_ADDRESS,
+    _LOOPBACK_IPV6_ADDRESS,
+    _UNSPECIFIED_IPV6_ADDRESS,
+    _LINK_LOCAL_IPV6_ADDRESS,
+    _UNIQUE_LOCAL_IPV6_ADDRESS,
+    _MULTICAST_IPV6_ADDRESS,
+)
+_ALLOWED_PUBLIC_ADDRESSES: tuple[str, ...] = (
+    _PUBLIC_IPV4_ADDRESS,
+    _ALTERNATE_PUBLIC_IPV4_ADDRESS,
+    _PUBLIC_IPV6_ADDRESS,
+    _ALTERNATE_PUBLIC_IPV6_ADDRESS,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -128,37 +184,11 @@ class TestNormaliseIpAddress:
 class TestIsIpAddressBlocked:
     """``_is_ip_address_blocked`` classifies normalised addresses."""
 
-    @pytest.mark.parametrize(
-        "address",
-        [
-            "127.0.0.1",
-            "10.0.0.1",
-            "192.168.1.1",
-            "169.254.169.254",
-            "100.64.0.1",
-            "0.0.0.0",
-            "224.0.0.1",
-            "255.255.255.255",
-            "240.0.0.1",
-            "::1",
-            "::",
-            "fe80::1",
-            "fc00::1",
-            "ff02::1",
-        ],
-    )
+    @pytest.mark.parametrize("address", _BLOCKED_ADVERSARIAL_ADDRESSES)
     def test_blocks_adversarial_ipv4_and_ipv6_addresses(self, address: str) -> None:
         assert _is_ip_address_blocked(ipaddress.ip_address(address)) is True
 
-    @pytest.mark.parametrize(
-        "address",
-        [
-            _PUBLIC_IPV4_ADDRESS,
-            "1.1.1.1",
-            _PUBLIC_IPV6_ADDRESS,
-            "2606:4700:4700::1111",
-        ],
-    )
+    @pytest.mark.parametrize("address", _ALLOWED_PUBLIC_ADDRESSES)
     def test_allows_public_addresses(self, address: str) -> None:
         assert _is_ip_address_blocked(ipaddress.ip_address(address)) is False
 
@@ -295,7 +325,7 @@ class TestValidateWebhookUrlMixedResolution:
     def test_public_ipv4_then_ipv6_loopback_is_rejected(self) -> None:
         mixed_addresses = [
             ipaddress.IPv4Address(_PUBLIC_IPV4_ADDRESS),
-            ipaddress.IPv6Address("::1"),
+            ipaddress.IPv6Address(_LOOPBACK_IPV6_ADDRESS),
         ]
         with patch(
             "phi_scan.notifier._resolve_hostname_addresses",
@@ -308,7 +338,7 @@ class TestValidateWebhookUrlMixedResolution:
         """Positive control — two public IPs must not trip the mixed-resolution rule."""
         all_public_addresses = [
             ipaddress.IPv4Address(_PUBLIC_IPV4_ADDRESS),
-            ipaddress.IPv4Address("1.1.1.1"),
+            ipaddress.IPv4Address(_ALTERNATE_PUBLIC_IPV4_ADDRESS),
         ]
         with patch(
             "phi_scan.notifier._resolve_hostname_addresses",
@@ -431,6 +461,54 @@ class TestRejectSsrfResolvedAddresses:
             _reject_ssrf_resolved_addresses(_DOMAIN_HOST, one_blocked)
 
     def test_unspecified_ipv6_raises(self) -> None:
-        unspecified_only = [ipaddress.IPv6Address("::")]
+        unspecified_only = [ipaddress.IPv6Address(_UNSPECIFIED_IPV6_ADDRESS)]
         with pytest.raises(NotificationError):
             _reject_ssrf_resolved_addresses(_DOMAIN_HOST, unspecified_only)
+
+
+# ---------------------------------------------------------------------------
+# Structural safety — threat-model N-6 (P1)
+# ---------------------------------------------------------------------------
+
+
+def _find_enabled_follow_redirects_keywords(module_source: str) -> list[int]:
+    """Return the line numbers of every ``follow_redirects=True`` keyword.
+
+    Walks every ``Call`` node in the parsed module and inspects its
+    keyword arguments. A hit is any keyword named ``follow_redirects``
+    whose value is the constant ``True``. Omitting the keyword entirely
+    is safe because httpx defaults to ``follow_redirects=False``.
+    """
+    tree = ast.parse(module_source)
+    enabled_line_numbers: list[int] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
+            continue
+        for keyword in node.keywords:
+            if keyword.arg != _BANNED_FOLLOW_REDIRECTS_KEYWORD:
+                continue
+            value = keyword.value
+            if isinstance(value, ast.Constant) and value.value is True:
+                enabled_line_numbers.append(node.lineno)
+    return enabled_line_numbers
+
+
+def test_notifier_module_never_enables_http_redirect_following() -> None:
+    """Structural regression gate for threat-model row N-6 (P1).
+
+    httpx defaults to ``follow_redirects=False``. A future change that
+    passes ``follow_redirects=True`` to any client call in
+    ``phi_scan/notifier.py`` would re-open the DNS-rebind-via-redirect
+    attack path: the validator pins the resolved IP into the outbound
+    URL, but a 3xx response from the pinned host could redirect to a
+    new hostname that re-enters DNS resolution outside the SSRF gate.
+    This test parses the module and fails on any explicit opt-in.
+    """
+    module_source = _NOTIFIER_MODULE_PATH.read_text(encoding=_SOURCE_FILE_ENCODING)
+    enabled_line_numbers = _find_enabled_follow_redirects_keywords(module_source)
+    assert not enabled_line_numbers, (
+        "phi_scan/notifier.py enabled follow_redirects=True at line(s) "
+        f"{enabled_line_numbers}, which re-opens the DNS-rebind-via-redirect "
+        "attack path covered by threat-model row N-6. Remove the opt-in or "
+        "update docs/threat-model.md before merge."
+    )
