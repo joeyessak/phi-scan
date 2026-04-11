@@ -129,6 +129,8 @@ from phi_scan.output import (
 )
 from phi_scan.report import generate_html_report, generate_pdf_report
 from phi_scan.scanner import (
+    _MIN_WORKER_COUNT,  # noqa: PLC2701
+    _PARALLEL_THREAD_NAME_PREFIX,  # noqa: PLC2701
     MAX_WORKER_COUNT,
     build_scan_result,
     collect_scan_targets,
@@ -376,11 +378,8 @@ _PROGRESS_FILENAME_ELLIPSIS: str = "…"
 # Replaces the per-file name shown in sequential mode (multiple files run simultaneously
 # so a single filename would be misleading).
 _PARALLEL_SCAN_PROGRESS_LABEL: str = "scanning..."
-# Thread name prefix used by the CLI-side ThreadPoolExecutor (progress bar path).
-_CLI_PARALLEL_THREAD_NAME_PREFIX: str = "phi-scan-worker"
-# Default and minimum worker count accepted by the --workers option.
-_DEFAULT_WORKER_COUNT: int = 1
-_MIN_WORKER_COUNT: int = 1
+# Default worker count accepted by the --workers option.
+_DEFAULT_WORKER_COUNT: int = _MIN_WORKER_COUNT
 # Error messages for out-of-range --workers values.
 _WORKERS_BELOW_MINIMUM_ERROR: str = f"--workers must be at least {_MIN_WORKER_COUNT}"
 _WORKERS_ABOVE_MAXIMUM_ERROR: str = f"--workers must not exceed {MAX_WORKER_COUNT}"
@@ -600,7 +599,7 @@ class _ScanExecutionOptions:
 
 
 @dataclass
-class _ParallelProgressScan:
+class _ProgressScanContext:
     """Arguments for _scan_files_with_progress and its sequential/parallel sub-helpers.
 
     Bundles all five inputs required by the progress-bar scan path into a single
@@ -720,7 +719,7 @@ def _validate_worker_count(worker_count: int) -> None:
 
 
 def _scan_files_sequential_with_progress(
-    scan: _ParallelProgressScan,
+    scan: _ProgressScanContext,
 ) -> list[ScanFinding]:
     """Scan files one at a time, advancing the progress bar after each file.
 
@@ -739,7 +738,7 @@ def _scan_files_sequential_with_progress(
 
 
 def _scan_files_parallel_with_progress(
-    scan: _ParallelProgressScan,
+    scan: _ProgressScanContext,
 ) -> list[ScanFinding]:
     """Scan files concurrently, advancing the progress bar as each file completes.
 
@@ -757,20 +756,24 @@ def _scan_files_parallel_with_progress(
     future_to_index: dict[Future[list[ScanFinding]], int] = {}
     with ThreadPoolExecutor(
         max_workers=scan.worker_count,
-        thread_name_prefix=_CLI_PARALLEL_THREAD_NAME_PREFIX,
+        thread_name_prefix=_PARALLEL_THREAD_NAME_PREFIX,
     ) as executor:
         for index, file_path in enumerate(scan.scan_targets):
             future_to_index[executor.submit(scan_file, file_path, scan.config)] = index
         for completed_future in as_completed(future_to_index):
             original_index = future_to_index[completed_future]
             indexed_results[original_index] = completed_future.result()
-            scan.progress.update(scan.task_id, description=_PARALLEL_SCAN_PROGRESS_LABEL, advance=1)
+            scan.progress.update(
+                scan.task_id,
+                description=_PARALLEL_SCAN_PROGRESS_LABEL,
+                advance=1,
+            )
     ordered_per_file = [indexed_results[i] for i in range(len(scan.scan_targets))]
     return [finding for file_findings in ordered_per_file for finding in file_findings]
 
 
 def _scan_files_with_progress(
-    scan: _ParallelProgressScan,
+    scan: _ProgressScanContext,
 ) -> list[ScanFinding]:
     """Dispatch to sequential or parallel progress scanning based on worker_count.
 
@@ -807,14 +810,14 @@ def _execute_scan_with_progress(
         return execute_scan(scan_targets, config, execution_options.worker_count)
     scan_start = time.monotonic()
     with create_scan_progress(total_files=len(scan_targets)) as (progress, task_id):
-        parallel_scan = _ParallelProgressScan(
+        progress_scan_context = _ProgressScanContext(
             scan_targets=scan_targets,
             config=config,
             worker_count=execution_options.worker_count,
             progress=progress,
             task_id=task_id,
         )
-        all_findings = _scan_files_with_progress(parallel_scan)
+        all_findings = _scan_files_with_progress(progress_scan_context)
     scan_duration = time.monotonic() - scan_start
     return build_scan_result(tuple(all_findings), len(scan_targets), scan_duration)
 

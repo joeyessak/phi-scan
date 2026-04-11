@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import functools
 import hashlib
 import json
 import logging
@@ -412,12 +411,15 @@ def _scan_files_parallel(
     Returns:
         All findings from all files, in scan_targets order.
     """
-    scan_one = functools.partial(scan_file, config=config)
+
+    def scan_one_file(file_path: Path) -> list[ScanFinding]:
+        return scan_file(file_path, config)
+
     with ThreadPoolExecutor(
         max_workers=worker_count,
         thread_name_prefix=_PARALLEL_THREAD_NAME_PREFIX,
     ) as executor:
-        per_file_results = list(executor.map(scan_one, scan_targets))
+        per_file_results = list(executor.map(scan_one_file, scan_targets))
     return [finding for file_findings in per_file_results for finding in file_findings]
 
 

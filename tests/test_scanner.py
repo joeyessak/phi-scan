@@ -582,7 +582,7 @@ def test_parallel_scan_finding_count_matches_sequential(tmp_path: Path) -> None:
     phi_files = _build_parity_files(tmp_path, _PARITY_FILE_COUNT)
     config = _build_default_config()
 
-    sequential_result = execute_scan(phi_files, config, worker_count=1)
+    sequential_result = execute_scan(phi_files, config, worker_count=_MIN_WORKER_COUNT)
     parallel_result = execute_scan(phi_files, config, worker_count=_PARITY_WORKER_COUNT)
 
     assert len(parallel_result.findings) == len(sequential_result.findings)
@@ -592,7 +592,7 @@ def test_parallel_scan_file_paths_match_sequential(tmp_path: Path) -> None:
     phi_files = _build_parity_files(tmp_path, _PARITY_FILE_COUNT)
     config = _build_default_config()
 
-    sequential_result = execute_scan(phi_files, config, worker_count=1)
+    sequential_result = execute_scan(phi_files, config, worker_count=_MIN_WORKER_COUNT)
     parallel_result = execute_scan(phi_files, config, worker_count=_PARITY_WORKER_COUNT)
 
     sequential_paths = [f.file_path for f in sequential_result.findings]
@@ -604,7 +604,7 @@ def test_parallel_scan_value_hashes_match_sequential(tmp_path: Path) -> None:
     phi_files = _build_parity_files(tmp_path, _PARITY_FILE_COUNT)
     config = _build_default_config()
 
-    sequential_result = execute_scan(phi_files, config, worker_count=1)
+    sequential_result = execute_scan(phi_files, config, worker_count=_MIN_WORKER_COUNT)
     parallel_result = execute_scan(phi_files, config, worker_count=_PARITY_WORKER_COUNT)
 
     sequential_hashes = [f.value_hash for f in sequential_result.findings]
@@ -616,7 +616,7 @@ def test_parallel_scan_risk_level_matches_sequential(tmp_path: Path) -> None:
     phi_files = _build_parity_files(tmp_path, _PARITY_FILE_COUNT)
     config = _build_default_config()
 
-    sequential_result = execute_scan(phi_files, config, worker_count=1)
+    sequential_result = execute_scan(phi_files, config, worker_count=_MIN_WORKER_COUNT)
     parallel_result = execute_scan(phi_files, config, worker_count=_PARITY_WORKER_COUNT)
 
     assert parallel_result.risk_level == sequential_result.risk_level
