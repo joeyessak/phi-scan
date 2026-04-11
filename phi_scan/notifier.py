@@ -117,7 +117,6 @@ _WEBHOOK_BUILD_NO_HOSTNAME_ERROR: str = "cannot build pinned request: URL has no
 _IPV6_ADDRESS_COLON: str = ":"
 _IPV6_NETLOC_BRACKET_TEMPLATE: str = "[{hostname}]"
 _NETLOC_PORT_TEMPLATE: str = ":{port}"
-_EMPTY_PORT_SEGMENT: str = ""
 
 # IP networks blocked by SSRF protection when is_private_webhook_url_allowed=False.
 # Covers RFC1918 private ranges, link-local, loopback, CGNAT, cloud metadata,
@@ -837,12 +836,21 @@ def _rewrite_url_hostname_to_ip(parsed_webhook_url: ParseResult, pinned_ip: str)
         URL with hostname replaced by ``pinned_ip``.
     """
     pinned_netloc_host = _format_netloc_host_segment(pinned_ip)
-    port_segment = (
-        _NETLOC_PORT_TEMPLATE.format(port=parsed_webhook_url.port)
-        if parsed_webhook_url.port
-        else _EMPTY_PORT_SEGMENT
+    if parsed_webhook_url.port:
+        port_suffix = _NETLOC_PORT_TEMPLATE.format(port=parsed_webhook_url.port)
+        pinned_netloc = f"{pinned_netloc_host}{port_suffix}"
+    else:
+        pinned_netloc = pinned_netloc_host
+    return urlunparse(
+        (
+            parsed_webhook_url.scheme,
+            pinned_netloc,
+            parsed_webhook_url.path,
+            parsed_webhook_url.params,
+            parsed_webhook_url.query,
+            parsed_webhook_url.fragment,
+        )
     )
-    return urlunparse(parsed_webhook_url._replace(netloc=f"{pinned_netloc_host}{port_segment}"))
 
 
 def _build_pinned_webhook_request(url: str, pinned_ip: str | None) -> _PinnedWebhookRequest:

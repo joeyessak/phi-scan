@@ -41,8 +41,8 @@ __all__ = [
 
 _NO_REMEDIATION_HINT: str = ""
 _SHA256_HEX_DIGEST_LENGTH: int = 64
-# Computed once at import time — avoids repeated str.lower() calls inside the
-# all() check in StructuredFindingRequest.__post_init__.
+# Lowercase-only hex digits — rejects uppercase A–F that string.hexdigits would
+# permit, enforcing that value_hash always holds a SHA-256 lowercase digest.
 _LOWERCASE_HEX_DIGITS: frozenset[str] = frozenset(string.hexdigits.lower())
 
 
