@@ -130,12 +130,12 @@ from phi_scan.report import generate_html_report, generate_pdf_report
 from phi_scan.scanner import (
     MAX_WORKER_COUNT,
     MIN_WORKER_COUNT,
-    _run_parallel_scan,  # noqa: PLC2701
     build_scan_result,
     collect_scan_targets,
     execute_scan,
     is_path_excluded,
     load_ignore_patterns,
+    run_parallel_scan,
     scan_file,
 )
 
@@ -602,10 +602,13 @@ class _ProgressScanContext:
     """Arguments for _run_scan_with_progress and its sequential/parallel sub-helpers.
 
     Bundles all five inputs required by the progress-bar scan path into a single
-    object so each helper stays within the three-argument limit.
+    object so each helper stays within the three-argument limit. ``scan_targets``
+    is stored as a tuple so the frozen=True guarantee extends to the ordered
+    collection itself — preventing in-place mutation of the scan target list
+    after the context has been constructed.
     """
 
-    scan_targets: list[Path]
+    scan_targets: tuple[Path, ...]
     config: ScanConfig
     worker_count: int
     progress: Progress
@@ -742,7 +745,7 @@ def _run_parallel_scan_with_progress(
 ) -> list[ScanFinding]:
     """Scan files concurrently, advancing the progress bar as each file completes.
 
-    Delegates the thread pool and ordering logic to ``scanner._run_parallel_scan``
+    Delegates the thread pool and ordering logic to ``scanner.run_parallel_scan``
     and supplies a per-file completion callback that ticks the Rich progress
     bar. Keeping a single parallel executor implementation prevents the CLI and
     scanner paths from diverging in thread safety, error handling, or ordering.
@@ -761,8 +764,8 @@ def _run_parallel_scan_with_progress(
             advance=1,
         )
 
-    return _run_parallel_scan(
-        scan.scan_targets,
+    return run_parallel_scan(
+        list(scan.scan_targets),
         scan.config,
         scan.worker_count,
         on_file_complete=_advance_progress_bar,
@@ -808,7 +811,7 @@ def _execute_scan_with_progress(
     scan_start = time.monotonic()
     with create_scan_progress(total_files=len(scan_targets)) as (progress, task_id):
         progress_scan_context = _ProgressScanContext(
-            scan_targets=scan_targets,
+            scan_targets=tuple(scan_targets),
             config=config,
             worker_count=execution_options.worker_count,
             progress=progress,

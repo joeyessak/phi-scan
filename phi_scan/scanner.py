@@ -51,6 +51,7 @@ __all__ = [
     "is_binary_file",
     "is_path_excluded",
     "load_ignore_patterns",
+    "run_parallel_scan",
     "scan_file",
 ]
 
@@ -406,7 +407,7 @@ def _collect_all_findings(
         All findings from all files, in scan_targets order.
     """
     if worker_count > MIN_WORKER_COUNT:
-        return _run_parallel_scan(scan_targets, config, worker_count)
+        return run_parallel_scan(scan_targets, config, worker_count)
     return _run_sequential_scan(scan_targets, config)
 
 
@@ -429,7 +430,7 @@ def _run_sequential_scan(
     return all_findings
 
 
-def _run_parallel_scan(
+def run_parallel_scan(
     scan_targets: list[Path],
     config: ScanConfig,
     worker_count: int,
@@ -437,12 +438,18 @@ def _run_parallel_scan(
 ) -> list[ScanFinding]:
     """Scan scan_targets concurrently using a bounded ThreadPoolExecutor.
 
-    Uses ``submit`` + ``as_completed`` so per-file results become available in
-    completion order, enabling callers to advance a progress UI as each file
-    finishes. Results are re-sorted by original scan_targets index before
-    flattening, so the returned findings list is deterministic regardless of
-    thread completion order. Worker-thread exceptions are re-raised by
-    ``Future.result()`` and propagate to the caller.
+    This is the single parallel executor used by both ``execute_scan`` and the
+    CLI progress-bar scan path. Uses ``submit`` + ``as_completed`` so per-file
+    results become available in completion order, enabling callers to advance a
+    progress UI as each file finishes. Results are re-sorted by original
+    scan_targets index before flattening, so the returned findings list is
+    deterministic regardless of thread completion order. Worker-thread
+    exceptions are re-raised by ``Future.result()`` and propagate to the caller.
+
+    This function does not apply the AI confidence review layer — callers that
+    need a full ``ScanResult`` with AI review and timing should use
+    ``execute_scan`` instead. ``run_parallel_scan`` is the lower-level primitive
+    that returns raw findings from the local detection layers only.
 
     Args:
         scan_targets: Ordered list of files to scan.

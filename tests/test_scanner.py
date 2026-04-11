@@ -29,13 +29,13 @@ from phi_scan.scanner import (
     MAX_WORKER_COUNT,
     MIN_WORKER_COUNT,
     _passes_decompression_bomb_guards,  # noqa: PLC2701
-    _run_parallel_scan,  # noqa: PLC2701
     _run_sequential_scan,  # noqa: PLC2701
     collect_scan_targets,
     execute_scan,
     is_binary_file,
     is_path_excluded,
     load_ignore_patterns,
+    run_parallel_scan,
     scan_file,
 )
 
@@ -643,7 +643,7 @@ def test_parallel_scan_risk_level_matches_sequential(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# _run_sequential_scan and _run_parallel_scan — unit tests
+# _run_sequential_scan and run_parallel_scan — unit tests
 # ---------------------------------------------------------------------------
 
 
@@ -654,7 +654,7 @@ def test_run_sequential_scan_returns_empty_for_no_targets() -> None:
 
 
 def test_run_parallel_scan_returns_empty_for_no_targets() -> None:
-    findings = _run_parallel_scan([], _build_default_config(), worker_count=_PARITY_WORKER_COUNT)
+    findings = run_parallel_scan([], _build_default_config(), worker_count=_PARITY_WORKER_COUNT)
 
     assert findings == []
 
@@ -664,7 +664,7 @@ def test_run_parallel_scan_preserves_order(tmp_path: Path) -> None:
     config = _build_default_config()
 
     sequential_findings = _run_sequential_scan(phi_files, config)
-    parallel_findings = _run_parallel_scan(phi_files, config, worker_count=_PARITY_WORKER_COUNT)
+    parallel_findings = run_parallel_scan(phi_files, config, worker_count=_PARITY_WORKER_COUNT)
 
     sequential_paths = [f.file_path for f in sequential_findings]
     parallel_paths = [f.file_path for f in parallel_findings]
