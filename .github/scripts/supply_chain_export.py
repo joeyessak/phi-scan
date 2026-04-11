@@ -41,29 +41,16 @@ class DependencyExportError(Exception):
     """Raised when ``uv export`` fails to produce a requirements file."""
 
 
-def _filter_editable_install_lines(raw_export_output: str) -> list[str]:
-    return [
-        line
-        for line in raw_export_output.splitlines()
-        if not line.startswith(EDITABLE_INSTALL_PREFIX)
-    ]
+def _reject_output_path_symlink() -> None:
+    if not REQUIREMENTS_OUTPUT_PATH.is_symlink():
+        return
+    raise DependencyExportError(
+        f"{REQUIREMENTS_OUTPUT_PATH.name} is a symlink; refusing to follow it "
+        "during write. Remove the symlink and re-run."
+    )
 
 
-def write_production_requirements_file() -> Path:
-    """Write the filtered production requirements file and return its path.
-
-    Refuses to follow a symlink at the output path, runs ``uv export``
-    with the no-dev / no-hashes flags, strips editable install lines so
-    pip-audit does not reject the file, and writes the filtered output
-    to ``REQUIREMENTS_OUTPUT_PATH``. Raises ``DependencyExportError`` on
-    symlink presence or any ``uv export`` failure so callers can decide
-    how to surface the error before exiting.
-    """
-    if REQUIREMENTS_OUTPUT_PATH.is_symlink():
-        raise DependencyExportError(
-            f"{REQUIREMENTS_OUTPUT_PATH.name} is a symlink; refusing to follow it "
-            "during write. Remove the symlink and re-run."
-        )
+def _capture_uv_export_output() -> str:
     try:
         export_completed = subprocess.run(
             UV_EXPORT_COMMAND,
@@ -77,9 +64,28 @@ def write_production_requirements_file() -> Path:
             f"uv export failed with exit code {export_error.returncode}: "
             f"{export_error.stderr.strip()}"
         ) from export_error
-    filtered_lines = _filter_editable_install_lines(export_completed.stdout)
+    return export_completed.stdout
+
+
+def _filter_editable_install_lines(raw_export_output: str) -> list[str]:
+    return [
+        line
+        for line in raw_export_output.splitlines()
+        if not line.startswith(EDITABLE_INSTALL_PREFIX)
+    ]
+
+
+def _persist_requirements_file(filtered_lines: list[str]) -> Path:
     REQUIREMENTS_OUTPUT_PATH.write_text("\n".join(filtered_lines) + "\n")
     return REQUIREMENTS_OUTPUT_PATH
+
+
+def write_production_requirements_file() -> Path:
+    """Write the filtered production requirements file and return its path."""
+    _reject_output_path_symlink()
+    raw_export_output = _capture_uv_export_output()
+    filtered_lines = _filter_editable_install_lines(raw_export_output)
+    return _persist_requirements_file(filtered_lines)
 
 
 def log_command_invocation(command: list[str]) -> None:
