@@ -174,10 +174,12 @@ _CORPUS_BENCHMARK_SPECS: tuple[CorpusBenchmarkSpec, ...] = (
 
 _BENCHMARK_WORKER_COUNT: int = 1
 
-# Guard against division by zero when computing files-per-second. In practice
+# Guard threshold for the files-per-second division. In practice
 # time.monotonic() always advances between two calls, but a defensive guard
 # avoids a ZeroDivisionError if the measured scan is unexpectedly instant.
-_ZERO_ELAPSED_SECONDS: float = 0.0
+# Named for the role (the smallest elapsed time we can safely divide by)
+# rather than for the literal value.
+_MINIMUM_MEASURABLE_ELAPSED_SECONDS: float = 0.0
 
 # Each synthetic file embeds three explicit PHI values (SSN, phone number,
 # email address). The real finding count observed in practice is higher
@@ -272,7 +274,7 @@ def _measure_scan_performance(corpus_files: list[Path], config: ScanConfig) -> B
     scan_start = time.monotonic()
     scan_result = execute_scan(corpus_files, config, worker_count=_BENCHMARK_WORKER_COUNT)
     elapsed_seconds = time.monotonic() - scan_start
-    if elapsed_seconds > _ZERO_ELAPSED_SECONDS:
+    if elapsed_seconds > _MINIMUM_MEASURABLE_ELAPSED_SECONDS:
         files_per_second = len(corpus_files) / elapsed_seconds
     else:
         files_per_second = float("inf")
@@ -283,7 +285,7 @@ def _measure_scan_performance(corpus_files: list[Path], config: ScanConfig) -> B
     )
 
 
-def _assert_measurement_meets_spec(
+def _verify_benchmark_thresholds(
     measurement: BenchmarkMeasurement, spec: CorpusBenchmarkSpec
 ) -> None:
     assert measurement.elapsed_seconds <= spec.max_elapsed_seconds, (
@@ -324,4 +326,4 @@ def test_execute_scan_meets_per_corpus_performance_thresholds(
     minimum_expected_finding_count = spec.file_count * _MINIMUM_FINDINGS_PER_SYNTHETIC_FILE
     assert measurement.scan_result.files_scanned == spec.file_count
     assert len(measurement.scan_result.findings) >= minimum_expected_finding_count
-    _assert_measurement_meets_spec(measurement, spec)
+    _verify_benchmark_thresholds(measurement, spec)
