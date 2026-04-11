@@ -21,6 +21,7 @@ returned here is the hand-off point for that later work.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
 from importlib.metadata import EntryPoint, entry_points
 
@@ -50,7 +51,9 @@ _NOT_A_RECOGNIZER_REASON: str = "class does not inherit from BaseRecognizer"
 _MISSING_NAME_REASON: str = "class does not declare a 'name' attribute"
 _INVALID_NAME_REASON: str = "name {name!r} does not match pattern {pattern}"
 _MISSING_ENTITY_TYPES_REASON: str = "class does not declare 'entity_types'"
-_ENTITY_TYPES_NOT_LIST_REASON: str = "entity_types must be a list, got {type_name}"
+_ENTITY_TYPES_NOT_SEQUENCE_REASON: str = (
+    "entity_types must be a tuple or list of str, got {type_name}"
+)
 _EMPTY_ENTITY_TYPES_REASON: str = "entity_types is empty — recognizer cannot emit any findings"
 _INVALID_ENTITY_TYPE_REASON: str = (
     "entity_types[{index}] {value!r} does not match pattern {pattern}"
@@ -131,14 +134,14 @@ def load_plugin_registry() -> PluginRegistry:
         entries and logged at WARNING level.
     """
     sorted_entry_points = _sort_entry_points_deterministically(_discover_entry_points())
-    loaded_plugins, skipped_plugins = _collect_plugin_outcomes(sorted_entry_points)
+    loaded_plugins, skipped_plugins = _collect_plugin_registry_entries(sorted_entry_points)
     return PluginRegistry(
         loaded=tuple(loaded_plugins),
         skipped=tuple(skipped_plugins),
     )
 
 
-def _collect_plugin_outcomes(
+def _collect_plugin_registry_entries(
     sorted_entry_points: tuple[EntryPoint, ...],
 ) -> tuple[list[LoadedPlugin], list[SkippedPlugin]]:
     loaded_plugins: list[LoadedPlugin] = []
@@ -186,9 +189,7 @@ def _evaluate_entry_point(
 ) -> LoadedPlugin | SkippedPlugin:
     distribution_name = _resolve_distribution_name(entry_point)
     try:
-        recognizer_class = _load_entry_point_class(entry_point)
-        _validate_recognizer_class(recognizer_class)
-        _reject_reserved_name(recognizer_class.name, reserved_names)
+        recognizer_class = _resolve_and_validate_recognizer_class(entry_point, reserved_names)
         recognizer_instance = _instantiate_recognizer(recognizer_class)
     except PluginValidationError as validation_error:
         return SkippedPlugin(
@@ -201,6 +202,16 @@ def _evaluate_entry_point(
         distribution_name=distribution_name,
         recognizer=recognizer_instance,
     )
+
+
+def _resolve_and_validate_recognizer_class(
+    entry_point: EntryPoint,
+    reserved_names: set[str],
+) -> type[BaseRecognizer]:
+    recognizer_class = _load_entry_point_class(entry_point)
+    _validate_recognizer_class(recognizer_class)
+    _reject_reserved_name(recognizer_class.name, reserved_names)
+    return recognizer_class
 
 
 def _load_entry_point_class(entry_point: EntryPoint) -> type[BaseRecognizer]:
@@ -220,7 +231,7 @@ def _load_entry_point_class(entry_point: EntryPoint) -> type[BaseRecognizer]:
 def _validate_recognizer_class(recognizer_class: type[BaseRecognizer]) -> None:
     _validate_api_version(recognizer_class)
     _validate_recognizer_name(recognizer_class)
-    _validate_entity_types_list(recognizer_class)
+    _validate_entity_types_sequence(recognizer_class)
 
 
 def _validate_api_version(recognizer_class: type[BaseRecognizer]) -> None:
@@ -249,20 +260,20 @@ def _validate_recognizer_name(recognizer_class: type[BaseRecognizer]) -> None:
         )
 
 
-def _validate_entity_types_list(recognizer_class: type[BaseRecognizer]) -> None:
+def _validate_entity_types_sequence(recognizer_class: type[BaseRecognizer]) -> None:
     declared_types = getattr(recognizer_class, "entity_types", None)
     if declared_types is None:
         raise PluginValidationError(_MISSING_ENTITY_TYPES_REASON)
-    if not isinstance(declared_types, list):
+    if not isinstance(declared_types, (list, tuple)):
         raise PluginValidationError(
-            _ENTITY_TYPES_NOT_LIST_REASON.format(type_name=type(declared_types).__name__)
+            _ENTITY_TYPES_NOT_SEQUENCE_REASON.format(type_name=type(declared_types).__name__)
         )
     if not declared_types:
         raise PluginValidationError(_EMPTY_ENTITY_TYPES_REASON)
     _validate_entity_type_values(declared_types)
 
 
-def _validate_entity_type_values(declared_types: list[str]) -> None:
+def _validate_entity_type_values(declared_types: Sequence[str]) -> None:
     seen_entity_types: set[str] = set()
     for type_index, entity_type_value in enumerate(declared_types):
         _reject_malformed_entity_type(type_index, entity_type_value)

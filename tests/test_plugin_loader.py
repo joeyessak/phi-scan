@@ -8,7 +8,6 @@ pipeline without needing to build installable fixture packages.
 
 from __future__ import annotations
 
-import tempfile
 from pathlib import Path
 
 import pytest
@@ -40,8 +39,11 @@ _BETA_ENTITY_TYPE: str = "BETA_IDENTIFIER"
 _ALPHA_ENTRY_POINT_NAME: str = "alpha_entry_point"
 _BETA_ENTRY_POINT_NAME: str = "beta_entry_point"
 
+_FIXTURES_SUBDIRECTORY: str = "fixtures"
 _SAMPLE_FILE_NAME: str = "phi-scan-plugin-test-file.py"
-_SAMPLE_FILE_PATH: Path = Path(tempfile.gettempdir()) / _SAMPLE_FILE_NAME
+# Deterministic, test-local path. Never opened (per the ScanContext contract);
+# used only as metadata so plugins can gate on file extension and line number.
+_SAMPLE_FILE_PATH: Path = Path(__file__).parent / _FIXTURES_SUBDIRECTORY / _SAMPLE_FILE_NAME
 _SAMPLE_FILE_EXTENSION: str = ".py"
 _SAMPLE_LINE_NUMBER: int = 10
 _SAMPLE_START_OFFSET: int = 2
@@ -55,14 +57,14 @@ _DUPLICATED_ENTITY_TYPE: str = "DUPLICATED_TYPE"
 _MALFORMED_RECOGNIZER_NAME: str = "1_starts_with_digit"
 
 
-class _FakeDistribution:
+class _DistributionStub:
     """Minimal stand-in for ``importlib.metadata.Distribution``."""
 
     def __init__(self, distribution_name: str) -> None:
         self.name = distribution_name
 
 
-class _FakeEntryPoint:
+class _EntryPointStub:
     """Minimal stand-in for ``importlib.metadata.EntryPoint``.
 
     Only exposes the attributes the loader touches:
@@ -87,17 +89,17 @@ class _FakeEntryPoint:
         return self._loaded_object
 
     @property
-    def dist(self) -> _FakeDistribution | None:
+    def dist(self) -> _DistributionStub | None:
         if self._distribution_name is None:
             return None
-        return _FakeDistribution(self._distribution_name)
+        return _DistributionStub(self._distribution_name)
 
 
 def _install_fake_entry_points(
     monkeypatch: pytest.MonkeyPatch,
-    fake_entry_points: list[_FakeEntryPoint],
+    fake_entry_points: list[_EntryPointStub],
 ) -> None:
-    def _entry_points_replacement(*, group: str) -> list[_FakeEntryPoint]:
+    def _entry_points_replacement(*, group: str) -> list[_EntryPointStub]:
         if group != PLUGIN_ENTRY_POINT_GROUP:
             return []
         return list(fake_entry_points)
@@ -117,6 +119,19 @@ class _ValidAlphaRecognizer(BaseRecognizer):
 class _ValidBetaRecognizer(BaseRecognizer):
     name = _BETA_RECOGNIZER_NAME
     entity_types = [_BETA_ENTITY_TYPE]
+
+    def detect(self, line: str, context: ScanContext) -> list[ScanFinding]:
+        del line, context
+        return []
+
+
+_TUPLE_RECOGNIZER_NAME: str = "tuple_types_recognizer"
+_TUPLE_ENTITY_TYPE: str = "TUPLE_IDENTIFIER"
+
+
+class _TupleEntityTypesRecognizer(BaseRecognizer):
+    name = _TUPLE_RECOGNIZER_NAME
+    entity_types = (_TUPLE_ENTITY_TYPE,)
 
     def detect(self, line: str, context: ScanContext) -> list[ScanFinding]:
         del line, context
@@ -344,7 +359,7 @@ def test_single_valid_plugin_is_loaded(
     _install_fake_entry_points(
         monkeypatch,
         [
-            _FakeEntryPoint(
+            _EntryPointStub(
                 _ALPHA_ENTRY_POINT_NAME,
                 _ValidAlphaRecognizer,
                 _FAKE_DISTRIBUTION_ALPHA,
@@ -369,12 +384,12 @@ def test_multiple_valid_plugins_are_sorted_deterministically(
     _install_fake_entry_points(
         monkeypatch,
         [
-            _FakeEntryPoint(
+            _EntryPointStub(
                 _BETA_ENTRY_POINT_NAME,
                 _ValidBetaRecognizer,
                 _FAKE_DISTRIBUTION_BETA,
             ),
-            _FakeEntryPoint(
+            _EntryPointStub(
                 _ALPHA_ENTRY_POINT_NAME,
                 _ValidAlphaRecognizer,
                 _FAKE_DISTRIBUTION_ALPHA,
@@ -393,7 +408,7 @@ def test_plugin_without_distribution_still_loads(
 ) -> None:
     _install_fake_entry_points(
         monkeypatch,
-        [_FakeEntryPoint(_ALPHA_ENTRY_POINT_NAME, _ValidAlphaRecognizer)],
+        [_EntryPointStub(_ALPHA_ENTRY_POINT_NAME, _ValidAlphaRecognizer)],
     )
     registry = load_plugin_registry()
     assert len(registry.loaded) == 1
@@ -411,7 +426,7 @@ def test_mismatched_api_version_is_skipped(
     _install_fake_entry_points(
         monkeypatch,
         [
-            _FakeEntryPoint(
+            _EntryPointStub(
                 _ALPHA_ENTRY_POINT_NAME,
                 _MismatchedVersionRecognizer,
                 _FAKE_DISTRIBUTION_ALPHA,
@@ -432,7 +447,7 @@ def test_name_with_hyphen_is_skipped(
 ) -> None:
     _install_fake_entry_points(
         monkeypatch,
-        [_FakeEntryPoint(_ALPHA_ENTRY_POINT_NAME, _HyphenNameRecognizer)],
+        [_EntryPointStub(_ALPHA_ENTRY_POINT_NAME, _HyphenNameRecognizer)],
     )
     registry = load_plugin_registry()
     assert registry.loaded == ()
@@ -444,7 +459,7 @@ def test_name_starting_with_digit_is_skipped(
 ) -> None:
     _install_fake_entry_points(
         monkeypatch,
-        [_FakeEntryPoint(_ALPHA_ENTRY_POINT_NAME, _DigitStartNameRecognizer)],
+        [_EntryPointStub(_ALPHA_ENTRY_POINT_NAME, _DigitStartNameRecognizer)],
     )
     registry = load_plugin_registry()
     assert registry.loaded == ()
@@ -456,23 +471,36 @@ def test_empty_entity_types_is_skipped(
 ) -> None:
     _install_fake_entry_points(
         monkeypatch,
-        [_FakeEntryPoint(_ALPHA_ENTRY_POINT_NAME, _EmptyEntityTypesRecognizer)],
+        [_EntryPointStub(_ALPHA_ENTRY_POINT_NAME, _EmptyEntityTypesRecognizer)],
     )
     registry = load_plugin_registry()
     assert registry.loaded == ()
     assert "empty" in registry.skipped[0].reason
 
 
-def test_non_list_entity_types_is_skipped(
+def test_non_sequence_entity_types_is_skipped(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     _install_fake_entry_points(
         monkeypatch,
-        [_FakeEntryPoint(_ALPHA_ENTRY_POINT_NAME, _NonListEntityTypesRecognizer)],
+        [_EntryPointStub(_ALPHA_ENTRY_POINT_NAME, _NonListEntityTypesRecognizer)],
     )
     registry = load_plugin_registry()
     assert registry.loaded == ()
-    assert "must be a list" in registry.skipped[0].reason
+    assert "must be a tuple or list" in registry.skipped[0].reason
+
+
+def test_tuple_entity_types_is_accepted(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    _install_fake_entry_points(
+        monkeypatch,
+        [_EntryPointStub(_ALPHA_ENTRY_POINT_NAME, _TupleEntityTypesRecognizer)],
+    )
+    registry = load_plugin_registry()
+    assert registry.skipped == ()
+    assert len(registry.loaded) == 1
+    assert registry.loaded[0].recognizer.name == _TUPLE_RECOGNIZER_NAME
 
 
 def test_lowercase_entity_type_is_skipped(
@@ -480,7 +508,7 @@ def test_lowercase_entity_type_is_skipped(
 ) -> None:
     _install_fake_entry_points(
         monkeypatch,
-        [_FakeEntryPoint(_ALPHA_ENTRY_POINT_NAME, _LowercaseEntityTypeRecognizer)],
+        [_EntryPointStub(_ALPHA_ENTRY_POINT_NAME, _LowercaseEntityTypeRecognizer)],
     )
     registry = load_plugin_registry()
     assert registry.loaded == ()
@@ -492,7 +520,7 @@ def test_duplicate_entity_types_is_skipped(
 ) -> None:
     _install_fake_entry_points(
         monkeypatch,
-        [_FakeEntryPoint(_ALPHA_ENTRY_POINT_NAME, _DuplicateEntityTypesRecognizer)],
+        [_EntryPointStub(_ALPHA_ENTRY_POINT_NAME, _DuplicateEntityTypesRecognizer)],
     )
     registry = load_plugin_registry()
     assert registry.loaded == ()
@@ -504,7 +532,7 @@ def test_non_recognizer_class_is_skipped(
 ) -> None:
     _install_fake_entry_points(
         monkeypatch,
-        [_FakeEntryPoint(_ALPHA_ENTRY_POINT_NAME, _NotARecognizerClass)],
+        [_EntryPointStub(_ALPHA_ENTRY_POINT_NAME, _NotARecognizerClass)],
     )
     registry = load_plugin_registry()
     assert registry.loaded == ()
@@ -516,7 +544,7 @@ def test_non_class_entry_point_target_is_skipped(
 ) -> None:
     _install_fake_entry_points(
         monkeypatch,
-        [_FakeEntryPoint(_ALPHA_ENTRY_POINT_NAME, _plain_function_not_a_class)],
+        [_EntryPointStub(_ALPHA_ENTRY_POINT_NAME, _plain_function_not_a_class)],
     )
     registry = load_plugin_registry()
     assert registry.loaded == ()
@@ -529,7 +557,7 @@ def test_entry_point_import_error_is_skipped(
     _install_fake_entry_points(
         monkeypatch,
         [
-            _FakeEntryPoint(
+            _EntryPointStub(
                 _ALPHA_ENTRY_POINT_NAME,
                 loaded_object=None,
                 load_error=ImportError("module missing"),
@@ -546,7 +574,7 @@ def test_missing_api_version_attribute_is_skipped(
 ) -> None:
     _install_fake_entry_points(
         monkeypatch,
-        [_FakeEntryPoint(_ALPHA_ENTRY_POINT_NAME, _MissingApiVersionRecognizer)],
+        [_EntryPointStub(_ALPHA_ENTRY_POINT_NAME, _MissingApiVersionRecognizer)],
     )
     registry = load_plugin_registry()
     assert registry.loaded == ()
@@ -558,7 +586,7 @@ def test_missing_name_attribute_is_skipped(
 ) -> None:
     _install_fake_entry_points(
         monkeypatch,
-        [_FakeEntryPoint(_ALPHA_ENTRY_POINT_NAME, _MissingNameRecognizer)],
+        [_EntryPointStub(_ALPHA_ENTRY_POINT_NAME, _MissingNameRecognizer)],
     )
     registry = load_plugin_registry()
     assert registry.loaded == ()
@@ -570,7 +598,7 @@ def test_missing_entity_types_attribute_is_skipped(
 ) -> None:
     _install_fake_entry_points(
         monkeypatch,
-        [_FakeEntryPoint(_ALPHA_ENTRY_POINT_NAME, _MissingEntityTypesRecognizer)],
+        [_EntryPointStub(_ALPHA_ENTRY_POINT_NAME, _MissingEntityTypesRecognizer)],
     )
     registry = load_plugin_registry()
     assert registry.loaded == ()
@@ -582,7 +610,7 @@ def test_recognizer_constructor_failure_is_skipped(
 ) -> None:
     _install_fake_entry_points(
         monkeypatch,
-        [_FakeEntryPoint(_ALPHA_ENTRY_POINT_NAME, _ConstructorRaisingRecognizer)],
+        [_EntryPointStub(_ALPHA_ENTRY_POINT_NAME, _ConstructorRaisingRecognizer)],
     )
     registry = load_plugin_registry()
     assert registry.loaded == ()
@@ -596,7 +624,7 @@ def test_recognizer_constructor_error_message_is_not_leaked(
 ) -> None:
     _install_fake_entry_points(
         monkeypatch,
-        [_FakeEntryPoint(_ALPHA_ENTRY_POINT_NAME, _ConstructorRaisingRecognizer)],
+        [_EntryPointStub(_ALPHA_ENTRY_POINT_NAME, _ConstructorRaisingRecognizer)],
     )
     registry = load_plugin_registry()
     skipped_reason = registry.skipped[0].reason
@@ -624,12 +652,12 @@ def test_name_collision_first_wins_second_skipped(
     _install_fake_entry_points(
         monkeypatch,
         [
-            _FakeEntryPoint(
+            _EntryPointStub(
                 _ALPHA_ENTRY_POINT_NAME,
                 _ValidAlphaRecognizer,
                 _FAKE_DISTRIBUTION_ALPHA,
             ),
-            _FakeEntryPoint(
+            _EntryPointStub(
                 _BETA_ENTRY_POINT_NAME,
                 _AlphaClone,
                 _FAKE_DISTRIBUTION_BETA,

@@ -36,6 +36,7 @@ from __future__ import annotations
 
 import re
 from abc import ABC, abstractmethod
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -203,10 +204,12 @@ class BaseRecognizer(ABC):
         * ``name`` — lowercase snake_case identifier matching
           ``RECOGNIZER_NAME_PATTERN``. Used as the collision key for
           deduplicating recognizers across installed distributions.
-        * ``entity_types`` — non-empty list of uppercase strings, each
-          matching ``ENTITY_TYPE_PATTERN`` and unique within the list.
+        * ``entity_types`` — non-empty sequence of uppercase strings
+          (``tuple`` preferred for immutability, ``list`` also accepted
+          for backwards compatibility). Each string must match
+          ``ENTITY_TYPE_PATTERN`` and be unique within the sequence.
           Every ``ScanFinding`` returned by this recognizer MUST
-          declare an ``entity_type`` that appears in this list.
+          declare an ``entity_type`` that appears in this sequence.
         * ``plugin_api_version`` — must equal the host's
           ``PLUGIN_API_VERSION`` constant for the plugin to be loaded.
           Defaults to ``"1.0"``.
@@ -240,7 +243,7 @@ class BaseRecognizer(ABC):
     """
 
     name: str
-    entity_types: list[str]
+    entity_types: Sequence[str]
     plugin_api_version: str = PLUGIN_API_VERSION
     version: str = _DEFAULT_PLUGIN_VERSION
     description: str = _DEFAULT_PLUGIN_DESCRIPTION
