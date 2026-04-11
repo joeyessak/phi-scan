@@ -9,6 +9,7 @@ import time
 import zipfile
 import zlib
 from collections import Counter
+from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from pathlib import Path
 from types import MappingProxyType
 from typing import TYPE_CHECKING
@@ -16,6 +17,8 @@ from typing import TYPE_CHECKING
 import pathspec
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from phi_scan.ai_review import AIUsageSummary
 
 from phi_scan.cache import FileCacheKey, get_cached_result, store_cached_result
@@ -41,11 +44,14 @@ from phi_scan.models import ScanConfig, ScanFinding, ScanResult
 from phi_scan.suppression import is_finding_suppressed, load_suppressions
 
 __all__ = [
+    "MAX_WORKER_COUNT",
+    "MIN_WORKER_COUNT",
     "collect_scan_targets",
     "execute_scan",
     "is_binary_file",
     "is_path_excluded",
     "load_ignore_patterns",
+    "run_parallel_scan",
     "scan_file",
 ]
 
@@ -57,6 +63,9 @@ _logger: logging.Logger = get_logger("scanner")
 
 _ROOT_PATH_NOT_FOUND_ERROR: str = "Scan root {path!r} does not exist"
 _ROOT_PATH_NOT_DIRECTORY_ERROR: str = "Scan root {path!r} is not a directory"
+_WORKER_COUNT_OUT_OF_RANGE_ERROR: str = (
+    "worker_count {worker_count} is out of range [{minimum}, {maximum}]"
+)
 _SYMLINK_SKIPPED_WARNING: str = "Skipping symlink {path!r} — symlink traversal is prohibited"
 _OVERSIZED_FILE_SKIPPED_WARNING: str = "Skipping {path!r} — size exceeds the {limit_mb} MB limit"
 _BINARY_FILE_SKIPPED_INFO: str = "Skipping {path!r} — detected as binary"
@@ -128,6 +137,19 @@ _NOTEBOOK_OUTPUT_TEXT_KEY: str = "text"
 # correct per the spec — joining with "\n" would insert double newlines.
 _NOTEBOOK_CELL_JOIN_SEPARATOR: str = ""
 _NOTEBOOK_SECTION_SEPARATOR: str = "\n"
+
+# ---------------------------------------------------------------------------
+# Parallel scan constants
+# ---------------------------------------------------------------------------
+
+# Maximum number of worker threads accepted by execute_scan and the CLI.
+# Values above this are rejected at the call site before reaching the executor.
+MAX_WORKER_COUNT: int = 32
+# Minimum worker count. Values at or below this run sequentially; values above
+# this switch execute_scan to the parallel code path.
+MIN_WORKER_COUNT: int = 1
+# Thread name prefix used by ThreadPoolExecutor for log and debugger visibility.
+_PARALLEL_THREAD_NAME_PREFIX: str = "phi-scan-worker"
 
 
 # ---------------------------------------------------------------------------
@@ -324,32 +346,140 @@ def scan_file(file_path: Path, config: ScanConfig) -> list[ScanFinding]:
     return _execute_scan_with_cache(file_content, content_hash, display_path, config)
 
 
-def execute_scan(scan_targets: list[Path], config: ScanConfig) -> ScanResult:
+def execute_scan(
+    scan_targets: list[Path],
+    config: ScanConfig,
+    worker_count: int = MIN_WORKER_COUNT,
+) -> ScanResult:
     """Scan every file in scan_targets and return the aggregated ScanResult.
 
     Runs all local detection layers first, then applies the optional AI
     confidence review layer to medium-confidence findings before building
-    the final result.
+    the final result. When worker_count > 1, files are scanned concurrently
+    using a bounded ThreadPoolExecutor; output order matches scan_targets order.
 
     Args:
         scan_targets: Ordered list of files to scan, as returned by
             collect_scan_targets.
         config: Scan configuration controlling thresholds and output format.
+        worker_count: Number of worker threads. 1 (default) runs sequentially.
+            Values above 1 enable parallel scanning up to MAX_WORKER_COUNT.
 
     Returns:
         A ScanResult aggregating all findings, file counts, timing, and
         risk classification.
+
+    Raises:
+        ValueError: If worker_count is outside
+            [MIN_WORKER_COUNT, MAX_WORKER_COUNT].
     """
     from phi_scan.ai_review import apply_ai_review_to_findings
 
+    if not MIN_WORKER_COUNT <= worker_count <= MAX_WORKER_COUNT:
+        raise ValueError(
+            _WORKER_COUNT_OUT_OF_RANGE_ERROR.format(
+                worker_count=worker_count,
+                minimum=MIN_WORKER_COUNT,
+                maximum=MAX_WORKER_COUNT,
+            ),
+        )
     scan_start = time.monotonic()
-    all_findings: list[ScanFinding] = []
-    for file_path in scan_targets:
-        file_findings = scan_file(file_path, config)
-        all_findings.extend(file_findings)
+    all_findings = _collect_all_findings(scan_targets, config, worker_count)
     reviewed_findings, ai_usage = apply_ai_review_to_findings(all_findings, config.ai_review_config)
     scan_duration = time.monotonic() - scan_start
     return build_scan_result(tuple(reviewed_findings), len(scan_targets), scan_duration, ai_usage)
+
+
+def _collect_all_findings(
+    scan_targets: list[Path],
+    config: ScanConfig,
+    worker_count: int,
+) -> list[ScanFinding]:
+    """Dispatch scan_targets to the sequential or parallel scan path.
+
+    Args:
+        scan_targets: Ordered list of files to scan.
+        config: Scan configuration forwarded to each scan_file call.
+        worker_count: Number of worker threads. Values at or below
+            MIN_WORKER_COUNT run sequentially; higher values run in parallel.
+
+    Returns:
+        All findings from all files, in scan_targets order.
+    """
+    if worker_count > MIN_WORKER_COUNT:
+        return run_parallel_scan(scan_targets, config, worker_count)
+    return _run_sequential_scan(scan_targets, config)
+
+
+def _run_sequential_scan(
+    scan_targets: list[Path],
+    config: ScanConfig,
+) -> list[ScanFinding]:
+    """Scan scan_targets one at a time and return all findings in input order.
+
+    Args:
+        scan_targets: Ordered list of files to scan.
+        config: Scan configuration forwarded to each scan_file call.
+
+    Returns:
+        All findings from all files, in scan_targets order.
+    """
+    all_findings: list[ScanFinding] = []
+    for file_path in scan_targets:
+        all_findings.extend(scan_file(file_path, config))
+    return all_findings
+
+
+def run_parallel_scan(
+    scan_targets: list[Path],
+    config: ScanConfig,
+    worker_count: int,
+    on_file_complete: Callable[[Path], None] | None = None,
+) -> list[ScanFinding]:
+    """Scan scan_targets concurrently using a bounded ThreadPoolExecutor.
+
+    This is the single parallel executor used by both ``execute_scan`` and the
+    CLI progress-bar scan path. Uses ``submit`` + ``as_completed`` so per-file
+    results become available in completion order, enabling callers to advance a
+    progress UI as each file finishes. Results are re-sorted by original
+    scan_targets index before flattening, so the returned findings list is
+    deterministic regardless of thread completion order. Worker-thread
+    exceptions are re-raised by ``Future.result()`` and propagate to the caller.
+
+    This function does not apply the AI confidence review layer — callers that
+    need a full ``ScanResult`` with AI review and timing should use
+    ``execute_scan`` instead. ``run_parallel_scan`` is the lower-level primitive
+    that returns raw findings from the local detection layers only.
+
+    Args:
+        scan_targets: Ordered list of files to scan.
+        config: Scan configuration forwarded to each scan_file call.
+        worker_count: Number of worker threads; must be > MIN_WORKER_COUNT.
+        on_file_complete: Optional callback invoked on the orchestrating thread
+            once per file, immediately after its ``scan_file`` result is
+            collected. Receives the completed file path. Any exception raised
+            by the callback propagates to the caller.
+
+    Returns:
+        All findings from all files, in scan_targets order.
+    """
+    if not scan_targets:
+        return []
+    indexed_results: dict[int, list[ScanFinding]] = {}
+    future_to_index: dict[Future[list[ScanFinding]], int] = {}
+    with ThreadPoolExecutor(
+        max_workers=worker_count,
+        thread_name_prefix=_PARALLEL_THREAD_NAME_PREFIX,
+    ) as executor:
+        for index, file_path in enumerate(scan_targets):
+            future_to_index[executor.submit(scan_file, file_path, config)] = index
+        for completed_future in as_completed(future_to_index):
+            original_index = future_to_index[completed_future]
+            indexed_results[original_index] = completed_future.result()
+            if on_file_complete is not None:
+                on_file_complete(scan_targets[original_index])
+    ordered_per_file = [indexed_results[i] for i in range(len(scan_targets))]
+    return [finding for file_findings in ordered_per_file for finding in file_findings]
 
 
 # ---------------------------------------------------------------------------
