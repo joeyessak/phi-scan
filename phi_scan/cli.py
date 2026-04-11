@@ -757,7 +757,12 @@ def _run_parallel_scan_with_progress(
         All findings in scan_targets order.
     """
 
-    def _advance_progress_bar(_: Path) -> None:
+    def _advance_progress_bar(completed_file_path: Path) -> None:
+        # completed_file_path is supplied by the run_parallel_scan callback
+        # contract but deliberately not displayed: the parallel progress
+        # label is a fixed string, because completion order is
+        # nondeterministic and showing file names mid-scan would cause the
+        # label to jitter across threads.
         scan.progress.update(
             scan.task_id,
             description=_PARALLEL_SCAN_PROGRESS_LABEL,

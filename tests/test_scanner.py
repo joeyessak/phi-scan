@@ -589,17 +589,21 @@ def test_execute_scan_parallel_is_clean_for_no_phi_content(tmp_path: Path) -> No
 # ---------------------------------------------------------------------------
 
 
-def _build_parity_files(root: Path, file_count: int) -> list[Path]:
-    """Create file_count Python files with PHI content under root; return ordered list."""
-    parity_content = _PARITY_PHI_FIXTURE_PATH.read_text(encoding=DEFAULT_TEXT_ENCODING)
-    files = [root / f"file_{index:03d}.py" for index in range(file_count)]
-    for phi_file in files:
-        phi_file.write_text(parity_content, encoding=DEFAULT_TEXT_ENCODING)
-    return files
+def _collect_parity_file_paths(root: Path, file_count: int) -> list[Path]:
+    """Return the ordered synthesised paths for file_count parity PHI files under root."""
+    return [root / f"file_{index:03d}.py" for index in range(file_count)]
+
+
+def _write_parity_file_contents(parity_files: list[Path]) -> None:
+    """Write the synthetic PHI fixture content into each path in parity_files."""
+    phi_file_content = _PARITY_PHI_FIXTURE_PATH.read_text(encoding=DEFAULT_TEXT_ENCODING)
+    for phi_file in parity_files:
+        phi_file.write_text(phi_file_content, encoding=DEFAULT_TEXT_ENCODING)
 
 
 def test_parallel_scan_finding_count_matches_sequential(tmp_path: Path) -> None:
-    phi_files = _build_parity_files(tmp_path, _PARITY_FILE_COUNT)
+    phi_files = _collect_parity_file_paths(tmp_path, _PARITY_FILE_COUNT)
+    _write_parity_file_contents(phi_files)
     config = _build_default_config()
 
     sequential_result = execute_scan(phi_files, config, worker_count=MIN_WORKER_COUNT)
@@ -609,7 +613,8 @@ def test_parallel_scan_finding_count_matches_sequential(tmp_path: Path) -> None:
 
 
 def test_parallel_scan_file_paths_match_sequential(tmp_path: Path) -> None:
-    phi_files = _build_parity_files(tmp_path, _PARITY_FILE_COUNT)
+    phi_files = _collect_parity_file_paths(tmp_path, _PARITY_FILE_COUNT)
+    _write_parity_file_contents(phi_files)
     config = _build_default_config()
 
     sequential_result = execute_scan(phi_files, config, worker_count=MIN_WORKER_COUNT)
@@ -621,7 +626,8 @@ def test_parallel_scan_file_paths_match_sequential(tmp_path: Path) -> None:
 
 
 def test_parallel_scan_value_hashes_match_sequential(tmp_path: Path) -> None:
-    phi_files = _build_parity_files(tmp_path, _PARITY_FILE_COUNT)
+    phi_files = _collect_parity_file_paths(tmp_path, _PARITY_FILE_COUNT)
+    _write_parity_file_contents(phi_files)
     config = _build_default_config()
 
     sequential_result = execute_scan(phi_files, config, worker_count=MIN_WORKER_COUNT)
@@ -633,7 +639,8 @@ def test_parallel_scan_value_hashes_match_sequential(tmp_path: Path) -> None:
 
 
 def test_parallel_scan_risk_level_matches_sequential(tmp_path: Path) -> None:
-    phi_files = _build_parity_files(tmp_path, _PARITY_FILE_COUNT)
+    phi_files = _collect_parity_file_paths(tmp_path, _PARITY_FILE_COUNT)
+    _write_parity_file_contents(phi_files)
     config = _build_default_config()
 
     sequential_result = execute_scan(phi_files, config, worker_count=MIN_WORKER_COUNT)
@@ -660,7 +667,8 @@ def test_run_parallel_scan_returns_empty_for_no_targets() -> None:
 
 
 def test_run_parallel_scan_preserves_order(tmp_path: Path) -> None:
-    phi_files = _build_parity_files(tmp_path, _PARITY_FILE_COUNT)
+    phi_files = _collect_parity_file_paths(tmp_path, _PARITY_FILE_COUNT)
+    _write_parity_file_contents(phi_files)
     config = _build_default_config()
 
     sequential_findings = _run_sequential_scan(phi_files, config)
