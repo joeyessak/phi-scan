@@ -131,6 +131,16 @@ def load_plugin_registry() -> PluginRegistry:
         entries and logged at WARNING level.
     """
     sorted_entry_points = _sort_entry_points_deterministically(_discover_entry_points())
+    loaded_plugins, skipped_plugins = _collect_plugin_outcomes(sorted_entry_points)
+    return PluginRegistry(
+        loaded=tuple(loaded_plugins),
+        skipped=tuple(skipped_plugins),
+    )
+
+
+def _collect_plugin_outcomes(
+    sorted_entry_points: tuple[EntryPoint, ...],
+) -> tuple[list[LoadedPlugin], list[SkippedPlugin]]:
     loaded_plugins: list[LoadedPlugin] = []
     skipped_plugins: list[SkippedPlugin] = []
     reserved_names: set[str] = set()
@@ -142,10 +152,7 @@ def load_plugin_registry() -> PluginRegistry:
             continue
         skipped_plugins.append(load_outcome)
         _log_skipped_plugin(load_outcome)
-    return PluginRegistry(
-        loaded=tuple(loaded_plugins),
-        skipped=tuple(skipped_plugins),
-    )
+    return loaded_plugins, skipped_plugins
 
 
 def _discover_entry_points() -> tuple[EntryPoint, ...]:
@@ -291,9 +298,15 @@ def _reject_reserved_name(recognizer_name: str, reserved_names: set[str]) -> Non
 def _instantiate_recognizer(
     recognizer_class: type[BaseRecognizer],
 ) -> BaseRecognizer:
+    # Third-party plugin constructors may raise anything. Catching the full
+    # Exception hierarchy is the intentional trust-boundary behaviour: a broken
+    # plugin must never crash the scan or leak a raw traceback to the CLI. The
+    # exception is re-raised as PluginValidationError so the loader records it
+    # in the skipped list and continues. BaseException (SystemExit,
+    # KeyboardInterrupt) is deliberately not caught.
     try:
         return recognizer_class()
-    except Exception as init_error:
+    except Exception as init_error:  # noqa: BLE001 — see comment above
         raise PluginValidationError(
             _INSTANTIATION_FAILURE_REASON.format(error=init_error)
         ) from init_error

@@ -8,6 +8,7 @@ pipeline without needing to build installable fixture packages.
 
 from __future__ import annotations
 
+import tempfile
 from pathlib import Path
 
 import pytest
@@ -39,7 +40,8 @@ _BETA_ENTITY_TYPE: str = "BETA_IDENTIFIER"
 _ALPHA_ENTRY_POINT_NAME: str = "alpha_entry_point"
 _BETA_ENTRY_POINT_NAME: str = "beta_entry_point"
 
-_SAMPLE_FILE_PATH: Path = Path("/tmp/phi-scan-plugin-test-file.py")
+_SAMPLE_FILE_NAME: str = "phi-scan-plugin-test-file.py"
+_SAMPLE_FILE_PATH: Path = Path(tempfile.gettempdir()) / _SAMPLE_FILE_NAME
 _SAMPLE_FILE_EXTENSION: str = ".py"
 _SAMPLE_LINE_NUMBER: int = 10
 _SAMPLE_START_OFFSET: int = 2
