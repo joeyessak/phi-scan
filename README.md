@@ -285,6 +285,7 @@ Copy-paste templates for all CI platforms: [docs/ci-cd-integration.md](docs/ci-c
 | [CHANGELOG.md](CHANGELOG.md) | Version history |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | Development setup, standards, PR process |
 | [SECURITY.md](SECURITY.md) | Vulnerability reporting policy |
+| [docs/PROGRAM_SCORECARD.md](docs/PROGRAM_SCORECARD.md) | Public-repo quality scorecard (10/10 criteria and status) |
 
 ---
 
