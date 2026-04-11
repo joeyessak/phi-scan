@@ -35,8 +35,8 @@ from supply_chain_export import (
     REPOSITORY_ROOT,
     DependencyExportError,
     execute_audit_command,
-    export_production_requirements,
     log_command_invocation,
+    write_production_requirements_file,
 )
 
 _IGNORE_FILE_NAME: str = ".pip-audit-ignore.toml"
@@ -204,7 +204,7 @@ def main() -> int:
         print(f"Policy violation: {policy_error}", file=sys.stderr)
         return _POLICY_VIOLATION_EXIT_CODE
     try:
-        requirements_path = export_production_requirements()
+        requirements_path = write_production_requirements_file()
     except DependencyExportError as export_error:
         print(f"Dependency export failed: {export_error}", file=sys.stderr)
         return EXPORT_FAILURE_EXIT_CODE

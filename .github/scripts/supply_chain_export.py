@@ -49,8 +49,8 @@ def _filter_editable_install_lines(raw_export_output: str) -> list[str]:
     ]
 
 
-def export_production_requirements() -> Path:
-    """Export the production dependency set and return the file path.
+def write_production_requirements_file() -> Path:
+    """Write the filtered production requirements file and return its path.
 
     Refuses to follow a symlink at the output path, runs ``uv export``
     with the no-dev / no-hashes flags, strips editable install lines so
