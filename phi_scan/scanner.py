@@ -343,7 +343,7 @@ def scan_file(file_path: Path, config: ScanConfig) -> list[ScanFinding]:
 def execute_scan(
     scan_targets: list[Path],
     config: ScanConfig,
-    worker_count: int = 1,
+    worker_count: int = _MIN_WORKER_COUNT,
 ) -> ScanResult:
     """Scan every file in scan_targets and return the aggregated ScanResult.
 

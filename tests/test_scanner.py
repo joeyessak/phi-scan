@@ -26,6 +26,7 @@ from phi_scan.constants import (
 from phi_scan.exceptions import TraversalError
 from phi_scan.models import ScanConfig, ScanResult
 from phi_scan.scanner import (
+    _MIN_WORKER_COUNT,  # noqa: PLC2701
     MAX_WORKER_COUNT,
     _passes_decompression_bomb_guards,  # noqa: PLC2701
     _scan_files_parallel,  # noqa: PLC2701
@@ -60,8 +61,10 @@ _MINIMUM_SCAN_DURATION: float = 0.0
 _PARITY_FILE_COUNT: int = 6
 # Worker count used in parallel parity tests — must be > 1 to activate the parallel code path.
 _PARITY_WORKER_COUNT: int = 2
-# PHI content written to parity test files. Uses a structurally valid SSN (high
-# confidence regex match) so findings are consistently generated across both code paths.
+# PHI content written to parity test files. Uses a structurally valid SSN pattern
+# (high confidence regex match) so findings are consistently generated across both code paths.
+# 123-45-6789 uses area number 123, which the SSA has never assigned — it is
+# a well-known synthetic test value and is not a real individual's SSN.
 _PARITY_PHI_CONTENT: str = "patient_ssn = '123-45-6789'\n"
 # Number of non-blank, non-comment patterns written by
 # test_load_ignore_patterns_skips_blank_lines: _SAMPLE_IGNORE_PATTERN ("*.log") and "*.tmp".
@@ -526,14 +529,14 @@ def test_execute_scan_category_counts_all_zero_for_clean_scan() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_execute_scan_worker_count_one_returns_scan_result(tmp_path: Path) -> None:
-    scan_result = execute_scan([], _build_default_config(), worker_count=1)
+def test_execute_scan_worker_count_one_returns_scan_result() -> None:
+    scan_result = execute_scan([], _build_default_config(), worker_count=_MIN_WORKER_COUNT)
 
     assert isinstance(scan_result, ScanResult)
 
 
-def test_execute_scan_worker_count_two_returns_scan_result(tmp_path: Path) -> None:
-    scan_result = execute_scan([], _build_default_config(), worker_count=2)
+def test_execute_scan_worker_count_two_returns_scan_result() -> None:
+    scan_result = execute_scan([], _build_default_config(), worker_count=_PARITY_WORKER_COUNT)
 
     assert isinstance(scan_result, ScanResult)
 
