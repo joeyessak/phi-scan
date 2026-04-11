@@ -4,7 +4,7 @@ Tracks progress toward 10/10 public-repo quality across four categories.
 Each check has a binary pass/fail state. All checks must pass before the repo
 is declared production-ready for v1.0.
 
-**Last updated:** 2026-04-13
+**Last updated:** 2026-04-14
 
 ---
 
@@ -47,11 +47,11 @@ is declared production-ready for v1.0.
 | S6 | ZIP decompression bomb protection implemented and tested | PASS | Size + ratio guards since 7E |
 | S7 | `docs/threat-model.md` exists with threat → mitigation → test → residual risk table | PASS | Full-attack-surface threat model in `docs/threat-model.md` covering scanner ingestion, archive handling, detectors, notifier, AI review, fixer, output, local artifacts, CI adapters. |
 | S8 | All P0/P1 threats in the threat model map to a named test | PASS | Every P0 and P1 row in `docs/threat-model.md` cites specific test names; all 61 citations verified via `pytest --collect-only`. |
-| S9 | Dependency vulnerability scanning runs in CI (e.g. `pip-audit` or `safety`) | FAIL | Not yet implemented |
-| S10 | SBOM generation policy documented | FAIL | Not yet documented |
-| S11 | Artifact signing policy documented (or explicitly out of scope with rationale) | FAIL | Not yet documented |
+| S9 | Dependency vulnerability scanning runs in CI (e.g. `pip-audit` or `safety`) | PASS | `dependency-audit` job in `.github/workflows/ci.yml` runs `pip-audit` on every PR and push to `main` via `.github/scripts/pip_audit_runner.py`. Policy-enforced ignore list at `.pip-audit-ignore.toml` (required `id`/`reason`/`tracking`, advisory-ID regex, optional future-dated `expires`, no wildcards). Zero active ignores; baseline CVEs cleared via direct pin bumps (`cryptography>=46.0.7`, `pygments>=2.20.0`). Documented in `docs/supply-chain.md`. |
+| S10 | SBOM generation policy documented | PASS | CycloneDX 1.4 SBOM generated at release time via `.github/scripts/sbom_generator.py`, attached to every GitHub Release as `sbom.cyclonedx.json`. Dev dependencies excluded. Policy and local regeneration command documented in `docs/supply-chain.md`. |
+| S11 | Artifact signing policy documented (or explicitly out of scope with rationale) | PASS | Keyless Sigstore signing via `sigstore/gh-action-sigstore-python@v3.0.0` wired into `release.yml`; per-artifact `<input>.sigstore.json` bundles attached to each GitHub Release alongside wheel, sdist, and SBOM. Verification workflow and workload-identity policy documented in `docs/supply-chain.md`. |
 
-**Passing: 8 / 11**
+**Passing: 11 / 11**
 
 ---
 
@@ -93,10 +93,10 @@ is declared production-ready for v1.0.
 | Category | Passing | Total | % |
 |----------|---------|-------|---|
 | Technical Maturity | 9 | 9 | 100% |
-| Security Posture | 8 | 11 | 73% |
+| Security Posture | 11 | 11 | 100% |
 | Architecture Scalability | 1 | 8 | 13% |
 | Commercial Readiness | 3 | 7 | 43% |
-| **Total** | **21** | **35** | **60%** |
+| **Total** | **24** | **35** | **69%** |
 
 **Target:** 35 / 35 checks passing.
 
@@ -109,6 +109,7 @@ is declared production-ready for v1.0.
 | 2026-04-11 | 7/9 | 5/11 | 1/8 | 3/7 | Scorecard created. 7J merged (DNS TOCTOU fix). README link added. Reconciled T4/T5/A7 for shipped parallel scan work ([8F-ext.1]). T6/T7 shipped: byte-exact golden contract tests for JSON/SARIF/CSV/JUnit. |
 | 2026-04-12 | 9/9 | 5/11 | 1/8 | 3/7 | T8/T9 shipped: synthetic small/medium/large corpora and per-size runtime + throughput thresholds enforced in the Linux pytest job. Technical Maturity category now at 100%. |
 | 2026-04-13 | 9/9 | 8/11 | 1/8 | 3/7 | S5/S7/S8 shipped: 50 adversarial SSRF tests (IPv4-mapped IPv6, unspecified, multicast, mixed-resolution, DNS rebind TOCTOU), full-surface threat model at `docs/threat-model.md`, notifier SSRF fix (unmap IPv4-mapped IPv6 + built-in-property checks). Security category now at 73%. |
+| 2026-04-14 | 9/9 | 11/11 | 1/8 | 3/7 | S9/S10/S11 shipped: pip-audit CI gate with policy-enforced `.pip-audit-ignore.toml`, release-time CycloneDX SBOM via `.github/scripts/sbom_generator.py`, keyless Sigstore signing of wheel+sdist. Baseline CVEs cleared via direct pin bumps (cryptography 46.0.7, pygments 2.20.0). Full supply-chain policy at `docs/supply-chain.md`. Security category at 100%; overall 69%. |
 
 ---
 
@@ -121,7 +122,7 @@ Checks are addressed in this sequence:
     - T6, T7 ✓ Done — byte-exact golden tests for JSON/SARIF/CSV/JUnit
     - T8, T9 ✓ Done — synthetic corpora + runtime/throughput CI thresholds
 3. **S5, S7, S8** ✓ Done — SSRF adversarial tests + threat model doc
-4. **S9, S10, S11** — Supply-chain security gates
+4. **S9, S10, S11** ✓ Done — Supply-chain security gates (pip-audit CI gate, CycloneDX SBOM, Sigstore signing)
 5. **A1–A5** — Plugin API v1 implementation
 6. **A6** — Suppressor + output-sink design doc (v1.1 shape)
 7. **A8** — CI adapter split design doc
