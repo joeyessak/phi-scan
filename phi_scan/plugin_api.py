@@ -258,7 +258,12 @@ class BaseRecognizer(ABC):
             context: Per-line metadata about where the line lives.
 
         Returns:
-            Zero or more ``ScanFinding`` objects. An empty list means
+            A freshly constructed list of zero or more ``ScanFinding``
+            objects. Plugins MUST return a new list on every call and
+            MUST NOT retain or reuse a shared mutable list across
+            invocations — the host may iterate, extend, or otherwise
+            consume the returned list, and aliasing would cause findings
+            from one line to bleed into another. An empty list means
             the line contains nothing this recognizer cares about.
             Raising from ``detect`` is allowed; the host catches the
             exception and drops the batch for that line with a

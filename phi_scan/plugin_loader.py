@@ -134,21 +134,21 @@ def load_plugin_registry() -> PluginRegistry:
         entries and logged at WARNING level.
     """
     sorted_entry_points = _sort_entry_points_deterministically(_discover_entry_points())
-    loaded_plugins, skipped_plugins = _collect_plugin_registry_entries(sorted_entry_points)
+    loaded_plugins, skipped_plugins = _partition_entry_points_into_registry(sorted_entry_points)
     return PluginRegistry(
         loaded=tuple(loaded_plugins),
         skipped=tuple(skipped_plugins),
     )
 
 
-def _collect_plugin_registry_entries(
+def _partition_entry_points_into_registry(
     sorted_entry_points: tuple[EntryPoint, ...],
 ) -> tuple[list[LoadedPlugin], list[SkippedPlugin]]:
     loaded_plugins: list[LoadedPlugin] = []
     skipped_plugins: list[SkippedPlugin] = []
     reserved_names: set[str] = set()
     for entry_point in sorted_entry_points:
-        load_outcome = _evaluate_entry_point(entry_point, reserved_names)
+        load_outcome = _resolve_plugin_from_entry_point(entry_point, reserved_names)
         if isinstance(load_outcome, LoadedPlugin):
             loaded_plugins.append(load_outcome)
             reserved_names.add(load_outcome.recognizer.name)
@@ -183,7 +183,7 @@ def _resolve_distribution_name(entry_point: EntryPoint) -> str | None:
     return distribution.name
 
 
-def _evaluate_entry_point(
+def _resolve_plugin_from_entry_point(
     entry_point: EntryPoint,
     reserved_names: set[str],
 ) -> LoadedPlugin | SkippedPlugin:
@@ -215,6 +215,13 @@ def _resolve_and_validate_recognizer_class(
 
 
 def _load_entry_point_class(entry_point: EntryPoint) -> type[BaseRecognizer]:
+    # ``EntryPoint.load()`` imports the target module and then resolves the
+    # class attribute named in the ``module:Class`` spec. ImportError covers
+    # the import step (module missing, transitive import failure). AttributeError
+    # covers the attribute-resolution step — a publishing package that points
+    # the entry point at a class name that no longer exists in the module
+    # (typo, rename, partial refactor). Both are plugin-metadata problems that
+    # should skip the plugin with a WARNING, not crash the scan.
     try:
         loaded_object = entry_point.load()
     except (ImportError, AttributeError) as load_error:
