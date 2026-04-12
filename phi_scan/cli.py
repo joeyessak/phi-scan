@@ -48,6 +48,7 @@ from phi_scan.ci_integration import (
 from phi_scan.cli_baseline import baseline_app
 from phi_scan.cli_config import config_app
 from phi_scan.cli_explain import explain_app
+from phi_scan.cli_plugins import plugins_app
 from phi_scan.cli_scan_config import load_scan_config
 from phi_scan.compliance import (
     ComplianceFramework,
@@ -161,6 +162,7 @@ app = typer.Typer(
 app.add_typer(config_app)
 app.add_typer(explain_app)
 app.add_typer(baseline_app)
+app.add_typer(plugins_app)
 
 # ---------------------------------------------------------------------------
 # Version flag

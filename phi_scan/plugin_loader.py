@@ -39,6 +39,7 @@ __all__ = [
     "PLUGIN_ENTRY_POINT_GROUP",
     "PluginRegistry",
     "SkippedPlugin",
+    "discover_plugin_registry",
     "load_plugin_registry",
 ]
 
@@ -122,24 +123,39 @@ class PluginRegistry:
     skipped: tuple[SkippedPlugin, ...] = ()
 
 
-def load_plugin_registry() -> PluginRegistry:
+def discover_plugin_registry() -> PluginRegistry:
     """Discover, validate, and instantiate every plugin under the entry-point group.
+
+    Returns the registry without emitting log messages. Use this when the
+    caller will display skipped plugins directly (e.g. ``plugins list``).
 
     Returns:
         A ``PluginRegistry`` with the successfully loaded recognizers
         in ``loaded`` and the rejected ones in ``skipped``. Both
         tuples preserve deterministic discovery order. Never raises;
-        all per-plugin failures are converted to ``SkippedPlugin``
-        entries and logged at WARNING level.
+        all per-plugin failures are converted to ``SkippedPlugin`` entries.
     """
     sorted_entry_points = _sort_entry_points_deterministically(_discover_entry_points())
     loaded_plugins, skipped_plugins = _classify_entry_points(sorted_entry_points)
-    for skipped_plugin in skipped_plugins:
-        _log_skipped_plugin(skipped_plugin)
     return PluginRegistry(
         loaded=tuple(loaded_plugins),
         skipped=tuple(skipped_plugins),
     )
+
+
+def load_plugin_registry() -> PluginRegistry:
+    """Discover, validate, instantiate, and log warnings for every plugin.
+
+    Delegates to ``discover_plugin_registry`` and then emits a
+    WARNING-level log for each skipped plugin. Prefer this function
+    when plugins are loaded silently during a scan; use
+    ``discover_plugin_registry`` when the caller renders the
+    skipped list directly.
+    """
+    registry = discover_plugin_registry()
+    for skipped_plugin in registry.skipped:
+        _log_skipped_plugin(skipped_plugin)
+    return registry
 
 
 def _classify_entry_points(
