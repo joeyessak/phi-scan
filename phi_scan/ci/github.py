@@ -10,7 +10,7 @@ import logging
 import os
 import subprocess
 
-from phi_scan.ci._base import BaseCIAdapter
+from phi_scan.ci._base import BaseCIAdapter, SanitisedCommentBody
 from phi_scan.ci._detect import PRContext
 from phi_scan.ci._env import fetch_environment_variable
 from phi_scan.ci._transport import (
@@ -52,7 +52,7 @@ class GitHubAdapter(BaseCIAdapter):
     def can_upload_sarif(self) -> bool:
         return True
 
-    def post_pr_comment(self, comment_body: str, pr_context: PRContext) -> None:
+    def post_pr_comment(self, comment_body: SanitisedCommentBody, pr_context: PRContext) -> None:
         pr_number = pr_context.pr_number
         if not pr_number:
             _LOG.debug("GitHub: no PR number — skipping comment")

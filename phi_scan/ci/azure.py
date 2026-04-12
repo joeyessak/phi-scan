@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
-from phi_scan.ci._base import BaseCIAdapter
+from phi_scan.ci._base import BaseCIAdapter, SanitisedCommentBody
 from phi_scan.ci._detect import PRContext
 from phi_scan.ci._env import fetch_environment_variable
 from phi_scan.ci._transport import (
@@ -60,7 +60,7 @@ class AzureAdapter(BaseCIAdapter):
     def can_create_work_item(self) -> bool:
         return True
 
-    def post_pr_comment(self, comment_body: str, pr_context: PRContext) -> None:
+    def post_pr_comment(self, comment_body: SanitisedCommentBody, pr_context: PRContext) -> None:
         pr_id = pr_context.pr_number
         repo_id = pr_context.repository
         collection_uri = pr_context.extras.get("collection_uri", "")
@@ -97,4 +97,4 @@ class AzureAdapter(BaseCIAdapter):
         _LOG.debug("Azure DevOps: PR thread comment posted to PR #%s", pr_id)
 
     def set_commit_status(self, scan_result: ScanResult, pr_context: PRContext) -> None:
-        self._raise_unsupported("commit status")
+        self._raise_unsupported_operation_error("commit status")

@@ -49,6 +49,7 @@ from phi_scan.ci import (  # noqa: F401 — backward-compatible re-exports
     get_pr_context,
     resolve_adapter,
 )
+from phi_scan.ci._base import SanitisedCommentBody
 from phi_scan.ci._transport import (
     HttpMethod,
     HttpRequestConfig,
@@ -76,6 +77,7 @@ __all__ = [
     "JenkinsAdapter",
     "OperationLabel",
     "PRContext",
+    "SanitisedCommentBody",
     "build_comment_body",
     "build_comment_body_with_baseline",
     "convert_findings_to_asff",
@@ -223,7 +225,7 @@ def _env(name: str) -> str | None:
 # ---------------------------------------------------------------------------
 
 
-def build_comment_body(scan_result: ScanResult) -> str:
+def build_comment_body(scan_result: ScanResult) -> SanitisedCommentBody:
     """Build a markdown PR/MR comment body from a ``ScanResult``.
 
     The body contains only counts, file names, and line numbers — never raw
@@ -242,7 +244,7 @@ def build_comment_body(scan_result: ScanResult) -> str:
             "",
             f"*Scan duration: {scan_result.scan_duration:.2f}s*",
         ]
-        return "\n".join(body_lines)
+        return SanitisedCommentBody("\n".join(body_lines))
 
     findings_count = len(scan_result.findings)
     header = _COMMENT_HEADER_VIOLATIONS
@@ -301,7 +303,7 @@ def build_comment_body(scan_result: ScanResult) -> str:
         comment_body = (
             comment_body[:_MAX_COMMENT_LENGTH] + "\n\n*(comment truncated — too many findings)*"
         )
-    return comment_body
+    return SanitisedCommentBody(comment_body)
 
 
 def _insert_baseline_context_into_comment(
@@ -318,14 +320,16 @@ def _insert_baseline_context_into_comment(
 def build_comment_body_with_baseline(
     scan_result: ScanResult,
     baseline_comparison: BaselineComparison,
-) -> str:
+) -> SanitisedCommentBody:
     """Build a PR/MR comment body that includes baseline comparison context."""
     baseline_line = _BASELINE_CONTEXT_FORMAT.format(
         new_findings_count=baseline_comparison.new_findings_count,
         baselined_count=baseline_comparison.baselined_count,
         resolved_count=baseline_comparison.resolved_count,
     )
-    return _insert_baseline_context_into_comment(build_comment_body(scan_result), baseline_line)
+    return SanitisedCommentBody(
+        _insert_baseline_context_into_comment(build_comment_body(scan_result), baseline_line)
+    )
 
 
 # ---------------------------------------------------------------------------

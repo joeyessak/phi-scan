@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import logging
 
-from phi_scan.ci._base import BaseCIAdapter
+from phi_scan.ci._base import BaseCIAdapter, SanitisedCommentBody
 from phi_scan.ci._detect import CIPlatform, PRContext
 from phi_scan.ci.github import GitHubAdapter
 from phi_scan.ci.gitlab import GitLabAdapter
@@ -30,7 +30,7 @@ class JenkinsAdapter(BaseCIAdapter):
     def can_post_commit_status(self) -> bool:
         return False
 
-    def post_pr_comment(self, comment_body: str, pr_context: PRContext) -> None:
+    def post_pr_comment(self, comment_body: SanitisedCommentBody, pr_context: PRContext) -> None:
         change_url = pr_context.extras.get("change_url", "")
         if not change_url:
             _LOG.debug("Jenkins: CHANGE_URL not set — skipping comment")
@@ -46,7 +46,7 @@ class JenkinsAdapter(BaseCIAdapter):
             _LOG.warning("Jenkins: unrecognized VCS in CHANGE_URL — skipping comment")
 
     def set_commit_status(self, scan_result: ScanResult, pr_context: PRContext) -> None:
-        self._raise_unsupported("commit status")
+        self._raise_unsupported_operation_error("commit status")
 
 
 def _build_github_context_from_jenkins(change_url: str, pr_context: PRContext) -> PRContext:

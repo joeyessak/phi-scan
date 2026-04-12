@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import logging
 
-from phi_scan.ci._base import BaseCIAdapter
+from phi_scan.ci._base import BaseCIAdapter, SanitisedCommentBody
 from phi_scan.ci._detect import CIPlatform, PRContext
 from phi_scan.ci.bitbucket import BitbucketAdapter
 from phi_scan.ci.github import GitHubAdapter
@@ -30,7 +30,7 @@ class CircleCIAdapter(BaseCIAdapter):
     def can_post_commit_status(self) -> bool:
         return False
 
-    def post_pr_comment(self, comment_body: str, pr_context: PRContext) -> None:
+    def post_pr_comment(self, comment_body: SanitisedCommentBody, pr_context: PRContext) -> None:
         pr_url = pr_context.extras.get("circle_pull_request_url", "")
         if not pr_url:
             _LOG.debug("CircleCI: CIRCLE_PULL_REQUEST not set — skipping comment")
@@ -46,7 +46,7 @@ class CircleCIAdapter(BaseCIAdapter):
             _LOG.warning("CircleCI: unrecognized VCS in CIRCLE_PULL_REQUEST URL — skipping comment")
 
     def set_commit_status(self, scan_result: ScanResult, pr_context: PRContext) -> None:
-        self._raise_unsupported("commit status")
+        self._raise_unsupported_operation_error("commit status")
 
 
 def _build_github_context_from_circle(pr_url: str, pr_context: PRContext) -> PRContext:

@@ -7,16 +7,24 @@ the two core methods: ``post_pr_comment`` and ``set_commit_status``.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
+from typing import NewType
 
 from phi_scan.ci._detect import PRContext
 from phi_scan.exceptions import CIIntegrationError
 from phi_scan.models import ScanResult
 
+SanitisedCommentBody = NewType("SanitisedCommentBody", str)
+"""A comment string verified to contain only hashed references and
+redacted metadata — never raw PHI values, code snippets, or matched
+strings.  Created by ``build_comment_body`` in ``ci_integration``.
+"""
+
 __all__ = [
     "BaseCIAdapter",
+    "SanitisedCommentBody",
 ]
 
-_UNSUPPORTED_OPERATION_MESSAGE: str = "{adapter_name} does not support {operation}"
+_UNSUPPORTED_OPERATION_MESSAGE: str = "{adapter_name} does not support {operation_name}"
 
 
 class BaseCIAdapter(ABC):
@@ -27,14 +35,13 @@ class BaseCIAdapter(ABC):
     """
 
     @abstractmethod
-    def post_pr_comment(self, comment_body: str, pr_context: PRContext) -> None:
+    def post_pr_comment(self, comment_body: SanitisedCommentBody, pr_context: PRContext) -> None:
         """Post a comment on the PR/MR associated with this build.
 
-        **PHI-safety contract:** ``comment_body`` is sent to an external
-        API.  Callers must ensure it contains only hashed references and
-        redacted metadata — never raw PHI values, code snippets, or
-        matched strings.  The formatting functions in ``ci_integration``
-        enforce this; bypass them only with an explicit safety audit.
+        ``comment_body`` is typed as ``SanitisedCommentBody`` to enforce
+        at the type level that only pre-sanitised content (hashed
+        references, redacted metadata) reaches an external API.  Use
+        ``build_comment_body`` in ``ci_integration`` to create one.
 
         Args:
             comment_body: Pre-sanitised Markdown comment text.
@@ -81,22 +88,22 @@ class BaseCIAdapter(ABC):
         """Whether this platform supports AWS Security Hub import."""
         return False
 
-    def _raise_unsupported(self, operation: str) -> None:
+    def _raise_unsupported_operation_error(self, operation_name: str) -> None:
         raise CIIntegrationError(
             _UNSUPPORTED_OPERATION_MESSAGE.format(
                 adapter_name=type(self).__name__,
-                operation=operation,
+                operation_name=operation_name,
             )
         )
 
     def upload_sarif(self, scan_result: ScanResult, pr_context: PRContext) -> None:
         """Upload SARIF to the platform's code scanning API."""
-        self._raise_unsupported("SARIF upload")
+        self._raise_unsupported_operation_error("SARIF upload")
 
-    def upload_code_insights(self, scan_result: ScanResult, pr_context: PRContext) -> None:
+    def annotate_code(self, scan_result: ScanResult, pr_context: PRContext) -> None:
         """Post inline code annotations to the platform."""
-        self._raise_unsupported("code insights")
+        self._raise_unsupported_operation_error("code annotations")
 
     def create_work_item(self, scan_result: ScanResult, pr_context: PRContext) -> None:
         """Create a work item or ticket from scan findings."""
-        self._raise_unsupported("work item creation")
+        self._raise_unsupported_operation_error("work item creation")

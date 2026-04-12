@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import logging
 
-from phi_scan.ci._base import BaseCIAdapter
+from phi_scan.ci._base import BaseCIAdapter, SanitisedCommentBody
 from phi_scan.ci._detect import PRContext
 from phi_scan.ci._env import fetch_environment_variable
 from phi_scan.ci._transport import (
@@ -42,7 +42,7 @@ _SHA_LOG_PREFIX_LENGTH: int = 8
 class GitLabAdapter(BaseCIAdapter):
     """GitLab CI adapter using the GitLab REST API."""
 
-    def post_pr_comment(self, comment_body: str, pr_context: PRContext) -> None:
+    def post_pr_comment(self, comment_body: SanitisedCommentBody, pr_context: PRContext) -> None:
         mr_iid = pr_context.pr_number
         project_id = pr_context.repository
         if not mr_iid or not project_id:
