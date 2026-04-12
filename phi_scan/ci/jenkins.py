@@ -26,6 +26,10 @@ _MIN_URL_PARTS_FOR_REPO_EXTRACTION: int = 5
 class JenkinsAdapter(BaseCIAdapter):
     """Jenkins adapter that delegates to GitHub or GitLab based on VCS."""
 
+    @property
+    def supports_commit_status(self) -> bool:
+        return False
+
     def post_pr_comment(self, comment_body: str, pr_context: PRContext) -> None:
         change_url = pr_context.extras.get("change_url", "")
         if not change_url:
@@ -42,7 +46,7 @@ class JenkinsAdapter(BaseCIAdapter):
             _LOG.warning("Jenkins: unrecognized VCS in CHANGE_URL — skipping comment")
 
     def set_commit_status(self, scan_result: ScanResult, pr_context: PRContext) -> None:
-        _LOG.debug("Jenkins: commit status handled via underlying VCS platform")
+        _LOG.debug("Jenkins: commit status not supported via adapter")
 
 
 def _build_github_context_from_jenkins(change_url: str, pr_context: PRContext) -> PRContext:

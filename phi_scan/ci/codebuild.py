@@ -3,9 +3,6 @@
 CodeBuild is a meta-platform that delegates PR comment posting to
 GitHub or Bitbucket based on the source repository URL detected from
 ``CODEBUILD_SOURCE_REPO_URL``.
-
-Note: AWS Security Hub ASFF import remains in ``ci_integration.py``
-for now and will be migrated in a follow-up PR.
 """
 
 from __future__ import annotations
@@ -30,6 +27,10 @@ class CodeBuildAdapter(BaseCIAdapter):
     """AWS CodeBuild adapter that delegates to GitHub or Bitbucket."""
 
     @property
+    def supports_commit_status(self) -> bool:
+        return False
+
+    @property
     def supports_security_hub(self) -> bool:
         return True
 
@@ -45,7 +46,7 @@ class CodeBuildAdapter(BaseCIAdapter):
             _LOG.warning("CodeBuild: unrecognised source repo URL — skipping PR comment")
 
     def set_commit_status(self, scan_result: ScanResult, pr_context: PRContext) -> None:
-        _LOG.debug("CodeBuild: commit status handled via underlying VCS platform")
+        _LOG.debug("CodeBuild: commit status not supported via adapter")
 
 
 def _build_github_context_from_codebuild(repo_url: str, pr_context: PRContext) -> PRContext:

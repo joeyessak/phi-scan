@@ -56,16 +56,16 @@ class HttpRequestConfig:
 
 
 def _assemble_request_options(request_config: HttpRequestConfig) -> dict[str, Any]:
-    options: dict[str, Any] = {"timeout": request_config.timeout_seconds}
+    request_options: dict[str, Any] = {"timeout": request_config.timeout_seconds}
     if request_config.headers is not None:
-        options["headers"] = request_config.headers
+        request_options["headers"] = request_config.headers
     if request_config.json_body is not None:
-        options["json"] = request_config.json_body
+        request_options["json"] = request_config.json_body
     if request_config.binary_body is not None:
-        options["content"] = request_config.binary_body
+        request_options["content"] = request_config.binary_body
     if request_config.auth is not None:
-        options["auth"] = request_config.auth
-    return options
+        request_options["auth"] = request_config.auth
+    return request_options
 
 
 def execute_http_request(request_config: HttpRequestConfig) -> httpx.Response:
@@ -80,9 +80,9 @@ def execute_http_request(request_config: HttpRequestConfig) -> httpx.Response:
     Raises:
         CIIntegrationError: On HTTP 4xx/5xx or any network error.
     """
-    options = _assemble_request_options(request_config)
+    request_options = _assemble_request_options(request_config)
     try:
-        response = httpx.request(request_config.method, request_config.url, **options)
+        response = httpx.request(request_config.method, request_config.url, **request_options)
         response.raise_for_status()
     except httpx.HTTPStatusError as status_error:
         raise CIIntegrationError(

@@ -2,9 +2,6 @@
 
 Posts PR comments and sets commit build statuses via the Bitbucket
 Cloud REST API. Uses ``BITBUCKET_TOKEN`` for authentication.
-
-Note: Bitbucket Code Insights (report + annotations) remains in
-``ci_integration.py`` for now and will be migrated in a follow-up PR.
 """
 
 from __future__ import annotations
@@ -100,7 +97,7 @@ class BitbucketAdapter(BaseCIAdapter):
         payload = {
             "key": _COMMIT_STATUS_CONTEXT,
             "state": state,
-            "name": "phi-scan",
+            "name": _COMMIT_STATUS_CONTEXT,
             "description": (
                 _COMMIT_STATUS_DESCRIPTION_CLEAN
                 if scan_result.is_clean

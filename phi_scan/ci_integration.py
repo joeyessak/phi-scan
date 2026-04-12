@@ -341,6 +341,13 @@ def set_commit_status(scan_result: ScanResult, pr_context: PRContext) -> None:
         )
         return
 
+    if not adapter.supports_commit_status:
+        _LOG.debug(
+            "Adapter %s does not support commit status — skipping",
+            type(adapter).__name__,
+        )
+        return
+
     adapter.set_commit_status(scan_result, pr_context)
 
 

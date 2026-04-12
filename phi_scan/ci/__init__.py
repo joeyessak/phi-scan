@@ -27,22 +27,6 @@ from phi_scan.ci.github import GitHubAdapter
 from phi_scan.ci.gitlab import GitLabAdapter
 from phi_scan.ci.jenkins import JenkinsAdapter
 
-__all__ = [
-    "AzureAdapter",
-    "BaseCIAdapter",
-    "BitbucketAdapter",
-    "CIPlatform",
-    "CircleCIAdapter",
-    "CodeBuildAdapter",
-    "GitHubAdapter",
-    "GitLabAdapter",
-    "JenkinsAdapter",
-    "PRContext",
-    "detect_platform",
-    "get_pr_context",
-    "resolve_adapter",
-]
-
 _PLATFORM_ADAPTERS: dict[CIPlatform, type[BaseCIAdapter]] = {
     CIPlatform.GITHUB_ACTIONS: GitHubAdapter,
     CIPlatform.GITLAB_CI: GitLabAdapter,
@@ -60,3 +44,20 @@ def resolve_adapter(platform: CIPlatform) -> BaseCIAdapter | None:
     if adapter_class is None:
         return None
     return adapter_class()
+
+
+__all__ = [
+    "AzureAdapter",
+    "BaseCIAdapter",
+    "BitbucketAdapter",
+    "CIPlatform",
+    "CircleCIAdapter",
+    "CodeBuildAdapter",
+    "GitHubAdapter",
+    "GitLabAdapter",
+    "JenkinsAdapter",
+    "PRContext",
+    "detect_platform",
+    "get_pr_context",
+    "resolve_adapter",
+]

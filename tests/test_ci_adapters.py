@@ -90,6 +90,19 @@ def test_codebuild_supports_security_hub() -> None:
     assert CodeBuildAdapter().supports_security_hub is True
 
 
+def test_adapters_with_commit_status_support() -> None:
+    assert GitHubAdapter().supports_commit_status is True
+    assert GitLabAdapter().supports_commit_status is True
+    assert BitbucketAdapter().supports_commit_status is True
+
+
+def test_adapters_without_commit_status_support() -> None:
+    assert AzureAdapter().supports_commit_status is False
+    assert JenkinsAdapter().supports_commit_status is False
+    assert CircleCIAdapter().supports_commit_status is False
+    assert CodeBuildAdapter().supports_commit_status is False
+
+
 def test_gitlab_default_capabilities_are_false() -> None:
     adapter = GitLabAdapter()
     assert adapter.supports_sarif_upload is False

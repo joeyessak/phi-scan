@@ -167,21 +167,18 @@ def read_env_variable(name: str) -> str | None:
     return env_value if env_value else None
 
 
-_env = read_env_variable
-
-
 def _build_github_context() -> PRContext:
-    pr_number = _env(_ENV_PR_NUMBER)
+    pr_number = read_env_variable(_ENV_PR_NUMBER)
     if not pr_number:
-        ref = _env(_ENV_GITHUB_REF) or ""
+        ref = read_env_variable(_ENV_GITHUB_REF) or ""
         if ref.startswith(_GITHUB_PR_REF_PREFIX):
             pr_number = ref.split("/")[_GITHUB_PR_REF_NUMBER_INDEX]
     return PRContext(
         platform=CIPlatform.GITHUB_ACTIONS,
         pr_number=pr_number,
-        repository=_env(_ENV_GITHUB_REPOSITORY),
-        sha=_env(_ENV_GITHUB_SHA),
-        branch=_env(_ENV_GITHUB_REF),
+        repository=read_env_variable(_ENV_GITHUB_REPOSITORY),
+        sha=read_env_variable(_ENV_GITHUB_SHA),
+        branch=read_env_variable(_ENV_GITHUB_REF),
         base_branch=None,
     )
 
@@ -189,13 +186,13 @@ def _build_github_context() -> PRContext:
 def _build_gitlab_context() -> PRContext:
     return PRContext(
         platform=CIPlatform.GITLAB_CI,
-        pr_number=_env(_ENV_CI_MERGE_REQUEST_IID),
-        repository=_env(_ENV_CI_PROJECT_ID),
-        sha=_env(_ENV_CI_COMMIT_SHA),
-        branch=_env(_ENV_CI_COMMIT_REF_NAME),
+        pr_number=read_env_variable(_ENV_CI_MERGE_REQUEST_IID),
+        repository=read_env_variable(_ENV_CI_PROJECT_ID),
+        sha=read_env_variable(_ENV_CI_COMMIT_SHA),
+        branch=read_env_variable(_ENV_CI_COMMIT_REF_NAME),
         base_branch=None,
         extras={
-            "ci_server_url": _env(_ENV_CI_SERVER_URL) or _GITLAB_DEFAULT_SERVER_URL,
+            "ci_server_url": read_env_variable(_ENV_CI_SERVER_URL) or _GITLAB_DEFAULT_SERVER_URL,
         },
     )
 
@@ -207,24 +204,25 @@ def _normalize_trailing_slash(uri: str) -> str:
 
 
 def _build_azure_context() -> PRContext:
-    collection_uri = _normalize_trailing_slash(_env(_ENV_SYSTEM_TEAMFOUNDATIONCOLLECTIONURI) or "")
+    raw_uri = read_env_variable(_ENV_SYSTEM_TEAMFOUNDATIONCOLLECTIONURI) or ""
+    collection_uri = _normalize_trailing_slash(raw_uri)
     return PRContext(
         platform=CIPlatform.AZURE_DEVOPS,
-        pr_number=_env(_ENV_SYSTEM_PULLREQUEST_PULLREQUESTID),
-        repository=_env(_ENV_BUILD_REPOSITORY_ID),
-        sha=_env(_ENV_BUILD_SOURCEVERSION),
+        pr_number=read_env_variable(_ENV_SYSTEM_PULLREQUEST_PULLREQUESTID),
+        repository=read_env_variable(_ENV_BUILD_REPOSITORY_ID),
+        sha=read_env_variable(_ENV_BUILD_SOURCEVERSION),
         branch=None,
         base_branch=None,
         extras={
             "collection_uri": collection_uri,
-            "team_project": _env(_ENV_SYSTEM_TEAMPROJECT) or "",
-            "build_id": _env(_ENV_BUILD_BUILDID) or "",
+            "team_project": read_env_variable(_ENV_SYSTEM_TEAMPROJECT) or "",
+            "build_id": read_env_variable(_ENV_BUILD_BUILDID) or "",
         },
     )
 
 
 def _build_circleci_context() -> PRContext:
-    pr_url = _env(_ENV_CIRCLE_PULL_REQUEST) or ""
+    pr_url = read_env_variable(_ENV_CIRCLE_PULL_REQUEST) or ""
     pr_number: str | None = None
     if pr_url:
         parts = pr_url.rstrip("/").split("/")
@@ -236,8 +234,8 @@ def _build_circleci_context() -> PRContext:
         platform=CIPlatform.CIRCLECI,
         pr_number=pr_number,
         repository=None,
-        sha=_env(_ENV_CIRCLE_SHA1),
-        branch=_env(_ENV_CIRCLE_BRANCH),
+        sha=read_env_variable(_ENV_CIRCLE_SHA1),
+        branch=read_env_variable(_ENV_CIRCLE_BRANCH),
         base_branch=None,
         extras={"circle_pull_request_url": pr_url},
     )
@@ -246,20 +244,20 @@ def _build_circleci_context() -> PRContext:
 def _build_bitbucket_context() -> PRContext:
     return PRContext(
         platform=CIPlatform.BITBUCKET,
-        pr_number=_env(_ENV_BITBUCKET_PR_ID),
-        repository=_env(_ENV_BITBUCKET_REPO_SLUG),
-        sha=_env(_ENV_BITBUCKET_COMMIT),
+        pr_number=read_env_variable(_ENV_BITBUCKET_PR_ID),
+        repository=read_env_variable(_ENV_BITBUCKET_REPO_SLUG),
+        sha=read_env_variable(_ENV_BITBUCKET_COMMIT),
         branch=None,
         base_branch=None,
         extras={
-            "workspace": _env(_ENV_BITBUCKET_WORKSPACE) or "",
-            "repo_slug": _env(_ENV_BITBUCKET_REPO_SLUG) or "",
+            "workspace": read_env_variable(_ENV_BITBUCKET_WORKSPACE) or "",
+            "repo_slug": read_env_variable(_ENV_BITBUCKET_REPO_SLUG) or "",
         },
     )
 
 
 def _build_codebuild_context() -> PRContext:
-    trigger = _env(_ENV_CODEBUILD_WEBHOOK_TRIGGER) or ""
+    trigger = read_env_variable(_ENV_CODEBUILD_WEBHOOK_TRIGGER) or ""
     pr_number: str | None = None
     if trigger.startswith(_CODEBUILD_PR_TRIGGER_PREFIX):
         pr_number = trigger[len(_CODEBUILD_PR_TRIGGER_PREFIX) :]
@@ -267,21 +265,21 @@ def _build_codebuild_context() -> PRContext:
         platform=CIPlatform.CODEBUILD,
         pr_number=pr_number,
         repository=None,
-        sha=_env(_ENV_CODEBUILD_SOURCE_VERSION),
+        sha=read_env_variable(_ENV_CODEBUILD_SOURCE_VERSION),
         branch=None,
-        base_branch=_env(_ENV_CODEBUILD_WEBHOOK_BASE_REF),
+        base_branch=read_env_variable(_ENV_CODEBUILD_WEBHOOK_BASE_REF),
     )
 
 
 def _build_jenkins_context() -> PRContext:
     return PRContext(
         platform=CIPlatform.JENKINS,
-        pr_number=_env(_ENV_CHANGE_ID),
+        pr_number=read_env_variable(_ENV_CHANGE_ID),
         repository=None,
         sha=None,
         branch=None,
         base_branch=None,
-        extras={"change_url": _env(_ENV_CHANGE_URL) or ""},
+        extras={"change_url": read_env_variable(_ENV_CHANGE_URL) or ""},
     )
 
 

@@ -26,6 +26,10 @@ _MIN_URL_PARTS_FOR_REPO_EXTRACTION: int = 5
 class CircleCIAdapter(BaseCIAdapter):
     """CircleCI adapter that delegates to GitHub or Bitbucket."""
 
+    @property
+    def supports_commit_status(self) -> bool:
+        return False
+
     def post_pr_comment(self, comment_body: str, pr_context: PRContext) -> None:
         pr_url = pr_context.extras.get("circle_pull_request_url", "")
         if not pr_url:
@@ -42,7 +46,7 @@ class CircleCIAdapter(BaseCIAdapter):
             _LOG.warning("CircleCI: unrecognized VCS in CIRCLE_PULL_REQUEST URL — skipping comment")
 
     def set_commit_status(self, scan_result: ScanResult, pr_context: PRContext) -> None:
-        _LOG.debug("CircleCI: commit status handled via underlying VCS platform")
+        _LOG.debug("CircleCI: commit status not supported via adapter")
 
 
 def _build_github_context_from_circle(pr_url: str, pr_context: PRContext) -> PRContext:

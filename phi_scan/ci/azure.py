@@ -2,10 +2,6 @@
 
 Posts PR thread comments via the Azure DevOps REST API.
 Uses ``SYSTEM_ACCESSTOKEN`` for authentication.
-
-Note: Azure-specific extras (build tags, PR statuses, Boards work items)
-remain in ``ci_integration.py`` for now and will be migrated in a
-follow-up PR.
 """
 
 from __future__ import annotations
@@ -32,6 +28,10 @@ _COMMIT_STATUS_CONTEXT: str = "phi-scan"
 
 class AzureAdapter(BaseCIAdapter):
     """Azure DevOps adapter using the Azure DevOps REST API."""
+
+    @property
+    def supports_commit_status(self) -> bool:
+        return False
 
     @property
     def supports_work_item_creation(self) -> bool:
@@ -80,10 +80,4 @@ class AzureAdapter(BaseCIAdapter):
         _LOG.debug("Azure DevOps: PR thread comment posted to PR #%s", pr_id)
 
     def set_commit_status(self, scan_result: ScanResult, pr_context: PRContext) -> None:
-        """Azure DevOps does not have a standalone commit status API.
-
-        Commit status is handled via ``set_azure_pr_status`` (a platform-
-        specific extra) which remains in ``ci_integration.py`` for now.
-        This method is a no-op; the CLI calls the extra directly.
-        """
-        _LOG.debug("Azure DevOps: commit status handled via set_azure_pr_status extra")
+        _LOG.debug("Azure DevOps: commit status not supported via adapter")

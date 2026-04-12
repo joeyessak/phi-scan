@@ -51,6 +51,11 @@ class BaseCIAdapter(ABC):
         """
 
     @property
+    def supports_commit_status(self) -> bool:
+        """Whether this platform supports setting commit status directly."""
+        return True
+
+    @property
     def supports_sarif_upload(self) -> bool:
         """Whether this platform supports native SARIF ingestion."""
         return False
