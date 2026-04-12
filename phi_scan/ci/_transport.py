@@ -60,7 +60,7 @@ class HttpRequestConfig:
     headers: dict[str, str] | None = None
     json_body: dict[str, Any] | list[Any] | None = None
     binary_body: bytes | None = None
-    auth: tuple[str, str] | None = None
+    basic_auth_credentials: tuple[str, str] | None = None
     timeout_seconds: float = _HTTP_TIMEOUT_SECONDS
 
 
@@ -72,8 +72,8 @@ def _assemble_request_options(request_config: HttpRequestConfig) -> dict[str, An
         request_options["json"] = request_config.json_body
     if request_config.binary_body is not None:
         request_options["content"] = request_config.binary_body
-    if request_config.auth is not None:
-        request_options["auth"] = request_config.auth
+    if request_config.basic_auth_credentials is not None:
+        request_options["auth"] = request_config.basic_auth_credentials
     return request_options
 
 

@@ -598,7 +598,7 @@ def set_azure_build_tag(scan_result: ScanResult, pr_context: PRContext) -> None:
             url=url,
             operation_label="Azure DevOps build tag",
             binary_body=_AZURE_BUILD_TAG_EMPTY_BODY,
-            auth=("", token),
+            basic_auth_credentials=("", token),
         )
     )
 
@@ -650,7 +650,7 @@ def set_azure_pr_status(scan_result: ScanResult, pr_context: PRContext) -> None:
             url=url,
             operation_label="Azure DevOps PR status",
             json_body=payload,
-            auth=("", token),
+            basic_auth_credentials=("", token),
         )
     )
 
@@ -717,7 +717,7 @@ def create_azure_boards_work_item(scan_result: ScanResult, pr_context: PRContext
             operation_label="Azure Boards work item",
             headers={"Content-Type": _AZURE_PATCH_CONTENT_TYPE},
             json_body=patch_payload,
-            auth=("", token),
+            basic_auth_credentials=("", token),
         )
     )
 

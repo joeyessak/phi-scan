@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 
 from phi_scan.ci._base import BaseCIAdapter
-from phi_scan.ci._detect import PRContext, fetch_env_variable
+from phi_scan.ci._detect import PRContext, fetch_environment_variable
 from phi_scan.ci._transport import HttpMethod, HttpRequestConfig, execute_http_request
 from phi_scan.models import ScanResult
 
@@ -22,8 +22,12 @@ _GITLAB_DEFAULT_SERVER_URL: str = "https://gitlab.com"
 _GITLAB_API_MR_NOTES_PATH: str = "/api/v4/projects/{project_id}/merge_requests/{mr_iid}/notes"
 _GITLAB_API_COMMIT_STATUSES_PATH: str = "/api/v4/projects/{project_id}/statuses/{sha}"
 
+_HTTP_HEADER_PRIVATE_TOKEN: str = "PRIVATE-TOKEN"
+_HTTP_HEADER_CONTENT_TYPE: str = "Content-Type"
 _JSON_CONTENT_TYPE: str = "application/json"
 _COMMIT_STATUS_CONTEXT: str = "phi-scan"
+_GITLAB_STATUS_SUCCESS: str = "success"
+_GITLAB_STATUS_FAILED: str = "failed"
 _COMMIT_STATUS_DESCRIPTION_CLEAN: str = "No PHI/PII violations found"
 _COMMIT_STATUS_DESCRIPTION_VIOLATIONS: str = "{count} PHI/PII violation(s) found"
 _SHA_LOG_PREFIX_LENGTH: int = 8
@@ -39,7 +43,9 @@ class GitLabAdapter(BaseCIAdapter):
             _LOG.debug("GitLab: missing MR IID or project ID — skipping comment")
             return
 
-        token = fetch_env_variable(_ENV_GITLAB_TOKEN) or fetch_env_variable(_ENV_CI_JOB_TOKEN)
+        token = fetch_environment_variable(_ENV_GITLAB_TOKEN) or fetch_environment_variable(
+            _ENV_CI_JOB_TOKEN
+        )
         if not token:
             _LOG.warning("GitLab: GITLAB_TOKEN and CI_JOB_TOKEN not set — skipping comment")
             return
@@ -49,7 +55,7 @@ class GitLabAdapter(BaseCIAdapter):
             project_id=project_id,
             mr_iid=mr_iid,
         )
-        headers = {"PRIVATE-TOKEN": token, "Content-Type": _JSON_CONTENT_TYPE}
+        headers = {_HTTP_HEADER_PRIVATE_TOKEN: token, _HTTP_HEADER_CONTENT_TYPE: _JSON_CONTENT_TYPE}
         payload = {"body": comment_body}
 
         execute_http_request(
@@ -71,19 +77,23 @@ class GitLabAdapter(BaseCIAdapter):
             _LOG.debug("GitLab: missing SHA or project ID — skipping status")
             return
 
-        token = fetch_env_variable(_ENV_GITLAB_TOKEN) or fetch_env_variable(_ENV_CI_JOB_TOKEN)
+        token = fetch_environment_variable(_ENV_GITLAB_TOKEN) or fetch_environment_variable(
+            _ENV_CI_JOB_TOKEN
+        )
         if not token:
             _LOG.warning("GitLab: no token — skipping commit status")
             return
 
         server_url = pr_context.extras.get("ci_server_url") or _GITLAB_DEFAULT_SERVER_URL
-        state = "success" if scan_result.is_clean else "failed"
+        commit_status_state = (
+            _GITLAB_STATUS_SUCCESS if scan_result.is_clean else _GITLAB_STATUS_FAILED
+        )
         url = server_url.rstrip("/") + _GITLAB_API_COMMIT_STATUSES_PATH.format(
             project_id=project_id,
             sha=sha,
         )
         payload = {
-            "state": state,
+            "state": commit_status_state,
             "name": _COMMIT_STATUS_CONTEXT,
             "description": (
                 _COMMIT_STATUS_DESCRIPTION_CLEAN
@@ -97,9 +107,10 @@ class GitLabAdapter(BaseCIAdapter):
                 method=HttpMethod.POST,
                 url=url,
                 operation_label="GitLab commit status",
-                headers={"PRIVATE-TOKEN": token},
+                headers={_HTTP_HEADER_PRIVATE_TOKEN: token},
                 json_body=payload,
             )
         )
 
-        _LOG.debug("GitLab: commit status set to %s for %s", state, sha[:_SHA_LOG_PREFIX_LENGTH])
+        sha_prefix = sha[:_SHA_LOG_PREFIX_LENGTH]
+        _LOG.debug("GitLab: commit status set to %s for %s", commit_status_state, sha_prefix)

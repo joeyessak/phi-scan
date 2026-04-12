@@ -7,9 +7,10 @@ Uses ``SYSTEM_ACCESSTOKEN`` for authentication.
 from __future__ import annotations
 
 import logging
+from typing import Any
 
 from phi_scan.ci._base import BaseCIAdapter
-from phi_scan.ci._detect import PRContext, fetch_env_variable
+from phi_scan.ci._detect import PRContext, fetch_environment_variable
 from phi_scan.ci._transport import HttpMethod, HttpRequestConfig, execute_http_request
 from phi_scan.models import ScanResult
 
@@ -27,6 +28,19 @@ _COMMIT_STATUS_CONTEXT: str = "phi-scan"
 _AZURE_COMMENT_PARENT_ID_ROOT: int = 0
 _AZURE_COMMENT_TYPE_TEXT: int = 1
 _AZURE_THREAD_STATUS_ACTIVE: str = "active"
+
+
+def _build_azure_thread_payload(comment_body: str) -> dict[str, Any]:
+    return {
+        "comments": [
+            {
+                "parentCommentId": _AZURE_COMMENT_PARENT_ID_ROOT,
+                "content": comment_body,
+                "commentType": _AZURE_COMMENT_TYPE_TEXT,
+            }
+        ],
+        "status": _AZURE_THREAD_STATUS_ACTIVE,
+    }
 
 
 class AzureAdapter(BaseCIAdapter):
@@ -50,7 +64,7 @@ class AzureAdapter(BaseCIAdapter):
             _LOG.debug("Azure DevOps: missing PR context — skipping comment")
             return
 
-        token = fetch_env_variable(_ENV_SYSTEM_ACCESSTOKEN)
+        token = fetch_environment_variable(_ENV_SYSTEM_ACCESSTOKEN)
         if not token:
             _LOG.warning(
                 "Azure DevOps: SYSTEM_ACCESSTOKEN not set — "
@@ -65,27 +79,15 @@ class AzureAdapter(BaseCIAdapter):
             pr_id=pr_id,
             api_version=_AZURE_API_VERSION,
         )
-        payload = {
-            "comments": [
-                {
-                    "parentCommentId": _AZURE_COMMENT_PARENT_ID_ROOT,
-                    "content": comment_body,
-                    "commentType": _AZURE_COMMENT_TYPE_TEXT,
-                }
-            ],
-            "status": _AZURE_THREAD_STATUS_ACTIVE,
-        }
-
         execute_http_request(
             HttpRequestConfig(
                 method=HttpMethod.POST,
                 url=url,
                 operation_label="Azure DevOps PR comment",
-                json_body=payload,
-                auth=("", token),
+                json_body=_build_azure_thread_payload(comment_body),
+                basic_auth_credentials=("", token),
             )
         )
-
         _LOG.debug("Azure DevOps: PR thread comment posted to PR #%s", pr_id)
 
     def set_commit_status(self, scan_result: ScanResult, pr_context: PRContext) -> None:
