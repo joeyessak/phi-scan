@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 import os
 
-from phi_scan.ci._base import BaseCIAdapter, SanitisedCommentBody
+from phi_scan.ci._base import BaseCIAdapter, SanitisedCommentBody, UnsupportedOperation
 from phi_scan.ci._detect import CIPlatform, PRContext
 from phi_scan.ci.bitbucket import BitbucketAdapter
 from phi_scan.ci.github import GitHubAdapter
@@ -46,7 +46,7 @@ class CodeBuildAdapter(BaseCIAdapter):
             _LOG.warning("CodeBuild: unrecognised source repo URL — skipping PR comment")
 
     def set_commit_status(self, scan_result: ScanResult, pr_context: PRContext) -> None:
-        self._raise_unsupported_operation_error("commit status")
+        self._raise_unsupported_operation_error(UnsupportedOperation.COMMIT_STATUS)
 
 
 def _build_github_context_from_codebuild(repo_url: str, pr_context: PRContext) -> PRContext:

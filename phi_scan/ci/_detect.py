@@ -82,6 +82,7 @@ _GITHUB_PR_REF_NUMBER_INDEX: int = 2
 # CodeBuild webhook trigger prefix for PR detection (e.g. "pr/42")
 _CODEBUILD_PR_TRIGGER_PREFIX: str = "pr/"
 _URL_LAST_SEGMENT_INDEX: int = -1
+_URL_PATH_SEPARATOR: str = "/"
 
 # Sentinel values for CI platform detection env vars
 _CI_ENV_SENTINEL_TRUE: str = "true"
@@ -201,8 +202,8 @@ def _build_gitlab_context() -> PRContext:
 
 
 def _normalise_collection_url(collection_url: str) -> str:
-    if collection_url and not collection_url.endswith("/"):
-        return collection_url + "/"
+    if collection_url and not collection_url.endswith(_URL_PATH_SEPARATOR):
+        return collection_url + _URL_PATH_SEPARATOR
     return collection_url
 
 

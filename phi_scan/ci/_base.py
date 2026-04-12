@@ -6,12 +6,24 @@ the two core methods: ``post_pr_comment`` and ``set_commit_status``.
 
 from __future__ import annotations
 
+import enum
 from abc import ABC, abstractmethod
 from typing import NewType
 
 from phi_scan.ci._detect import PRContext
 from phi_scan.exceptions import CIIntegrationError
 from phi_scan.models import ScanResult
+
+
+class UnsupportedOperation(enum.StrEnum):
+    """Named operations that an adapter may not support."""
+
+    COMMIT_STATUS = "commit status"
+    SARIF_UPLOAD = "SARIF upload"
+    CODE_ANNOTATIONS = "code annotations"
+    WORK_ITEM_CREATION = "work item creation"
+    SECURITY_HUB_IMPORT = "Security Hub import"
+
 
 SanitisedCommentBody = NewType("SanitisedCommentBody", str)
 """A comment string verified to contain only hashed references and
@@ -88,7 +100,7 @@ class BaseCIAdapter(ABC):
         """Whether this platform supports AWS Security Hub import."""
         return False
 
-    def _raise_unsupported_operation_error(self, operation_name: str) -> None:
+    def _raise_unsupported_operation_error(self, operation_name: UnsupportedOperation) -> None:
         raise CIIntegrationError(
             _UNSUPPORTED_OPERATION_MESSAGE.format(
                 adapter_name=type(self).__name__,
@@ -98,16 +110,16 @@ class BaseCIAdapter(ABC):
 
     def upload_sarif(self, scan_result: ScanResult, pr_context: PRContext) -> None:
         """Upload SARIF to the platform's code scanning API."""
-        self._raise_unsupported_operation_error("SARIF upload")
+        self._raise_unsupported_operation_error(UnsupportedOperation.SARIF_UPLOAD)
 
     def annotate_code(self, scan_result: ScanResult, pr_context: PRContext) -> None:
         """Post inline code annotations to the platform."""
-        self._raise_unsupported_operation_error("code annotations")
+        self._raise_unsupported_operation_error(UnsupportedOperation.CODE_ANNOTATIONS)
 
     def create_work_item(self, scan_result: ScanResult, pr_context: PRContext) -> None:
         """Create a work item or ticket from scan findings."""
-        self._raise_unsupported_operation_error("work item creation")
+        self._raise_unsupported_operation_error(UnsupportedOperation.WORK_ITEM_CREATION)
 
     def import_to_security_hub(self, scan_result: ScanResult, pr_context: PRContext) -> None:
         """Import findings into AWS Security Hub."""
-        self._raise_unsupported_operation_error("Security Hub import")
+        self._raise_unsupported_operation_error(UnsupportedOperation.SECURITY_HUB_IMPORT)

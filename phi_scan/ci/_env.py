@@ -8,8 +8,10 @@ from __future__ import annotations
 
 import os
 
+_ENV_DEFAULT_EMPTY: str = ""
+
 
 def fetch_environment_variable(name: str) -> str | None:
     """Return the environment variable value, or None if unset or empty."""
-    raw_env_string = os.environ.get(name, "").strip()
+    raw_env_string = os.environ.get(name, _ENV_DEFAULT_EMPTY).strip()
     return raw_env_string if raw_env_string else None
