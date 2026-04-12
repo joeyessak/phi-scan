@@ -185,6 +185,11 @@ Security audit, performance hardening, enterprise features, and public launch.
 - Performance optimisation (target: 10k files/sec)
 - Enterprise SSO and audit log API
 - Signed plugin registry
+- Organisation migration from `joeyessak/*` to `phiscanhq/*` — planned,
+  not started. Blocked on pristine signoff; runbook in
+  [docs/org-migration-checklist.md](docs/org-migration-checklist.md).
+  GitHub Marketplace publication of `phi-scan-action` is deferred until
+  post-migration.
 - Public launch: ProductHunt, Hacker News, security community outreach
 
 ---

@@ -266,7 +266,12 @@ Copy-paste templates for all CI platforms: [docs/ci-cd-integration.md](docs/ci-c
 > **GitHub Action:** The [`phi-scan-action`](https://github.com/joeyessak/phi-scan-action)
 > composite action provides one-liner GitHub CI/CD integration with SARIF upload,
 > PR comment, diff-only scanning, and AI review support. GitHub Marketplace
-> publication is pending org migration.
+> publication is deferred pending org migration completion + post-pristine signoff.
+>
+> Note: Organization migration to `phiscanhq` is planned after pristine signoff.
+> No action is required from users during planning; GitHub redirects will be used
+> during transfer. See [docs/org-migration-checklist.md](docs/org-migration-checklist.md)
+> for the operational runbook.
 
 ---
 
