@@ -9,7 +9,7 @@ import time
 from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Annotated, Any
+from typing import Annotated, Any
 
 import pathspec
 import typer
@@ -118,9 +118,6 @@ from phi_scan.scanner import (
     run_parallel_scan,
     scan_file,
 )
-
-if TYPE_CHECKING:
-    pass
 
 __all__ = ["app"]
 
