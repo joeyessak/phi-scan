@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import logging
 from collections import Counter
+from dataclasses import dataclass
 from pathlib import Path
 
 from phi_scan.constants import (
@@ -27,7 +28,6 @@ from phi_scan.constants import (
 from phi_scan.hashing import compute_value_hash, severity_from_confidence
 from phi_scan.models import ScanFinding
 from phi_scan.plugin_api import (
-    BaseRecognizer,
     ScanContext,
 )
 from phi_scan.plugin_api import (
@@ -57,6 +57,25 @@ _PLUGIN_WARNING_LOG: str = "Plugin %r at %s:%d — %s"
 _PLUGIN_SUMMARY_LOG: str = "Plugin %r produced %d warnings during this scan (first %d shown above)"
 
 
+@dataclass(frozen=True)
+class _PluginLineInvocation:
+    """One plugin's invocation against one line of one file."""
+
+    loaded_plugin: LoadedPlugin
+    line_text: str
+    context: ScanContext
+    file_path: Path
+
+
+@dataclass(frozen=True)
+class _PluginFindingValidation:
+    """A single plugin-reported finding paired with its invocation context."""
+
+    plugin_finding: PluginScanFinding
+    invocation: _PluginLineInvocation
+    declared_entity_types: frozenset[str]
+
+
 class _RecognizerWarningBudget:
     """Tracks warning emissions per recognizer for the duration of one scan."""
 
@@ -64,7 +83,7 @@ class _RecognizerWarningBudget:
         self._limit = limit
         self._counts: Counter[str] = Counter()
 
-    def claim_warning_slot(self, recognizer_name: str) -> bool:
+    def claim_recognizer_warning_slot(self, recognizer_name: str) -> bool:
         """Claim one warning slot for ``recognizer_name``; return ``True`` if granted.
 
         Each call consumes one slot regardless of the return value — the
@@ -75,6 +94,19 @@ class _RecognizerWarningBudget:
         """
         self._counts[recognizer_name] += 1
         return self._counts[recognizer_name] <= self._limit
+
+    def log_recognizer_warning(
+        self, recognizer_name: str, context: ScanContext, message: str
+    ) -> None:
+        if not self.claim_recognizer_warning_slot(recognizer_name):
+            return
+        _logger.warning(
+            _PLUGIN_WARNING_LOG,
+            recognizer_name,
+            context.file_path,
+            context.line_number,
+            message,
+        )
 
     def emit_recognizer_warning_summary(self) -> None:
         for recognizer_name, total_count in self._counts.items():
@@ -123,57 +155,42 @@ def run_plugin_pass(
             file_extension=file_extension,
         )
         for loaded_plugin in registry.loaded:
-            findings.extend(
-                _run_single_plugin_on_line(
-                    loaded_plugin=loaded_plugin,
-                    line_text=line_text,
-                    context=context,
-                    file_path=file_path,
-                    warning_budget=warning_budget,
-                )
+            invocation = _PluginLineInvocation(
+                loaded_plugin=loaded_plugin,
+                line_text=line_text,
+                context=context,
+                file_path=file_path,
             )
+            findings.extend(_run_single_plugin_on_line(invocation, warning_budget))
     warning_budget.emit_recognizer_warning_summary()
     return _sort_plugin_findings(findings)
 
 
 def _run_single_plugin_on_line(
-    loaded_plugin: LoadedPlugin,
-    line_text: str,
-    context: ScanContext,
-    file_path: Path,
+    invocation: _PluginLineInvocation,
     warning_budget: _RecognizerWarningBudget,
 ) -> list[ScanFinding]:
     """Invoke one plugin on one line, returning validated host findings."""
-    recognizer = loaded_plugin.recognizer
-    unvalidated_plugin_findings = _safely_invoke_detect(
-        recognizer=recognizer,
-        line_text=line_text,
-        context=context,
-        warning_budget=warning_budget,
-    )
+    recognizer = invocation.loaded_plugin.recognizer
+    unvalidated_plugin_findings = _safely_invoke_detect(invocation, warning_budget)
     if unvalidated_plugin_findings is None:
         return []
     declared_entity_types = frozenset(recognizer.entity_types)
     host_findings: list[ScanFinding] = []
     for plugin_finding in unvalidated_plugin_findings:
-        host_finding = _translate_plugin_finding_to_host(
+        validation = _PluginFindingValidation(
             plugin_finding=plugin_finding,
-            line_text=line_text,
-            file_path=file_path,
-            context=context,
-            recognizer=recognizer,
+            invocation=invocation,
             declared_entity_types=declared_entity_types,
-            warning_budget=warning_budget,
         )
+        host_finding = _translate_plugin_finding_to_host(validation, warning_budget)
         if host_finding is not None:
             host_findings.append(host_finding)
     return host_findings
 
 
 def _safely_invoke_detect(
-    recognizer: BaseRecognizer,
-    line_text: str,
-    context: ScanContext,
+    invocation: _PluginLineInvocation,
     warning_budget: _RecognizerWarningBudget,
 ) -> list[PluginScanFinding] | None:
     """Call ``recognizer.detect`` under exception isolation.
@@ -186,72 +203,66 @@ def _safely_invoke_detect(
     the Plugin API v1 failure-semantics contract; it is deliberately scoped
     to one line from one plugin so unrelated scan work proceeds unaffected.
     """
+    recognizer = invocation.loaded_plugin.recognizer
     try:
-        unvalidated_plugin_findings = recognizer.detect(line_text, context)
+        unvalidated_plugin_findings = recognizer.detect(invocation.line_text, invocation.context)
     except Exception as exception:  # noqa: BLE001 — plugin isolation boundary (see docstring)
-        _log_plugin_warning(
-            recognizer_name=recognizer.name,
-            context=context,
-            message=_DETECT_EXCEPTION_ERROR.format(
+        warning_budget.log_recognizer_warning(
+            recognizer.name,
+            invocation.context,
+            _DETECT_EXCEPTION_ERROR.format(
                 error_type=type(exception).__name__,
                 error_message=str(exception),
             ),
-            warning_budget=warning_budget,
         )
         return None
     if not isinstance(unvalidated_plugin_findings, list):
-        _log_plugin_warning(
-            recognizer_name=recognizer.name,
-            context=context,
-            message=_RETURN_TYPE_ERROR.format(
-                actual_type=type(unvalidated_plugin_findings).__name__
-            ),
-            warning_budget=warning_budget,
+        warning_budget.log_recognizer_warning(
+            recognizer.name,
+            invocation.context,
+            _RETURN_TYPE_ERROR.format(actual_type=type(unvalidated_plugin_findings).__name__),
         )
         return None
     return unvalidated_plugin_findings
 
 
 def _translate_plugin_finding_to_host(
-    plugin_finding: PluginScanFinding,
-    line_text: str,
-    file_path: Path,
-    context: ScanContext,
-    recognizer: BaseRecognizer,
-    declared_entity_types: frozenset[str],
+    validation: _PluginFindingValidation,
     warning_budget: _RecognizerWarningBudget,
 ) -> ScanFinding | None:
     """Validate a plugin finding and translate it into a host ScanFinding."""
+    plugin_finding = validation.plugin_finding
+    invocation = validation.invocation
+    recognizer = invocation.loaded_plugin.recognizer
+    line_text = invocation.line_text
+    context = invocation.context
     if not isinstance(plugin_finding, PluginScanFinding):
-        _log_plugin_warning(
-            recognizer_name=recognizer.name,
-            context=context,
-            message=_MALFORMED_FINDING_ERROR.format(
+        warning_budget.log_recognizer_warning(
+            recognizer.name,
+            context,
+            _MALFORMED_FINDING_ERROR.format(
                 error=f"expected ScanFinding, got {type(plugin_finding).__name__}"
             ),
-            warning_budget=warning_budget,
         )
         return None
-    if plugin_finding.entity_type not in declared_entity_types:
-        _log_plugin_warning(
-            recognizer_name=recognizer.name,
-            context=context,
-            message=_UNDECLARED_ENTITY_TYPE_ERROR.format(
+    if plugin_finding.entity_type not in validation.declared_entity_types:
+        warning_budget.log_recognizer_warning(
+            recognizer.name,
+            context,
+            _UNDECLARED_ENTITY_TYPE_ERROR.format(
                 entity_type=plugin_finding.entity_type,
-                declared=sorted(declared_entity_types),
+                declared=sorted(validation.declared_entity_types),
             ),
-            warning_budget=warning_budget,
         )
         return None
     if plugin_finding.end_offset > len(line_text):
-        _log_plugin_warning(
-            recognizer_name=recognizer.name,
-            context=context,
-            message=_OFFSET_OVERRUN_ERROR.format(
+        warning_budget.log_recognizer_warning(
+            recognizer.name,
+            context,
+            _OFFSET_OVERRUN_ERROR.format(
                 end_offset=plugin_finding.end_offset,
                 line_length=len(line_text),
             ),
-            warning_budget=warning_budget,
         )
         return None
     redacted_context = (
@@ -260,7 +271,7 @@ def _translate_plugin_finding_to_host(
         + line_text[plugin_finding.end_offset :]
     ).rstrip()
     return ScanFinding(
-        file_path=file_path,
+        file_path=invocation.file_path,
         line_number=context.line_number,
         entity_type=plugin_finding.entity_type,
         hipaa_category=_DEFAULT_PLUGIN_HIPAA_CATEGORY,
@@ -272,23 +283,6 @@ def _translate_plugin_finding_to_host(
         severity=severity_from_confidence(plugin_finding.confidence),
         code_context=redacted_context,
         remediation_hint=_PLUGIN_REMEDIATION_HINT,
-    )
-
-
-def _log_plugin_warning(
-    recognizer_name: str,
-    context: ScanContext,
-    message: str,
-    warning_budget: _RecognizerWarningBudget,
-) -> None:
-    if not warning_budget.claim_warning_slot(recognizer_name):
-        return
-    _logger.warning(
-        _PLUGIN_WARNING_LOG,
-        recognizer_name,
-        context.file_path,
-        context.line_number,
-        message,
     )
 
 

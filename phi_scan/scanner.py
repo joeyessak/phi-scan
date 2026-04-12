@@ -5,11 +5,13 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import threading
 import time
 import zipfile
 import zlib
 from collections import Counter
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
+from functools import cache
 from pathlib import Path
 from types import MappingProxyType
 from typing import TYPE_CHECKING
@@ -20,8 +22,6 @@ if TYPE_CHECKING:
     from collections.abc import Callable
 
     from phi_scan.ai_review import AIUsageSummary
-
-from functools import cache
 
 from phi_scan.cache import FileCacheKey, get_cached_result, store_cached_result
 from phi_scan.constants import (
@@ -159,6 +159,9 @@ _PARALLEL_THREAD_NAME_PREFIX: str = "phi-scan-worker"
 # ---------------------------------------------------------------------------
 # Plugin registry (scan-scoped cache)
 # ---------------------------------------------------------------------------
+
+
+_PLUGIN_REGISTRY_CACHE_LOCK: threading.Lock = threading.Lock()
 
 
 @cache
@@ -411,7 +414,9 @@ def execute_scan(
                 maximum=MAX_WORKER_COUNT,
             ),
         )
-    _load_cached_plugin_registry.cache_clear()
+    with _PLUGIN_REGISTRY_CACHE_LOCK:
+        _load_cached_plugin_registry.cache_clear()
+        _load_cached_plugin_registry()
     scan_start = time.monotonic()
     all_findings = _collect_all_findings(scan_targets, config, worker_count)
     reviewed_findings, ai_usage = apply_ai_review_to_findings(all_findings, config.ai_review_config)
