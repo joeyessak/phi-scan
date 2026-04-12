@@ -113,7 +113,7 @@ stable finding sets across upgrades SHOULD use baseline mode
 ## Deprecation Process
 
 Deprecations within a MAJOR version line follow the policy defined in
-[docs/plugin-api-v1.md](plugin-api-v1.md):
+[plugin-api-v1.md](plugin-api-v1.md):
 
 - Deprecated features are announced in release notes with a migration
   path and the earliest removal version.
