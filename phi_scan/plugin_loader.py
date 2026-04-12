@@ -189,7 +189,7 @@ def _load_or_skip_entry_point(
 ) -> LoadedPlugin | SkippedPlugin:
     distribution_name = _resolve_distribution_name(entry_point)
     try:
-        recognizer_class = _resolve_and_validate_recognizer_class(entry_point, reserved_names)
+        recognizer_class = _import_validated_recognizer_class(entry_point, reserved_names)
         recognizer_instance = _instantiate_recognizer(recognizer_class)
     except PluginValidationError as validation_error:
         return SkippedPlugin(
@@ -204,7 +204,7 @@ def _load_or_skip_entry_point(
     )
 
 
-def _resolve_and_validate_recognizer_class(
+def _import_validated_recognizer_class(
     entry_point: EntryPoint,
     reserved_names: set[str],
 ) -> type[BaseRecognizer]:
@@ -284,36 +284,36 @@ def _validate_entity_types_sequence(recognizer_class: type[BaseRecognizer]) -> N
         )
     if not declared_types:
         raise PluginValidationError(_EMPTY_ENTITY_TYPES_REASON)
-    _validate_entity_type_values(declared_types)
+    _validate_entity_type_candidates(declared_types)
 
 
-def _validate_entity_type_values(declared_types: Sequence[str]) -> None:
+def _validate_entity_type_candidates(declared_types: Sequence[str]) -> None:
     seen_entity_types: set[str] = set()
-    for type_index, entity_type_value in enumerate(declared_types):
-        _reject_malformed_entity_type(type_index, entity_type_value)
-        _reject_duplicate_entity_type(entity_type_value, seen_entity_types)
-        seen_entity_types.add(entity_type_value)
+    for type_index, entity_type_candidate in enumerate(declared_types):
+        _reject_malformed_entity_type(type_index, entity_type_candidate)
+        _reject_duplicate_entity_type(entity_type_candidate, seen_entity_types)
+        seen_entity_types.add(entity_type_candidate)
 
 
-def _reject_malformed_entity_type(type_index: int, entity_type_value: object) -> None:
-    if isinstance(entity_type_value, str) and ENTITY_TYPE_PATTERN.match(entity_type_value):
+def _reject_malformed_entity_type(type_index: int, entity_type_candidate: object) -> None:
+    if isinstance(entity_type_candidate, str) and ENTITY_TYPE_PATTERN.match(entity_type_candidate):
         return
     raise PluginValidationError(
         _INVALID_ENTITY_TYPE_REASON.format(
             index=type_index,
-            value=entity_type_value,
+            value=entity_type_candidate,
             pattern=ENTITY_TYPE_PATTERN.pattern,
         )
     )
 
 
 def _reject_duplicate_entity_type(
-    entity_type_value: str,
+    entity_type_candidate: str,
     seen_entity_types: set[str],
 ) -> None:
-    if entity_type_value not in seen_entity_types:
+    if entity_type_candidate not in seen_entity_types:
         return
-    raise PluginValidationError(_DUPLICATE_ENTITY_TYPE_REASON.format(value=entity_type_value))
+    raise PluginValidationError(_DUPLICATE_ENTITY_TYPE_REASON.format(value=entity_type_candidate))
 
 
 def _reject_reserved_name(recognizer_name: str, reserved_names: set[str]) -> None:
