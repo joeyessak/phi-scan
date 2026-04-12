@@ -150,6 +150,39 @@ have read values from the environment that could incidentally contain
 PHI. `BaseException` subclasses (`SystemExit`, `KeyboardInterrupt`)
 are NOT caught.
 
+### Plugin Detection Exception Isolation (Runtime Carve-out)
+
+Exceptions raised from `detect()` during a scan are caught at the
+per-line plugin invocation boundary so that one faulty plugin cannot
+abort the scan or starve other plugins of their chance to run. This is
+the single designated exemption to the project-wide rule that bare
+`Exception` MUST NOT be caught without re-raising.
+
+The carve-out applies **only** under all of the following conditions:
+
+1. **Single-invocation scope.** The `try`/`except` wraps exactly one
+   call to third-party plugin code (one `recognizer.detect(...)`
+   invocation against one line). It MUST NOT span multiple plugins,
+   multiple lines, or any host logic.
+2. **`BaseException` still propagates.** Only `Exception` is caught;
+   `SystemExit`, `KeyboardInterrupt`, and other `BaseException`
+   subclasses continue to abort the scan as normal.
+3. **Warning is logged.** The exception type and message are recorded
+   through the rate-limited `_RecognizerWarningBudget` so operators
+   can diagnose misbehaving plugins without log spam.
+4. **Inline justification.** The catch site carries
+   `# noqa: BLE001` with a short comment pointing to the docstring
+   that explains the isolation contract.
+5. **Dedicated test coverage.** Tests MUST prove that (a) a raising
+   plugin produces a warning instead of propagating, (b) the scan
+   continues to completion, and (c) findings from other plugins on the
+   same line are still emitted.
+
+The canonical — and currently only — site is
+`phi_scan.plugin_runtime._invoke_detect_with_isolation`. Any new
+exemption site MUST be reviewed against the conditions above and
+documented here.
+
 ---
 
 ## Authoring Constraints (v1)
