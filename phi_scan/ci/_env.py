@@ -8,9 +8,7 @@ from __future__ import annotations
 
 import os
 
-_UNSET_VARIABLE_FALLBACK: str = ""
-
 
 def fetch_environment_variable(variable_name: str) -> str | None:
     """Return the environment variable value, or None if unset or empty."""
-    return os.environ.get(variable_name, _UNSET_VARIABLE_FALLBACK).strip() or None
+    return os.environ.get(variable_name, "").strip() or None

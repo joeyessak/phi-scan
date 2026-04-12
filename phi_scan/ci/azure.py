@@ -32,7 +32,6 @@ _AZURE_PR_THREADS_PATH: str = (
     "/pullRequests/{pr_id}/threads?api-version={api_version}"
 )
 
-_COMMIT_STATUS_CONTEXT: str = "phi-scan"
 _AZURE_COMMENT_PARENT_ID_ROOT: int = 0
 
 

@@ -84,6 +84,7 @@ _CODEBUILD_PR_TRIGGER_PREFIX: str = "pr/"
 _URL_PATH_SEPARATOR: str = "/"
 
 # Sentinel values for CI platform detection env vars
+# Azure DevOps uses "True" (capital T) while all other platforms use "true"
 _CI_ENV_SENTINEL_TRUE: str = "true"
 _AZURE_ENV_SENTINEL_TRUE: str = "True"
 
