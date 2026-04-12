@@ -169,6 +169,13 @@ def _load_cached_plugin_registry() -> PluginRegistry:
     clears the cache at the start of every invocation so a fresh registry
     is discovered per scan while per-file calls inside one scan share the
     same registry instance.
+
+    Invariant: ``execute_scan`` is the only supported entry point for this
+    cache's lifecycle. Callers that invoke ``run_plugin_pass`` directly
+    (outside ``execute_scan``) must pass a registry they constructed
+    themselves and must not rely on this function; tests that exercise
+    ``execute_scan`` are responsible for clearing the cache between runs
+    (see the autouse fixture in ``tests/test_plugin_runtime.py``).
     """
     return load_plugin_registry()
 

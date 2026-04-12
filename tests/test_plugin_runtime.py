@@ -28,8 +28,6 @@ _ACME_ENTITY_TYPE: str = "ACME_EMPLOYEE_ID"
 _ACME_RECOGNIZER_NAME: str = "acme_employee_id"
 _ACME_CONFIDENCE: float = 0.9
 _PLUGIN_SAMPLE_LINE: str = "employee_id = EMP-123456"
-_PLUGIN_SAMPLE_OFFSET_START: int = 15
-_PLUGIN_SAMPLE_OFFSET_END: int = 25
 
 
 class _AcmeRecognizer(BaseRecognizer):

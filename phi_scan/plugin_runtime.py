@@ -43,6 +43,7 @@ _MAX_WARNINGS_PER_RECOGNIZER: int = 5
 _PLUGIN_REMEDIATION_HINT: str = (
     "Review the matched value and replace or de-identify if it is real PHI/PII."
 )
+_DEFAULT_PLUGIN_HIPAA_CATEGORY: PhiCategory = PhiCategory.UNIQUE_ID
 
 _RETURN_TYPE_ERROR: str = "returned {actual_type} instead of list[ScanFinding]"
 _MALFORMED_FINDING_ERROR: str = "returned malformed ScanFinding: {error}"
@@ -63,11 +64,18 @@ class _RecognizerWarningBudget:
         self._limit = limit
         self._counts: Counter[str] = Counter()
 
-    def should_log(self, recognizer_name: str) -> bool:
+    def register_warning_and_check_budget(self, recognizer_name: str) -> bool:
+        """Record a warning for ``recognizer_name`` and report whether it should be logged.
+
+        Mutation and predicate are fused intentionally: every warning emission
+        site must both count toward the per-recognizer budget and gate logging
+        on that same count. Splitting the two would let callers log without
+        incrementing (or vice versa), breaking the rate-limit invariant.
+        """
         self._counts[recognizer_name] += 1
         return self._counts[recognizer_name] <= self._limit
 
-    def emit_summary(self) -> None:
+    def emit_recognizer_warning_summary(self) -> None:
         for recognizer_name, total_count in self._counts.items():
             if total_count > self._limit:
                 _logger.warning(
@@ -123,7 +131,7 @@ def run_plugin_pass(
                     warning_budget=warning_budget,
                 )
             )
-    warning_budget.emit_summary()
+    warning_budget.emit_recognizer_warning_summary()
     return _sort_plugin_findings(findings)
 
 
@@ -167,10 +175,19 @@ def _safely_invoke_detect(
     context: ScanContext,
     warning_budget: _RecognizerWarningBudget,
 ) -> list[PluginScanFinding] | None:
-    """Call ``recognizer.detect`` under exception isolation."""
+    """Call ``recognizer.detect`` under exception isolation.
+
+    Third-party plugins execute arbitrary user code and must not be able to
+    abort a scan. This is the single designated plugin exception boundary:
+    any exception raised by ``detect`` is caught, logged through the
+    rate-limited warning budget, and the line is treated as producing no
+    findings. The broad ``except Exception`` is intentional and required by
+    the Plugin API v1 failure-semantics contract; it is deliberately scoped
+    to one line from one plugin so unrelated scan work proceeds unaffected.
+    """
     try:
-        result = recognizer.detect(line_text, context)
-    except Exception as exception:
+        raw_plugin_findings = recognizer.detect(line_text, context)
+    except Exception as exception:  # noqa: BLE001 — plugin isolation boundary (see docstring)
         _log_plugin_warning(
             recognizer_name=recognizer.name,
             context=context,
@@ -181,15 +198,15 @@ def _safely_invoke_detect(
             warning_budget=warning_budget,
         )
         return None
-    if not isinstance(result, list):
+    if not isinstance(raw_plugin_findings, list):
         _log_plugin_warning(
             recognizer_name=recognizer.name,
             context=context,
-            message=_RETURN_TYPE_ERROR.format(actual_type=type(result).__name__),
+            message=_RETURN_TYPE_ERROR.format(actual_type=type(raw_plugin_findings).__name__),
             warning_budget=warning_budget,
         )
         return None
-    return result
+    return raw_plugin_findings
 
 
 def _translate_plugin_finding_to_host(
@@ -244,7 +261,7 @@ def _translate_plugin_finding_to_host(
         file_path=file_path,
         line_number=context.line_number,
         entity_type=plugin_finding.entity_type,
-        hipaa_category=PhiCategory.UNIQUE_ID,
+        hipaa_category=_DEFAULT_PLUGIN_HIPAA_CATEGORY,
         confidence=plugin_finding.confidence,
         detection_layer=DetectionLayer.PLUGIN,
         value_hash=compute_value_hash(matched_slice),
@@ -260,7 +277,7 @@ def _log_plugin_warning(
     message: str,
     warning_budget: _RecognizerWarningBudget,
 ) -> None:
-    if not warning_budget.should_log(recognizer_name):
+    if not warning_budget.register_warning_and_check_budget(recognizer_name):
         return
     _logger.warning(
         _PLUGIN_WARNING_LOG,
