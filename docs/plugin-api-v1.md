@@ -209,8 +209,10 @@ values in any `ScanFinding`.
 
 Plugin authors MUST NOT:
 
-- Open, read, or stat the file at `context.file_path` — it is provided
-  for language-gating and logging only.
+- Open, read, stat, or follow symlinks at `context.file_path` — it is
+  provided for language-gating and logging only. PhiScan never follows
+  symlinks during directory traversal and plugins MUST NOT circumvent
+  that guarantee.
 - Include raw PHI values in any `ScanFinding` or log output.
 - Send data to any remote service — PhiScan is an offline scanner and
   plugins inherit that guarantee.
@@ -251,11 +253,16 @@ class InternalIdRecognizer(BaseRecognizer):
             position = line.find(MARKER_PREFIX, search_start)
             if position < 0:
                 break
+            match_end = position + len(MARKER_PREFIX) + SUFFIX_LENGTH
+            # Guard: end_offset must not exceed the line length
+            if match_end > len(line):
+                search_start = position + 1
+                continue
             findings.append(
                 ScanFinding(
                     entity_type=ENTITY_TYPE_INTERNAL_ID,
                     start_offset=position,
-                    end_offset=position + len(MARKER_PREFIX) + SUFFIX_LENGTH,
+                    end_offset=match_end,
                     confidence=MATCH_CONFIDENCE,
                 )
             )
