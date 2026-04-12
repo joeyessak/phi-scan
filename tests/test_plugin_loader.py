@@ -95,7 +95,7 @@ class _EntryPointStub:
         return _DistributionStub(self._distribution_name)
 
 
-def _install_fake_entry_points(
+def _patch_entry_point_discovery(
     monkeypatch: pytest.MonkeyPatch,
     fake_entry_points: list[_EntryPointStub],
 ) -> None:
@@ -347,7 +347,7 @@ def test_scan_context_accepts_valid_arguments() -> None:
 def test_empty_entry_point_group_yields_empty_registry(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _install_fake_entry_points(monkeypatch, [])
+    _patch_entry_point_discovery(monkeypatch, [])
     registry = load_plugin_registry()
     assert registry.loaded == ()
     assert registry.skipped == ()
@@ -356,7 +356,7 @@ def test_empty_entry_point_group_yields_empty_registry(
 def test_single_valid_plugin_is_loaded(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _install_fake_entry_points(
+    _patch_entry_point_discovery(
         monkeypatch,
         [
             _EntryPointStub(
@@ -381,7 +381,7 @@ def test_single_valid_plugin_is_loaded(
 def test_multiple_valid_plugins_are_sorted_deterministically(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _install_fake_entry_points(
+    _patch_entry_point_discovery(
         monkeypatch,
         [
             _EntryPointStub(
@@ -406,7 +406,7 @@ def test_multiple_valid_plugins_are_sorted_deterministically(
 def test_plugin_without_distribution_still_loads(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _install_fake_entry_points(
+    _patch_entry_point_discovery(
         monkeypatch,
         [_EntryPointStub(_ALPHA_ENTRY_POINT_NAME, _ValidAlphaRecognizer)],
     )
@@ -423,7 +423,7 @@ def test_plugin_without_distribution_still_loads(
 def test_mismatched_api_version_is_skipped(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _install_fake_entry_points(
+    _patch_entry_point_discovery(
         monkeypatch,
         [
             _EntryPointStub(
@@ -445,7 +445,7 @@ def test_mismatched_api_version_is_skipped(
 def test_name_with_hyphen_is_skipped(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _install_fake_entry_points(
+    _patch_entry_point_discovery(
         monkeypatch,
         [_EntryPointStub(_ALPHA_ENTRY_POINT_NAME, _HyphenNameRecognizer)],
     )
@@ -457,7 +457,7 @@ def test_name_with_hyphen_is_skipped(
 def test_name_starting_with_digit_is_skipped(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _install_fake_entry_points(
+    _patch_entry_point_discovery(
         monkeypatch,
         [_EntryPointStub(_ALPHA_ENTRY_POINT_NAME, _DigitStartNameRecognizer)],
     )
@@ -469,7 +469,7 @@ def test_name_starting_with_digit_is_skipped(
 def test_empty_entity_types_is_skipped(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _install_fake_entry_points(
+    _patch_entry_point_discovery(
         monkeypatch,
         [_EntryPointStub(_ALPHA_ENTRY_POINT_NAME, _EmptyEntityTypesRecognizer)],
     )
@@ -481,7 +481,7 @@ def test_empty_entity_types_is_skipped(
 def test_non_sequence_entity_types_is_skipped(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _install_fake_entry_points(
+    _patch_entry_point_discovery(
         monkeypatch,
         [_EntryPointStub(_ALPHA_ENTRY_POINT_NAME, _NonListEntityTypesRecognizer)],
     )
@@ -493,7 +493,7 @@ def test_non_sequence_entity_types_is_skipped(
 def test_tuple_entity_types_is_accepted(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _install_fake_entry_points(
+    _patch_entry_point_discovery(
         monkeypatch,
         [_EntryPointStub(_ALPHA_ENTRY_POINT_NAME, _TupleEntityTypesRecognizer)],
     )
@@ -506,7 +506,7 @@ def test_tuple_entity_types_is_accepted(
 def test_lowercase_entity_type_is_skipped(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _install_fake_entry_points(
+    _patch_entry_point_discovery(
         monkeypatch,
         [_EntryPointStub(_ALPHA_ENTRY_POINT_NAME, _LowercaseEntityTypeRecognizer)],
     )
@@ -518,7 +518,7 @@ def test_lowercase_entity_type_is_skipped(
 def test_duplicate_entity_types_is_skipped(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _install_fake_entry_points(
+    _patch_entry_point_discovery(
         monkeypatch,
         [_EntryPointStub(_ALPHA_ENTRY_POINT_NAME, _DuplicateEntityTypesRecognizer)],
     )
@@ -530,7 +530,7 @@ def test_duplicate_entity_types_is_skipped(
 def test_non_recognizer_class_is_skipped(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _install_fake_entry_points(
+    _patch_entry_point_discovery(
         monkeypatch,
         [_EntryPointStub(_ALPHA_ENTRY_POINT_NAME, _NotARecognizerClass)],
     )
@@ -542,7 +542,7 @@ def test_non_recognizer_class_is_skipped(
 def test_non_class_entry_point_target_is_skipped(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _install_fake_entry_points(
+    _patch_entry_point_discovery(
         monkeypatch,
         [_EntryPointStub(_ALPHA_ENTRY_POINT_NAME, _plain_function_not_a_class)],
     )
@@ -554,7 +554,7 @@ def test_non_class_entry_point_target_is_skipped(
 def test_entry_point_import_error_is_skipped(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _install_fake_entry_points(
+    _patch_entry_point_discovery(
         monkeypatch,
         [
             _EntryPointStub(
@@ -572,7 +572,7 @@ def test_entry_point_import_error_is_skipped(
 def test_missing_api_version_attribute_is_skipped(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _install_fake_entry_points(
+    _patch_entry_point_discovery(
         monkeypatch,
         [_EntryPointStub(_ALPHA_ENTRY_POINT_NAME, _MissingApiVersionRecognizer)],
     )
@@ -584,7 +584,7 @@ def test_missing_api_version_attribute_is_skipped(
 def test_missing_name_attribute_is_skipped(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _install_fake_entry_points(
+    _patch_entry_point_discovery(
         monkeypatch,
         [_EntryPointStub(_ALPHA_ENTRY_POINT_NAME, _MissingNameRecognizer)],
     )
@@ -596,7 +596,7 @@ def test_missing_name_attribute_is_skipped(
 def test_missing_entity_types_attribute_is_skipped(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _install_fake_entry_points(
+    _patch_entry_point_discovery(
         monkeypatch,
         [_EntryPointStub(_ALPHA_ENTRY_POINT_NAME, _MissingEntityTypesRecognizer)],
     )
@@ -608,7 +608,7 @@ def test_missing_entity_types_attribute_is_skipped(
 def test_recognizer_constructor_failure_is_skipped(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _install_fake_entry_points(
+    _patch_entry_point_discovery(
         monkeypatch,
         [_EntryPointStub(_ALPHA_ENTRY_POINT_NAME, _ConstructorRaisingRecognizer)],
     )
@@ -622,7 +622,7 @@ def test_recognizer_constructor_failure_is_skipped(
 def test_recognizer_constructor_error_message_is_not_leaked(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    _install_fake_entry_points(
+    _patch_entry_point_discovery(
         monkeypatch,
         [_EntryPointStub(_ALPHA_ENTRY_POINT_NAME, _ConstructorRaisingRecognizer)],
     )
@@ -649,7 +649,7 @@ def test_name_collision_first_wins_second_skipped(
             del line, context
             return []
 
-    _install_fake_entry_points(
+    _patch_entry_point_discovery(
         monkeypatch,
         [
             _EntryPointStub(

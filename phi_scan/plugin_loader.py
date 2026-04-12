@@ -133,7 +133,7 @@ def load_plugin_registry() -> PluginRegistry:
         entries and logged at WARNING level.
     """
     sorted_entry_points = _sort_entry_points_deterministically(_discover_entry_points())
-    loaded_plugins, skipped_plugins = _build_registry_lists(sorted_entry_points)
+    loaded_plugins, skipped_plugins = _classify_entry_points(sorted_entry_points)
     for skipped_plugin in skipped_plugins:
         _log_skipped_plugin(skipped_plugin)
     return PluginRegistry(
@@ -142,7 +142,7 @@ def load_plugin_registry() -> PluginRegistry:
     )
 
 
-def _build_registry_lists(
+def _classify_entry_points(
     sorted_entry_points: tuple[EntryPoint, ...],
 ) -> tuple[list[LoadedPlugin], list[SkippedPlugin]]:
     loaded_plugins: list[LoadedPlugin] = []
@@ -208,13 +208,14 @@ def _resolve_and_validate_recognizer_class(
     entry_point: EntryPoint,
     reserved_names: set[str],
 ) -> type[BaseRecognizer]:
-    recognizer_class = _load_entry_point_class(entry_point)
+    entry_point_target = _import_entry_point_object(entry_point)
+    recognizer_class = _coerce_to_recognizer_class(entry_point_target)
     _validate_recognizer_class(recognizer_class)
     _reject_reserved_name(recognizer_class.name, reserved_names)
     return recognizer_class
 
 
-def _load_entry_point_class(entry_point: EntryPoint) -> type[BaseRecognizer]:
+def _import_entry_point_object(entry_point: EntryPoint) -> object:
     # ``EntryPoint.load()`` imports the target module and then resolves the
     # class attribute named in the ``module:Class`` spec. ImportError covers
     # the import step (module missing, transitive import failure). AttributeError
@@ -223,16 +224,19 @@ def _load_entry_point_class(entry_point: EntryPoint) -> type[BaseRecognizer]:
     # (typo, rename, partial refactor). Both are plugin-metadata problems that
     # should skip the plugin with a WARNING, not crash the scan.
     try:
-        loaded_object = entry_point.load()
+        return entry_point.load()
     except (ImportError, AttributeError) as load_error:
         raise PluginValidationError(
             _IMPORT_FAILURE_REASON.format(error_type=type(load_error).__name__)
         ) from load_error
-    if not isinstance(loaded_object, type):
+
+
+def _coerce_to_recognizer_class(entry_point_target: object) -> type[BaseRecognizer]:
+    if not isinstance(entry_point_target, type):
         raise PluginValidationError(_NOT_A_CLASS_REASON)
-    if not issubclass(loaded_object, BaseRecognizer):
+    if not issubclass(entry_point_target, BaseRecognizer):
         raise PluginValidationError(_NOT_A_RECOGNIZER_REASON)
-    return loaded_object
+    return entry_point_target
 
 
 def _validate_recognizer_class(recognizer_class: type[BaseRecognizer]) -> None:
