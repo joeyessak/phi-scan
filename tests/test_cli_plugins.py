@@ -148,19 +148,16 @@ class _MismatchedVersionRecognizer(BaseRecognizer):
 # ---------------------------------------------------------------------------
 
 
-_CLI_RUNNER = CliRunner()
-
-
 def _patch_entry_point_discovery(
     monkeypatch: pytest.MonkeyPatch,
     entry_point_stubs: list[_EntryPointStub],
 ) -> None:
-    def _entry_points_replacement(*, group: str) -> list[_EntryPointStub]:
+    def _return_stub_entry_points(*, group: str) -> list[_EntryPointStub]:
         if group != PLUGIN_ENTRY_POINT_GROUP:
             return []
         return list(entry_point_stubs)
 
-    monkeypatch.setattr(_ENTRY_POINTS_PATCH_TARGET, _entry_points_replacement)
+    monkeypatch.setattr(_ENTRY_POINTS_PATCH_TARGET, _return_stub_entry_points)
 
 
 def _invoke_plugins_list(
@@ -174,7 +171,8 @@ def _invoke_plugins_list(
     cli_arguments = ["plugins", "list"]
     if is_json:
         cli_arguments.append("--json")
-    invocation_result = _CLI_RUNNER.invoke(app, cli_arguments)
+    runner = CliRunner()
+    invocation_result = runner.invoke(app, cli_arguments)
     assert invocation_result.exit_code == EXIT_CODE_CLEAN
     return invocation_result.output
 
@@ -391,10 +389,12 @@ class TestJsonOutput:
 class TestCommandIntegration:
     def test_plugins_list_exits_cleanly(self, monkeypatch: pytest.MonkeyPatch) -> None:
         _patch_entry_point_discovery(monkeypatch, [])
-        invocation_result = _CLI_RUNNER.invoke(app, ["plugins", "list"])
+        runner = CliRunner()
+        invocation_result = runner.invoke(app, ["plugins", "list"])
         assert invocation_result.exit_code == EXIT_CODE_CLEAN
 
     def test_plugins_help_shows_subcommand(self, monkeypatch: pytest.MonkeyPatch) -> None:
         _patch_entry_point_discovery(monkeypatch, [])
-        invocation_result = _CLI_RUNNER.invoke(app, ["plugins", "--help"])
+        runner = CliRunner()
+        invocation_result = runner.invoke(app, ["plugins", "--help"])
         assert "list" in invocation_result.output
