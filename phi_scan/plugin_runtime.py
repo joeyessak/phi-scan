@@ -1,0 +1,341 @@
+"""Plugin runtime — execute loaded recognizer plugins against scanned files.
+
+Integrates the Plugin API v1 (``phi_scan.plugin_api``) with the scan
+path. The host iterates the file's lines, calls each loaded plugin's
+``detect(line, context)`` exactly once per line, validates the returned
+findings, computes the value hash and redacted code context, and emits
+host ``ScanFinding`` objects that flow through the same downstream
+filtering, suppression, baseline, and output pipeline as built-in
+findings.
+
+The plugin pass is independent of the built-in detection cache — plugin
+findings are recomputed on every scan so that plugin updates take effect
+immediately without a cache invalidation step.
+"""
+
+from __future__ import annotations
+
+import logging
+from collections import Counter
+from dataclasses import dataclass
+from pathlib import Path
+
+from phi_scan.constants import (
+    CODE_CONTEXT_REDACTED_VALUE,
+    DetectionLayer,
+    PhiCategory,
+)
+from phi_scan.hashing import compute_value_hash, severity_from_confidence
+from phi_scan.models import ScanFinding
+from phi_scan.plugin_api import ScanContext
+from phi_scan.plugin_api import ScanFinding as PluginScanFinding
+from phi_scan.plugin_loader import LoadedPlugin, PluginRegistry
+
+__all__ = ["execute_plugin_pass"]
+
+_logger: logging.Logger = logging.getLogger(__name__)
+
+_MAX_WARNINGS_PER_RECOGNIZER: int = 5
+_PLUGIN_REMEDIATION_HINT: str = (
+    "Review the matched value and replace or de-identify if it is real PHI/PII."
+)
+# Plugin API v1 does not expose ``hipaa_category`` on ``PluginScanFinding``;
+# every plugin-reported match is tagged ``UNIQUE_ID`` (the least-specific
+# identifier category) until the category is added to the plugin contract
+# in v1.1. Operators who need accurate HIPAA category reporting for plugin
+# findings should track this as a known v1 limitation.
+_DEFAULT_PLUGIN_HIPAA_CATEGORY: PhiCategory = PhiCategory.UNIQUE_ID
+
+_RETURN_TYPE_ERROR: str = "returned {actual_type} instead of list[ScanFinding]"
+_MALFORMED_FINDING_ERROR: str = "returned malformed ScanFinding: {error}"
+_OFFSET_OVERRUN_ERROR: str = "end_offset {end_offset} exceeds line length {line_length}"
+_UNDECLARED_ENTITY_TYPE_ERROR: str = (
+    "entity_type {entity_type!r} not declared in entity_types {declared}"
+)
+_DETECT_EXCEPTION_ERROR: str = "detect() raised {error_type}: {error_message}"
+
+_PLUGIN_WARNING_LOG: str = "Plugin %r at %s:%d — %s"
+_PLUGIN_SUMMARY_LOG: str = "Plugin %r produced %d warnings during this scan (first %d shown above)"
+
+
+@dataclass(frozen=True)
+class _PluginPassState:
+    """Per-scan plugin-pass state threaded through the collection helpers."""
+
+    file_content: str
+    file_path: Path
+    registry: PluginRegistry
+    warning_budget: _RecognizerWarningBudget
+
+
+@dataclass(frozen=True)
+class _PluginLineInvocation:
+    """One plugin's invocation against one line of one file."""
+
+    loaded_plugin: LoadedPlugin
+    line_text: str
+    context: ScanContext
+
+    @property
+    def file_path(self) -> Path:
+        return self.context.file_path
+
+
+@dataclass(frozen=True)
+class _PluginFindingValidation:
+    """A single plugin-reported finding paired with its invocation context."""
+
+    plugin_finding: PluginScanFinding
+    invocation: _PluginLineInvocation
+    declared_entity_types: frozenset[str]
+
+
+class _RecognizerWarningBudget:
+    """Tracks warning emissions per recognizer for the duration of one scan."""
+
+    def __init__(self, limit: int = _MAX_WARNINGS_PER_RECOGNIZER) -> None:
+        self._limit = limit
+        self._counts: Counter[str] = Counter()
+
+    def claim_recognizer_warning_slot(self, recognizer_name: str) -> bool:
+        """Claim one warning slot for ``recognizer_name``; return ``True`` if granted.
+
+        Each call consumes one slot regardless of the return value — the
+        count is the authoritative tally used by the end-of-scan summary.
+        Returns ``True`` while the per-recognizer budget still has capacity
+        (first ``limit`` calls) and ``False`` afterward so the caller can
+        suppress the log line.
+        """
+        self._counts[recognizer_name] += 1
+        return self._counts[recognizer_name] <= self._limit
+
+    def log_recognizer_warning(
+        self, recognizer_name: str, context: ScanContext, message: str
+    ) -> None:
+        if not self.claim_recognizer_warning_slot(recognizer_name):
+            return
+        _logger.warning(
+            _PLUGIN_WARNING_LOG,
+            recognizer_name,
+            context.file_path,
+            context.line_number,
+            message,
+        )
+
+    def emit_recognizer_warning_summary(self) -> None:
+        for recognizer_name, total_count in self._counts.items():
+            if total_count > self._limit:
+                _logger.warning(
+                    _PLUGIN_SUMMARY_LOG,
+                    recognizer_name,
+                    total_count,
+                    self._limit,
+                )
+
+
+def execute_plugin_pass(
+    file_content: str,
+    file_path: Path,
+    registry: PluginRegistry,
+) -> list[ScanFinding]:
+    """Run every loaded plugin against each line of ``file_content``.
+
+    Args:
+        file_content: Decoded text content of the file. Empty strings
+            and content without newlines are handled naturally.
+        file_path: Relative path recorded on each produced
+            ``ScanFinding``. Plugins see the same path in
+            ``ScanContext.file_path`` but must not open it.
+        registry: Plugin registry loaded once per scan invocation.
+            Only ``registry.loaded`` is consulted; skipped plugins do
+            not participate in the runtime pass.
+
+    Returns:
+        Deterministically sorted list of ``ScanFinding`` objects, one
+        per plugin-reported match that passed validation. Empty list
+        when no plugins produced findings (or when the registry has
+        no loaded plugins).
+    """
+    if not registry.loaded:
+        return []
+    state = _PluginPassState(
+        file_content=file_content,
+        file_path=file_path,
+        registry=registry,
+        warning_budget=_RecognizerWarningBudget(),
+    )
+    findings = _collect_findings_for_all_lines(state)
+    state.warning_budget.emit_recognizer_warning_summary()
+    return _sort_plugin_findings(findings)
+
+
+def _collect_findings_for_all_lines(state: _PluginPassState) -> list[ScanFinding]:
+    """Iterate every line and every loaded plugin, collecting host findings."""
+    findings: list[ScanFinding] = []
+    file_extension = state.file_path.suffix.lower()
+    for line_index, line_text in enumerate(state.file_content.splitlines(), start=1):
+        context = ScanContext(
+            file_path=state.file_path,
+            line_number=line_index,
+            file_extension=file_extension,
+        )
+        for loaded_plugin in state.registry.loaded:
+            invocation = _PluginLineInvocation(
+                loaded_plugin=loaded_plugin,
+                line_text=line_text,
+                context=context,
+            )
+            findings.extend(_execute_single_plugin_on_line(invocation, state.warning_budget))
+    return findings
+
+
+def _execute_single_plugin_on_line(
+    invocation: _PluginLineInvocation,
+    warning_budget: _RecognizerWarningBudget,
+) -> list[ScanFinding]:
+    """Invoke one plugin on one line, returning validated host findings."""
+    recognizer = invocation.loaded_plugin.recognizer
+    unvalidated_plugin_findings = _invoke_detect_with_isolation(invocation, warning_budget)
+    if unvalidated_plugin_findings is None:
+        return []
+    declared_entity_types = frozenset(recognizer.entity_types)
+    host_findings: list[ScanFinding] = []
+    for plugin_finding in unvalidated_plugin_findings:
+        validation = _PluginFindingValidation(
+            plugin_finding=plugin_finding,
+            invocation=invocation,
+            declared_entity_types=declared_entity_types,
+        )
+        host_finding = _translate_plugin_finding_to_host(validation, warning_budget)
+        if host_finding is not None:
+            host_findings.append(host_finding)
+    return host_findings
+
+
+def _invoke_detect_with_isolation(
+    invocation: _PluginLineInvocation,
+    warning_budget: _RecognizerWarningBudget,
+) -> list[PluginScanFinding] | None:
+    """Call ``recognizer.detect`` under exception isolation.
+
+    Third-party plugins execute arbitrary user code and must not be able to
+    abort a scan. This is the single designated plugin exception boundary:
+    any exception raised by ``detect`` is caught, logged through the
+    rate-limited warning budget, and the line is treated as producing no
+    findings. The broad ``except Exception`` is intentional and required by
+    the Plugin API v1 failure-semantics contract; it is deliberately scoped
+    to one line from one plugin so unrelated scan work proceeds unaffected.
+    """
+    recognizer = invocation.loaded_plugin.recognizer
+    try:
+        unvalidated_plugin_findings = recognizer.detect(invocation.line_text, invocation.context)
+    except Exception as exception:  # noqa: BLE001 — plugin isolation boundary (see docstring)
+        warning_budget.log_recognizer_warning(
+            recognizer.name,
+            invocation.context,
+            _DETECT_EXCEPTION_ERROR.format(
+                error_type=type(exception).__name__,
+                error_message=str(exception),
+            ),
+        )
+        return None
+    if not isinstance(unvalidated_plugin_findings, list):
+        warning_budget.log_recognizer_warning(
+            recognizer.name,
+            invocation.context,
+            _RETURN_TYPE_ERROR.format(actual_type=type(unvalidated_plugin_findings).__name__),
+        )
+        return None
+    return unvalidated_plugin_findings
+
+
+def _translate_plugin_finding_to_host(
+    validation: _PluginFindingValidation,
+    warning_budget: _RecognizerWarningBudget,
+) -> ScanFinding | None:
+    """Validate a plugin finding and translate it into a host ScanFinding."""
+    if not _is_plugin_finding_valid(validation, warning_budget):
+        return None
+    return _build_host_scan_finding(validation)
+
+
+def _is_plugin_finding_valid(
+    validation: _PluginFindingValidation,
+    warning_budget: _RecognizerWarningBudget,
+) -> bool:
+    """Return ``True`` when ``validation.plugin_finding`` passes every host check."""
+    plugin_finding = validation.plugin_finding
+    invocation = validation.invocation
+    recognizer_name = invocation.loaded_plugin.recognizer.name
+    context = invocation.context
+    if not isinstance(plugin_finding, PluginScanFinding):
+        warning_budget.log_recognizer_warning(
+            recognizer_name,
+            context,
+            _MALFORMED_FINDING_ERROR.format(
+                error=f"expected ScanFinding, got {type(plugin_finding).__name__}"
+            ),
+        )
+        return False
+    if plugin_finding.entity_type not in validation.declared_entity_types:
+        warning_budget.log_recognizer_warning(
+            recognizer_name,
+            context,
+            _UNDECLARED_ENTITY_TYPE_ERROR.format(
+                entity_type=plugin_finding.entity_type,
+                declared=sorted(validation.declared_entity_types),
+            ),
+        )
+        return False
+    if plugin_finding.end_offset > len(invocation.line_text):
+        warning_budget.log_recognizer_warning(
+            recognizer_name,
+            context,
+            _OFFSET_OVERRUN_ERROR.format(
+                end_offset=plugin_finding.end_offset,
+                line_length=len(invocation.line_text),
+            ),
+        )
+        return False
+    return True
+
+
+def _build_host_scan_finding(validation: _PluginFindingValidation) -> ScanFinding:
+    """Construct the host ``ScanFinding`` for a validated plugin finding."""
+    plugin_finding = validation.plugin_finding
+    invocation = validation.invocation
+    line_text = invocation.line_text
+    redacted_context = (
+        line_text[: plugin_finding.start_offset]
+        + CODE_CONTEXT_REDACTED_VALUE
+        + line_text[plugin_finding.end_offset :]
+    ).rstrip()
+    return ScanFinding(
+        file_path=invocation.file_path,
+        line_number=invocation.context.line_number,
+        entity_type=plugin_finding.entity_type,
+        hipaa_category=_DEFAULT_PLUGIN_HIPAA_CATEGORY,
+        confidence=plugin_finding.confidence,
+        detection_layer=DetectionLayer.PLUGIN,
+        value_hash=compute_value_hash(
+            line_text[plugin_finding.start_offset : plugin_finding.end_offset]
+        ),
+        severity=severity_from_confidence(plugin_finding.confidence),
+        code_context=redacted_context,
+        remediation_hint=_PLUGIN_REMEDIATION_HINT,
+    )
+
+
+def _plugin_finding_sort_key(finding: ScanFinding) -> tuple[str, int, str, str]:
+    """Deterministic sort key for plugin findings (file, line, entity, hash)."""
+    return (
+        str(finding.file_path),
+        finding.line_number,
+        finding.entity_type,
+        finding.value_hash,
+    )
+
+
+def _sort_plugin_findings(findings: list[ScanFinding]) -> list[ScanFinding]:
+    """Return plugin findings sorted for deterministic output."""
+    return sorted(findings, key=_plugin_finding_sort_key)
