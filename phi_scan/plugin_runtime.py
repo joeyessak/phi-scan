@@ -27,12 +27,8 @@ from phi_scan.constants import (
 )
 from phi_scan.hashing import compute_value_hash, severity_from_confidence
 from phi_scan.models import ScanFinding
-from phi_scan.plugin_api import (
-    ScanContext,
-)
-from phi_scan.plugin_api import (
-    ScanFinding as PluginScanFinding,
-)
+from phi_scan.plugin_api import ScanContext
+from phi_scan.plugin_api import ScanFinding as PluginScanFinding
 from phi_scan.plugin_loader import LoadedPlugin, PluginRegistry
 
 __all__ = ["execute_plugin_pass"]
