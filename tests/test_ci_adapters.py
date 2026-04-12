@@ -1,0 +1,441 @@
+# phi-scan:ignore-file
+"""Tests for the phi_scan.ci adapter package.
+
+Covers:
+  - resolve_adapter returns correct adapter types
+  - Adapter capability flags
+  - BaseCIAdapter.upload_sarif default raises CIIntegrationError
+  - Import parity: all names importable via both old and new paths
+  - Meta-platform delegation (Jenkins, CircleCI, CodeBuild)
+  - Transport error wrapping
+  - Platform detection from env vars
+  - PRContext builders
+"""
+
+from __future__ import annotations
+
+from unittest.mock import MagicMock, patch
+
+import httpx
+import pytest
+
+from phi_scan.ci import (
+    AzureAdapter,
+    BaseCIAdapter,
+    BitbucketAdapter,
+    CIPlatform,
+    CircleCIAdapter,
+    CodeBuildAdapter,
+    GitHubAdapter,
+    GitLabAdapter,
+    HttpMethod,
+    HttpRequestConfig,
+    JenkinsAdapter,
+    PRContext,
+    detect_platform,
+    execute_http_request,
+    get_pr_context,
+    resolve_adapter,
+)
+from phi_scan.exceptions import CIIntegrationError
+
+# ---------------------------------------------------------------------------
+# resolve_adapter
+# ---------------------------------------------------------------------------
+
+
+_EXPECTED_ADAPTER_TYPES: list[tuple[CIPlatform, type[BaseCIAdapter]]] = [
+    (CIPlatform.GITHUB_ACTIONS, GitHubAdapter),
+    (CIPlatform.GITLAB_CI, GitLabAdapter),
+    (CIPlatform.AZURE_DEVOPS, AzureAdapter),
+    (CIPlatform.BITBUCKET, BitbucketAdapter),
+    (CIPlatform.CIRCLECI, CircleCIAdapter),
+    (CIPlatform.CODEBUILD, CodeBuildAdapter),
+    (CIPlatform.JENKINS, JenkinsAdapter),
+]
+
+
+@pytest.mark.parametrize(
+    ("platform", "expected_type"),
+    _EXPECTED_ADAPTER_TYPES,
+    ids=[p.value for p, _ in _EXPECTED_ADAPTER_TYPES],
+)
+def test_resolve_adapter_returns_correct_type(
+    platform: CIPlatform, expected_type: type[BaseCIAdapter]
+) -> None:
+    adapter = resolve_adapter(platform)
+    assert isinstance(adapter, expected_type)
+
+
+def test_resolve_adapter_unknown_returns_none() -> None:
+    assert resolve_adapter(CIPlatform.UNKNOWN) is None
+
+
+# ---------------------------------------------------------------------------
+# Capability flags
+# ---------------------------------------------------------------------------
+
+
+def test_github_supports_sarif_upload() -> None:
+    assert GitHubAdapter().supports_sarif_upload is True
+
+
+def test_bitbucket_supports_code_insights() -> None:
+    assert BitbucketAdapter().supports_code_insights is True
+
+
+def test_azure_supports_work_item_creation() -> None:
+    assert AzureAdapter().supports_work_item_creation is True
+
+
+def test_codebuild_supports_security_hub() -> None:
+    assert CodeBuildAdapter().supports_security_hub is True
+
+
+def test_gitlab_default_capabilities_are_false() -> None:
+    adapter = GitLabAdapter()
+    assert adapter.supports_sarif_upload is False
+    assert adapter.supports_code_insights is False
+    assert adapter.supports_work_item_creation is False
+    assert adapter.supports_security_hub is False
+
+
+# ---------------------------------------------------------------------------
+# BaseCIAdapter.upload_sarif raises domain error
+# ---------------------------------------------------------------------------
+
+
+def test_upload_sarif_raises_ci_integration_error() -> None:
+    adapter = GitLabAdapter()
+    scan_result_mock = MagicMock()
+    pr_context = PRContext(
+        platform=CIPlatform.GITLAB_CI,
+        pr_number="1",
+        repository="123",
+        sha="abc",
+        branch="main",
+        base_branch=None,
+    )
+    with pytest.raises(CIIntegrationError, match="GitLabAdapter.*SARIF upload"):
+        adapter.upload_sarif(scan_result_mock, pr_context)
+
+
+# ---------------------------------------------------------------------------
+# Import parity — old path still works
+# ---------------------------------------------------------------------------
+
+_BACKWARD_COMPAT_NAMES: list[str] = [
+    "CIPlatform",
+    "PRContext",
+    "CIIntegrationError",
+    "detect_platform",
+    "get_pr_context",
+    "BaseCIAdapter",
+    "GitHubAdapter",
+    "GitLabAdapter",
+    "AzureAdapter",
+    "BitbucketAdapter",
+    "CircleCIAdapter",
+    "CodeBuildAdapter",
+    "JenkinsAdapter",
+    "resolve_adapter",
+    "HttpMethod",
+    "HttpRequestConfig",
+    "execute_http_request",
+]
+
+
+@pytest.mark.parametrize("name", _BACKWARD_COMPAT_NAMES)
+def test_backward_compat_import_from_ci_integration(name: str) -> None:
+    import phi_scan.ci_integration as old_module
+
+    assert hasattr(old_module, name), f"{name} not importable from phi_scan.ci_integration"
+
+
+@pytest.mark.parametrize("name", _BACKWARD_COMPAT_NAMES)
+def test_old_and_new_paths_resolve_to_same_object(name: str) -> None:
+    import phi_scan.ci as new_module
+    import phi_scan.ci_integration as old_module
+
+    if name == "CIIntegrationError":
+        import phi_scan.exceptions
+
+        new_obj = phi_scan.exceptions.CIIntegrationError
+    else:
+        new_obj = getattr(new_module, name)
+    old_obj = getattr(old_module, name)
+    assert old_obj is new_obj, f"{name} differs between old and new import paths"
+
+
+# ---------------------------------------------------------------------------
+# Transport — error wrapping
+# ---------------------------------------------------------------------------
+
+
+def test_execute_http_request_wraps_status_error() -> None:
+    mock_response = httpx.Response(
+        status_code=403,
+        request=httpx.Request("POST", "https://example.com"),
+    )
+    with patch("phi_scan.ci._transport.httpx.request", return_value=mock_response):
+        with pytest.raises(CIIntegrationError, match="403"):
+            execute_http_request(
+                HttpRequestConfig(
+                    method=HttpMethod.POST,
+                    url="https://example.com",
+                    operation_label="test operation",
+                )
+            )
+
+
+def test_execute_http_request_wraps_network_error() -> None:
+    with patch(
+        "phi_scan.ci._transport.httpx.request",
+        side_effect=httpx.ConnectError("connection refused"),
+    ):
+        with pytest.raises(CIIntegrationError, match="request failed"):
+            execute_http_request(
+                HttpRequestConfig(
+                    method=HttpMethod.POST,
+                    url="https://example.com",
+                    operation_label="test operation",
+                )
+            )
+
+
+# ---------------------------------------------------------------------------
+# Platform detection
+# ---------------------------------------------------------------------------
+
+_DETECTION_CASES: list[tuple[dict[str, str], CIPlatform]] = [
+    ({"GITHUB_ACTIONS": "true"}, CIPlatform.GITHUB_ACTIONS),
+    ({"GITLAB_CI": "true"}, CIPlatform.GITLAB_CI),
+    ({"TF_BUILD": "True"}, CIPlatform.AZURE_DEVOPS),
+    ({"CIRCLECI": "true"}, CIPlatform.CIRCLECI),
+    ({"BITBUCKET_BUILD_NUMBER": "42"}, CIPlatform.BITBUCKET),
+    ({"CODEBUILD_BUILD_ID": "build-123"}, CIPlatform.CODEBUILD),
+    ({"JENKINS_URL": "https://jenkins.example.com"}, CIPlatform.JENKINS),
+    ({}, CIPlatform.UNKNOWN),
+]
+
+
+@pytest.mark.parametrize(
+    ("env_vars", "expected_platform"),
+    _DETECTION_CASES,
+    ids=[p.value for _, p in _DETECTION_CASES],
+)
+def test_detect_platform(env_vars: dict[str, str], expected_platform: CIPlatform) -> None:
+    with patch.dict("os.environ", env_vars, clear=True):
+        assert detect_platform() == expected_platform
+
+
+# ---------------------------------------------------------------------------
+# PRContext builders
+# ---------------------------------------------------------------------------
+
+
+def test_get_pr_context_github() -> None:
+    env = {
+        "GITHUB_ACTIONS": "true",
+        "GITHUB_REPOSITORY": "owner/repo",
+        "GITHUB_SHA": "abc123",
+        "GITHUB_REF": "refs/pull/42/merge",
+        "PR_NUMBER": "42",
+    }
+    with patch.dict("os.environ", env, clear=True):
+        context = get_pr_context()
+    assert context.platform == CIPlatform.GITHUB_ACTIONS
+    assert context.pr_number == "42"
+    assert context.repository == "owner/repo"
+    assert context.sha == "abc123"
+
+
+def test_get_pr_context_github_extracts_pr_from_ref() -> None:
+    env = {
+        "GITHUB_ACTIONS": "true",
+        "GITHUB_REPOSITORY": "owner/repo",
+        "GITHUB_SHA": "abc123",
+        "GITHUB_REF": "refs/pull/99/merge",
+    }
+    with patch.dict("os.environ", env, clear=True):
+        context = get_pr_context()
+    assert context.pr_number == "99"
+
+
+def test_get_pr_context_gitlab() -> None:
+    env = {
+        "GITLAB_CI": "true",
+        "CI_PROJECT_ID": "12345",
+        "CI_MERGE_REQUEST_IID": "7",
+        "CI_COMMIT_SHA": "def456",
+        "CI_COMMIT_REF_NAME": "feature",
+        "CI_SERVER_URL": "https://gitlab.example.com",
+    }
+    with patch.dict("os.environ", env, clear=True):
+        context = get_pr_context()
+    assert context.platform == CIPlatform.GITLAB_CI
+    assert context.pr_number == "7"
+    assert context.extras["ci_server_url"] == "https://gitlab.example.com"
+
+
+def test_get_pr_context_unknown() -> None:
+    with patch.dict("os.environ", {}, clear=True):
+        context = get_pr_context()
+    assert context.platform == CIPlatform.UNKNOWN
+    assert context.pr_number is None
+
+
+# ---------------------------------------------------------------------------
+# Meta-platform delegation
+# ---------------------------------------------------------------------------
+
+
+def test_jenkins_delegates_to_github(monkeypatch: pytest.MonkeyPatch) -> None:
+    pr_context = PRContext(
+        platform=CIPlatform.JENKINS,
+        pr_number="10",
+        repository=None,
+        sha=None,
+        branch=None,
+        base_branch=None,
+        extras={"change_url": "https://github.com/owner/repo/pull/10"},
+    )
+    with patch.object(GitHubAdapter, "post_pr_comment") as mock_gh:
+        JenkinsAdapter().post_pr_comment("test body", pr_context)
+        mock_gh.assert_called_once()
+        delegated_context = mock_gh.call_args[0][1]
+        assert delegated_context.platform == CIPlatform.GITHUB_ACTIONS
+        assert delegated_context.repository == "owner/repo"
+
+
+def test_jenkins_delegates_to_gitlab() -> None:
+    pr_context = PRContext(
+        platform=CIPlatform.JENKINS,
+        pr_number="5",
+        repository=None,
+        sha=None,
+        branch=None,
+        base_branch=None,
+        extras={"change_url": "https://gitlab.example.com/group/project/-/merge_requests/5"},
+    )
+    with patch.object(GitLabAdapter, "post_pr_comment") as mock_gl:
+        JenkinsAdapter().post_pr_comment("test body", pr_context)
+        mock_gl.assert_called_once()
+
+
+def test_jenkins_skips_when_no_change_url() -> None:
+    pr_context = PRContext(
+        platform=CIPlatform.JENKINS,
+        pr_number="5",
+        repository=None,
+        sha=None,
+        branch=None,
+        base_branch=None,
+        extras={},
+    )
+    with (
+        patch.object(GitHubAdapter, "post_pr_comment") as mock_gh,
+        patch.object(GitLabAdapter, "post_pr_comment") as mock_gl,
+    ):
+        JenkinsAdapter().post_pr_comment("test body", pr_context)
+        mock_gh.assert_not_called()
+        mock_gl.assert_not_called()
+
+
+def test_circleci_delegates_to_github() -> None:
+    pr_context = PRContext(
+        platform=CIPlatform.CIRCLECI,
+        pr_number="20",
+        repository=None,
+        sha="abc",
+        branch="feature",
+        base_branch=None,
+        extras={"circle_pull_request_url": "https://github.com/owner/repo/pull/20"},
+    )
+    with patch.object(GitHubAdapter, "post_pr_comment") as mock_gh:
+        CircleCIAdapter().post_pr_comment("test body", pr_context)
+        mock_gh.assert_called_once()
+        delegated_context = mock_gh.call_args[0][1]
+        assert delegated_context.repository == "owner/repo"
+
+
+def test_circleci_delegates_to_bitbucket() -> None:
+    pr_context = PRContext(
+        platform=CIPlatform.CIRCLECI,
+        pr_number="15",
+        repository=None,
+        sha="abc",
+        branch="feature",
+        base_branch=None,
+        extras={"circle_pull_request_url": "https://bitbucket.org/workspace/repo/pull-requests/15"},
+    )
+    with patch.object(BitbucketAdapter, "post_pr_comment") as mock_bb:
+        CircleCIAdapter().post_pr_comment("test body", pr_context)
+        mock_bb.assert_called_once()
+
+
+def test_codebuild_delegates_to_github() -> None:
+    pr_context = PRContext(
+        platform=CIPlatform.CODEBUILD,
+        pr_number="30",
+        repository=None,
+        sha="abc",
+        branch=None,
+        base_branch=None,
+    )
+    with patch.dict("os.environ", {"CODEBUILD_SOURCE_REPO_URL": "https://github.com/owner/repo"}):
+        with patch.object(GitHubAdapter, "post_pr_comment") as mock_gh:
+            CodeBuildAdapter().post_pr_comment("test body", pr_context)
+            mock_gh.assert_called_once()
+            delegated_context = mock_gh.call_args[0][1]
+            assert delegated_context.repository == "owner/repo"
+
+
+def test_codebuild_delegates_to_bitbucket() -> None:
+    pr_context = PRContext(
+        platform=CIPlatform.CODEBUILD,
+        pr_number="30",
+        repository=None,
+        sha="abc",
+        branch=None,
+        base_branch=None,
+    )
+    with patch.dict(
+        "os.environ", {"CODEBUILD_SOURCE_REPO_URL": "https://bitbucket.org/workspace/repo"}
+    ):
+        with patch.object(BitbucketAdapter, "post_pr_comment") as mock_bb:
+            CodeBuildAdapter().post_pr_comment("test body", pr_context)
+            mock_bb.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# PRContext is frozen
+# ---------------------------------------------------------------------------
+
+
+def test_pr_context_is_frozen() -> None:
+    context = PRContext(
+        platform=CIPlatform.UNKNOWN,
+        pr_number=None,
+        repository=None,
+        sha=None,
+        branch=None,
+        base_branch=None,
+    )
+    with pytest.raises(AttributeError):
+        context.pr_number = "999"  # type: ignore[misc]
+
+
+# ---------------------------------------------------------------------------
+# HttpRequestConfig is frozen
+# ---------------------------------------------------------------------------
+
+
+def test_http_request_config_is_frozen() -> None:
+    config = HttpRequestConfig(
+        method=HttpMethod.POST,
+        url="https://example.com",
+        operation_label="test",
+    )
+    with pytest.raises(AttributeError):
+        config.url = "https://other.com"  # type: ignore[misc]
