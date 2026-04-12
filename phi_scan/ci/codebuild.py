@@ -27,11 +27,11 @@ class CodeBuildAdapter(BaseCIAdapter):
     """AWS CodeBuild adapter that delegates to GitHub or Bitbucket."""
 
     @property
-    def supports_commit_status(self) -> bool:
+    def can_post_commit_status(self) -> bool:
         return False
 
     @property
-    def supports_security_hub(self) -> bool:
+    def can_import_to_security_hub(self) -> bool:
         return True
 
     def post_pr_comment(self, comment_body: str, pr_context: PRContext) -> None:

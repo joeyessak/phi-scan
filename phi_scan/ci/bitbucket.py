@@ -10,7 +10,8 @@ import logging
 from typing import Any
 
 from phi_scan.ci._base import BaseCIAdapter
-from phi_scan.ci._detect import PRContext, fetch_environment_variable
+from phi_scan.ci._detect import PRContext
+from phi_scan.ci._env import fetch_environment_variable
 from phi_scan.ci._transport import (
     HttpMethod,
     HttpRequestConfig,
@@ -71,7 +72,7 @@ class BitbucketAdapter(BaseCIAdapter):
     """Bitbucket Cloud adapter using the Bitbucket REST API."""
 
     @property
-    def supports_code_insights(self) -> bool:
+    def can_annotate_code(self) -> bool:
         return True
 
     def post_pr_comment(self, comment_body: str, pr_context: PRContext) -> None:

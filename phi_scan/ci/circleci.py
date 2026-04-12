@@ -27,7 +27,7 @@ class CircleCIAdapter(BaseCIAdapter):
     """CircleCI adapter that delegates to GitHub or Bitbucket."""
 
     @property
-    def supports_commit_status(self) -> bool:
+    def can_post_commit_status(self) -> bool:
         return False
 
     def post_pr_comment(self, comment_body: str, pr_context: PRContext) -> None:

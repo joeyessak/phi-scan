@@ -10,7 +10,8 @@ import logging
 from typing import Any
 
 from phi_scan.ci._base import BaseCIAdapter
-from phi_scan.ci._detect import PRContext, fetch_environment_variable
+from phi_scan.ci._detect import PRContext
+from phi_scan.ci._env import fetch_environment_variable
 from phi_scan.ci._transport import (
     HttpMethod,
     HttpRequestConfig,
@@ -52,11 +53,11 @@ class AzureAdapter(BaseCIAdapter):
     """Azure DevOps adapter using the Azure DevOps REST API."""
 
     @property
-    def supports_commit_status(self) -> bool:
+    def can_post_commit_status(self) -> bool:
         return False
 
     @property
-    def supports_work_item_creation(self) -> bool:
+    def can_create_work_item(self) -> bool:
         return True
 
     def post_pr_comment(self, comment_body: str, pr_context: PRContext) -> None:

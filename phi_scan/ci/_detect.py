@@ -11,6 +11,8 @@ import os
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
+from phi_scan.ci._env import fetch_environment_variable
+
 __all__ = [
     "CIPlatform",
     "PRContext",
@@ -154,12 +156,6 @@ def detect_platform() -> CIPlatform:
 # ---------------------------------------------------------------------------
 
 
-def fetch_environment_variable(name: str) -> str | None:
-    """Return the environment variable value, or None if unset or empty."""
-    raw_env_string = os.environ.get(name, "").strip()
-    return raw_env_string if raw_env_string else None
-
-
 def _extract_github_pr_number(github_ref: str) -> str | None:
     if not github_ref.startswith(_GITHUB_PR_REF_PREFIX):
         return None
@@ -253,16 +249,17 @@ def _build_circleci_context() -> PRContext:
 
 
 def _build_bitbucket_context() -> PRContext:
+    repo_slug = fetch_environment_variable(_ENV_BITBUCKET_REPO_SLUG)
     return PRContext(
         platform=CIPlatform.BITBUCKET,
         pr_number=fetch_environment_variable(_ENV_BITBUCKET_PR_ID),
-        repository=fetch_environment_variable(_ENV_BITBUCKET_REPO_SLUG),
+        repository=repo_slug,
         sha=fetch_environment_variable(_ENV_BITBUCKET_COMMIT),
         branch=None,
         base_branch=None,
         extras={
             "workspace": fetch_environment_variable(_ENV_BITBUCKET_WORKSPACE) or "",
-            "repo_slug": fetch_environment_variable(_ENV_BITBUCKET_REPO_SLUG) or "",
+            "repo_slug": repo_slug or "",
         },
     )
 

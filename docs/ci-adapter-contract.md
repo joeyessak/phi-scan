@@ -108,17 +108,17 @@ class BaseCIAdapter(ABC):
         """
 
     @property
-    def supports_sarif_upload(self) -> bool:
+    def can_upload_sarif(self) -> bool:
         """Whether this platform supports native SARIF ingestion."""
         return False
 
     @property
-    def supports_code_insights(self) -> bool:
+    def can_annotate_code(self) -> bool:
         """Whether this platform supports inline code annotations."""
         return False
 
     @property
-    def supports_work_item_creation(self) -> bool:
+    def can_create_work_item(self) -> bool:
         """Whether this platform supports creating work items from findings."""
         return False
 ```
@@ -133,10 +133,10 @@ the adapter's capabilities inspectable:
 |-----------|--------|--------|-------|----------|-----------|-----------|---------|
 | `post_pr_comment` | Yes | Yes | Yes | Yes | Yes | Yes | Yes |
 | `set_commit_status` | Yes | Yes | Yes | Yes | Yes | Yes | Yes |
-| `supports_sarif_upload` | Yes | No | No | No | No | No | No |
-| `supports_code_insights` | No | No | No | No | Yes | No | No |
-| `supports_work_item_creation` | No | No | Yes | No | No | No | No |
-| `supports_security_hub` | No | No | No | No | No | Yes | No |
+| `can_upload_sarif` | Yes | No | No | No | No | No | No |
+| `can_annotate_code` | No | No | No | No | Yes | No | No |
+| `can_create_work_item` | No | No | Yes | No | No | No | No |
+| `can_import_to_security_hub` | No | No | No | No | No | Yes | No |
 
 Platforms that support an extra MUST implement the corresponding method
 (e.g. `upload_sarif()` on `GitHubAdapter`). The base class provides a

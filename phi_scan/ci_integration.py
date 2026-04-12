@@ -379,7 +379,7 @@ def set_commit_status(scan_result: ScanResult, pr_context: PRContext) -> None:
         )
         return
 
-    if not adapter.supports_commit_status:
+    if not adapter.can_post_commit_status:
         _LOG.debug(
             "Adapter %s does not support commit status — skipping",
             type(adapter).__name__,

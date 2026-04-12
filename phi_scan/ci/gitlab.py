@@ -9,7 +9,8 @@ from __future__ import annotations
 import logging
 
 from phi_scan.ci._base import BaseCIAdapter
-from phi_scan.ci._detect import PRContext, fetch_environment_variable
+from phi_scan.ci._detect import PRContext
+from phi_scan.ci._env import fetch_environment_variable
 from phi_scan.ci._transport import (
     HttpMethod,
     HttpRequestConfig,

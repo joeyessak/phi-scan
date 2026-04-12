@@ -79,41 +79,41 @@ def test_resolve_adapter_unknown_returns_none() -> None:
 # ---------------------------------------------------------------------------
 
 
-def test_github_supports_sarif_upload() -> None:
-    assert GitHubAdapter().supports_sarif_upload is True
+def test_github_can_upload_sarif() -> None:
+    assert GitHubAdapter().can_upload_sarif is True
 
 
-def test_bitbucket_supports_code_insights() -> None:
-    assert BitbucketAdapter().supports_code_insights is True
+def test_bitbucket_can_annotate_code() -> None:
+    assert BitbucketAdapter().can_annotate_code is True
 
 
-def test_azure_supports_work_item_creation() -> None:
-    assert AzureAdapter().supports_work_item_creation is True
+def test_azure_can_create_work_item() -> None:
+    assert AzureAdapter().can_create_work_item is True
 
 
-def test_codebuild_supports_security_hub() -> None:
-    assert CodeBuildAdapter().supports_security_hub is True
+def test_codebuild_can_import_to_security_hub() -> None:
+    assert CodeBuildAdapter().can_import_to_security_hub is True
 
 
 def test_adapters_with_commit_status_support() -> None:
-    assert GitHubAdapter().supports_commit_status is True
-    assert GitLabAdapter().supports_commit_status is True
-    assert BitbucketAdapter().supports_commit_status is True
+    assert GitHubAdapter().can_post_commit_status is True
+    assert GitLabAdapter().can_post_commit_status is True
+    assert BitbucketAdapter().can_post_commit_status is True
 
 
 def test_adapters_without_commit_status_support() -> None:
-    assert AzureAdapter().supports_commit_status is False
-    assert JenkinsAdapter().supports_commit_status is False
-    assert CircleCIAdapter().supports_commit_status is False
-    assert CodeBuildAdapter().supports_commit_status is False
+    assert AzureAdapter().can_post_commit_status is False
+    assert JenkinsAdapter().can_post_commit_status is False
+    assert CircleCIAdapter().can_post_commit_status is False
+    assert CodeBuildAdapter().can_post_commit_status is False
 
 
 def test_gitlab_default_capabilities_are_false() -> None:
     adapter = GitLabAdapter()
-    assert adapter.supports_sarif_upload is False
-    assert adapter.supports_code_insights is False
-    assert adapter.supports_work_item_creation is False
-    assert adapter.supports_security_hub is False
+    assert adapter.can_upload_sarif is False
+    assert adapter.can_annotate_code is False
+    assert adapter.can_create_work_item is False
+    assert adapter.can_import_to_security_hub is False
 
 
 # ---------------------------------------------------------------------------

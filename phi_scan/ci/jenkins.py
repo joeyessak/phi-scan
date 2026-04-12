@@ -27,7 +27,7 @@ class JenkinsAdapter(BaseCIAdapter):
     """Jenkins adapter that delegates to GitHub or GitLab based on VCS."""
 
     @property
-    def supports_commit_status(self) -> bool:
+    def can_post_commit_status(self) -> bool:
         return False
 
     def post_pr_comment(self, comment_body: str, pr_context: PRContext) -> None:

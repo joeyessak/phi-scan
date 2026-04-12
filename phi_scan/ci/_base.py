@@ -30,8 +30,14 @@ class BaseCIAdapter(ABC):
     def post_pr_comment(self, comment_body: str, pr_context: PRContext) -> None:
         """Post a comment on the PR/MR associated with this build.
 
+        **PHI-safety contract:** ``comment_body`` is sent to an external
+        API.  Callers must ensure it contains only hashed references and
+        redacted metadata — never raw PHI values, code snippets, or
+        matched strings.  The formatting functions in ``ci_integration``
+        enforce this; bypass them only with an explicit safety audit.
+
         Args:
-            comment_body: Markdown comment text.
+            comment_body: Pre-sanitised Markdown comment text.
             pr_context: Platform context extracted from environment variables.
 
         Raises:
@@ -51,27 +57,27 @@ class BaseCIAdapter(ABC):
         """
 
     @property
-    def supports_commit_status(self) -> bool:
+    def can_post_commit_status(self) -> bool:
         """Whether this platform supports setting commit status directly."""
         return True
 
     @property
-    def supports_sarif_upload(self) -> bool:
+    def can_upload_sarif(self) -> bool:
         """Whether this platform supports native SARIF ingestion."""
         return False
 
     @property
-    def supports_code_insights(self) -> bool:
+    def can_annotate_code(self) -> bool:
         """Whether this platform supports inline code annotations."""
         return False
 
     @property
-    def supports_work_item_creation(self) -> bool:
+    def can_create_work_item(self) -> bool:
         """Whether this platform supports creating work items from findings."""
         return False
 
     @property
-    def supports_security_hub(self) -> bool:
+    def can_import_to_security_hub(self) -> bool:
         """Whether this platform supports AWS Security Hub import."""
         return False
 
