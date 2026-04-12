@@ -230,8 +230,8 @@ def _extract_pr_number_from_url(pr_url: str) -> str | None:
     url_segments = pr_url.rstrip("/").split("/")
     if not url_segments:
         return None
-    pr_number_candidate = url_segments[-1]
-    return pr_number_candidate if pr_number_candidate.isdigit() else None
+    last_url_segment = url_segments[-1]
+    return last_url_segment if last_url_segment.isdigit() else None
 
 
 def _build_circleci_context() -> PRContext:
@@ -312,6 +312,7 @@ _PLATFORM_CONTEXT_BUILDERS: dict[CIPlatform, Callable[[], PRContext]] = {
     CIPlatform.BITBUCKET: _build_bitbucket_context,
     CIPlatform.CODEBUILD: _build_codebuild_context,
     CIPlatform.JENKINS: _build_jenkins_context,
+    CIPlatform.UNKNOWN: _build_unknown_context,
 }
 
 
@@ -322,5 +323,5 @@ def get_pr_context() -> PRContext:
     repository, commit SHA, and branch.
     """
     platform = detect_platform()
-    builder = _PLATFORM_CONTEXT_BUILDERS.get(platform, _build_unknown_context)
+    builder = _PLATFORM_CONTEXT_BUILDERS[platform]
     return builder()

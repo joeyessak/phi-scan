@@ -88,10 +88,10 @@ class AzureAdapter(BaseCIAdapter):
         collection_uri = pr_context.extras.get("collection_uri", "")
         team_project = pr_context.extras.get("team_project", "")
 
-        if not all((pr_id, repo_id, collection_uri, team_project)):
-            raise CIIntegrationError(
-                "Azure DevOps: missing PR context fields required for PR comment"
-            )
+        if not pr_id or not repo_id:
+            raise CIIntegrationError("Azure DevOps: missing PR ID or repository ID")
+        if not collection_uri or not team_project:
+            raise CIIntegrationError("Azure DevOps: missing collection URI or team project")
 
         system_access_token = fetch_environment_variable(_ENV_SYSTEM_ACCESSTOKEN)
         if not system_access_token:
@@ -110,4 +110,4 @@ class AzureAdapter(BaseCIAdapter):
         _LOG.debug("Azure DevOps: PR thread comment posted to PR #%s", pr_id)
 
     def set_commit_status(self, scan_result: ScanResult, pr_context: PRContext) -> None:
-        self._raise_unsupported_operation_error(UnsupportedOperation.COMMIT_STATUS)
+        self._abort_unsupported_operation(UnsupportedOperation.COMMIT_STATUS)

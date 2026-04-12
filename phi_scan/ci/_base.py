@@ -100,7 +100,7 @@ class BaseCIAdapter(ABC):
         """Whether this platform supports AWS Security Hub import."""
         return False
 
-    def _raise_unsupported_operation_error(self, operation_name: UnsupportedOperation) -> NoReturn:
+    def _abort_unsupported_operation(self, operation_name: UnsupportedOperation) -> NoReturn:
         raise CIIntegrationError(
             _UNSUPPORTED_OPERATION_MESSAGE.format(
                 adapter_name=type(self).__name__,
@@ -110,16 +110,16 @@ class BaseCIAdapter(ABC):
 
     def upload_sarif(self, scan_result: ScanResult, pr_context: PRContext) -> None:
         """Upload SARIF to the platform's code scanning API."""
-        self._raise_unsupported_operation_error(UnsupportedOperation.SARIF_UPLOAD)
+        self._abort_unsupported_operation(UnsupportedOperation.SARIF_UPLOAD)
 
     def annotate_code(self, scan_result: ScanResult, pr_context: PRContext) -> None:
         """Post inline code annotations to the platform."""
-        self._raise_unsupported_operation_error(UnsupportedOperation.CODE_ANNOTATIONS)
+        self._abort_unsupported_operation(UnsupportedOperation.CODE_ANNOTATIONS)
 
     def create_work_item(self, scan_result: ScanResult, pr_context: PRContext) -> None:
         """Create a work item or ticket from scan findings."""
-        self._raise_unsupported_operation_error(UnsupportedOperation.WORK_ITEM_CREATION)
+        self._abort_unsupported_operation(UnsupportedOperation.WORK_ITEM_CREATION)
 
     def import_to_security_hub(self, scan_result: ScanResult, pr_context: PRContext) -> None:
         """Import findings into AWS Security Hub."""
-        self._raise_unsupported_operation_error(UnsupportedOperation.SECURITY_HUB_IMPORT)
+        self._abort_unsupported_operation(UnsupportedOperation.SECURITY_HUB_IMPORT)
