@@ -21,6 +21,8 @@ from phi_scan.models import ScanResult
 
 _LOG: logging.Logger = logging.getLogger(__name__)
 
+_GITHUB_URL_HOSTNAME: str = "github.com"
+_BITBUCKET_URL_HOSTNAME: str = "bitbucket.org"
 _MIN_URL_PARTS_FOR_REPO_EXTRACTION: int = 2
 
 
@@ -33,10 +35,10 @@ class CodeBuildAdapter(BaseCIAdapter):
 
     def post_pr_comment(self, comment_body: str, pr_context: PRContext) -> None:
         repo_url = os.environ.get("CODEBUILD_SOURCE_REPO_URL", "")
-        if "github.com" in repo_url:
+        if _GITHUB_URL_HOSTNAME in repo_url:
             github_context = _build_github_context_from_codebuild(repo_url, pr_context)
             GitHubAdapter().post_pr_comment(comment_body, github_context)
-        elif "bitbucket.org" in repo_url:
+        elif _BITBUCKET_URL_HOSTNAME in repo_url:
             bitbucket_context = _build_bitbucket_context_from_codebuild(repo_url, pr_context)
             BitbucketAdapter().post_pr_comment(comment_body, bitbucket_context)
         else:

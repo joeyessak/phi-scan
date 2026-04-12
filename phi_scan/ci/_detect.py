@@ -16,6 +16,7 @@ __all__ = [
     "PRContext",
     "detect_platform",
     "get_pr_context",
+    "read_env_variable",
 ]
 
 # ---------------------------------------------------------------------------
@@ -73,6 +74,13 @@ _ENV_CODEBUILD_WEBHOOK_BASE_REF: str = "CODEBUILD_WEBHOOK_BASE_REF"
 # GitLab default
 _GITLAB_DEFAULT_SERVER_URL: str = "https://gitlab.com"
 
+# GitHub ref prefix for PR detection (e.g. "refs/pull/42/merge")
+_GITHUB_PR_REF_PREFIX: str = "refs/pull/"
+_GITHUB_PR_REF_NUMBER_INDEX: int = 2
+
+# CodeBuild webhook trigger prefix for PR detection (e.g. "pr/42")
+_CODEBUILD_PR_TRIGGER_PREFIX: str = "pr/"
+
 
 # ---------------------------------------------------------------------------
 # Public types
@@ -120,21 +128,19 @@ def detect_platform() -> CIPlatform:
     Checks well-known platform sentinel variables in order of specificity.
     Returns ``CIPlatform.UNKNOWN`` when none of the known sentinels are set.
     """
-    env_get = os.environ.get
-
-    if env_get(_ENV_GITHUB_ACTIONS) == "true":
+    if os.environ.get(_ENV_GITHUB_ACTIONS) == "true":
         return CIPlatform.GITHUB_ACTIONS
-    if env_get(_ENV_GITLAB_CI) == "true":
+    if os.environ.get(_ENV_GITLAB_CI) == "true":
         return CIPlatform.GITLAB_CI
-    if env_get(_ENV_TF_BUILD) == "True":
+    if os.environ.get(_ENV_TF_BUILD) == "True":
         return CIPlatform.AZURE_DEVOPS
-    if env_get(_ENV_CIRCLECI) == "true":
+    if os.environ.get(_ENV_CIRCLECI) == "true":
         return CIPlatform.CIRCLECI
-    if env_get(_ENV_BITBUCKET_BUILD_NUMBER):
+    if os.environ.get(_ENV_BITBUCKET_BUILD_NUMBER):
         return CIPlatform.BITBUCKET
-    if env_get(_ENV_CODEBUILD_BUILD_ID):
+    if os.environ.get(_ENV_CODEBUILD_BUILD_ID):
         return CIPlatform.CODEBUILD
-    if env_get(_ENV_JENKINS_URL):
+    if os.environ.get(_ENV_JENKINS_URL):
         return CIPlatform.JENKINS
     return CIPlatform.UNKNOWN
 
@@ -155,18 +161,21 @@ def get_pr_context() -> PRContext:
 # ---------------------------------------------------------------------------
 
 
-def _env(name: str) -> str | None:
+def read_env_variable(name: str) -> str | None:
     """Return the environment variable value, or None if unset or empty."""
     env_value = os.environ.get(name, "").strip()
     return env_value if env_value else None
+
+
+_env = read_env_variable
 
 
 def _build_github_context() -> PRContext:
     pr_number = _env(_ENV_PR_NUMBER)
     if not pr_number:
         ref = _env(_ENV_GITHUB_REF) or ""
-        if ref.startswith("refs/pull/"):
-            pr_number = ref.split("/")[2]
+        if ref.startswith(_GITHUB_PR_REF_PREFIX):
+            pr_number = ref.split("/")[_GITHUB_PR_REF_NUMBER_INDEX]
     return PRContext(
         platform=CIPlatform.GITHUB_ACTIONS,
         pr_number=pr_number,
@@ -191,10 +200,14 @@ def _build_gitlab_context() -> PRContext:
     )
 
 
+def _normalize_trailing_slash(uri: str) -> str:
+    if uri and not uri.endswith("/"):
+        return uri + "/"
+    return uri
+
+
 def _build_azure_context() -> PRContext:
-    collection_uri = _env(_ENV_SYSTEM_TEAMFOUNDATIONCOLLECTIONURI) or ""
-    if collection_uri and not collection_uri.endswith("/"):
-        collection_uri += "/"
+    collection_uri = _normalize_trailing_slash(_env(_ENV_SYSTEM_TEAMFOUNDATIONCOLLECTIONURI) or "")
     return PRContext(
         platform=CIPlatform.AZURE_DEVOPS,
         pr_number=_env(_ENV_SYSTEM_PULLREQUEST_PULLREQUESTID),
@@ -248,8 +261,8 @@ def _build_bitbucket_context() -> PRContext:
 def _build_codebuild_context() -> PRContext:
     trigger = _env(_ENV_CODEBUILD_WEBHOOK_TRIGGER) or ""
     pr_number: str | None = None
-    if trigger.startswith("pr/"):
-        pr_number = trigger[3:]
+    if trigger.startswith(_CODEBUILD_PR_TRIGGER_PREFIX):
+        pr_number = trigger[len(_CODEBUILD_PR_TRIGGER_PREFIX) :]
     return PRContext(
         platform=CIPlatform.CODEBUILD,
         pr_number=pr_number,

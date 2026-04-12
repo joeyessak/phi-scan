@@ -19,7 +19,6 @@ from __future__ import annotations
 
 from phi_scan.ci._base import BaseCIAdapter
 from phi_scan.ci._detect import CIPlatform, PRContext, detect_platform, get_pr_context
-from phi_scan.ci._transport import HttpMethod, HttpRequestConfig, execute_http_request
 from phi_scan.ci.azure import AzureAdapter
 from phi_scan.ci.bitbucket import BitbucketAdapter
 from phi_scan.ci.circleci import CircleCIAdapter
@@ -37,12 +36,9 @@ __all__ = [
     "CodeBuildAdapter",
     "GitHubAdapter",
     "GitLabAdapter",
-    "HttpMethod",
-    "HttpRequestConfig",
     "JenkinsAdapter",
     "PRContext",
     "detect_platform",
-    "execute_http_request",
     "get_pr_context",
     "resolve_adapter",
 ]

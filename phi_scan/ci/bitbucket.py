@@ -10,10 +10,9 @@ Note: Bitbucket Code Insights (report + annotations) remains in
 from __future__ import annotations
 
 import logging
-import os
 
 from phi_scan.ci._base import BaseCIAdapter
-from phi_scan.ci._detect import PRContext
+from phi_scan.ci._detect import PRContext, read_env_variable
 from phi_scan.ci._transport import HttpMethod, HttpRequestConfig, execute_http_request
 from phi_scan.models import ScanResult
 
@@ -35,11 +34,7 @@ _BITBUCKET_COMMENT_RAW_KEY: str = "raw"
 _COMMIT_STATUS_CONTEXT: str = "phi-scan"
 _COMMIT_STATUS_DESCRIPTION_CLEAN: str = "No PHI/PII violations found"
 _COMMIT_STATUS_DESCRIPTION_VIOLATIONS: str = "{count} PHI/PII violation(s) found"
-
-
-def _env(name: str) -> str | None:
-    env_value = os.environ.get(name, "").strip()
-    return env_value if env_value else None
+_SHA_LOG_PREFIX_LENGTH: int = 8
 
 
 class BitbucketAdapter(BaseCIAdapter):
@@ -58,7 +53,7 @@ class BitbucketAdapter(BaseCIAdapter):
             _LOG.debug("Bitbucket: missing PR context — skipping comment")
             return
 
-        token = _env(_ENV_BITBUCKET_TOKEN)
+        token = read_env_variable(_ENV_BITBUCKET_TOKEN)
         if not token:
             _LOG.warning("Bitbucket: BITBUCKET_TOKEN not set — skipping comment")
             return
@@ -91,7 +86,7 @@ class BitbucketAdapter(BaseCIAdapter):
             _LOG.debug("Bitbucket: missing context — skipping commit status")
             return
 
-        token = _env(_ENV_BITBUCKET_TOKEN)
+        token = read_env_variable(_ENV_BITBUCKET_TOKEN)
         if not token:
             _LOG.warning("Bitbucket: BITBUCKET_TOKEN not set — skipping commit status")
             return
@@ -123,4 +118,4 @@ class BitbucketAdapter(BaseCIAdapter):
             )
         )
 
-        _LOG.debug("Bitbucket: commit status set to %s for %s", state, sha[:8])
+        _LOG.debug("Bitbucket: commit status set to %s for %s", state, sha[:_SHA_LOG_PREFIX_LENGTH])

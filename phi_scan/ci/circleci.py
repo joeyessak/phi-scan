@@ -18,6 +18,8 @@ from phi_scan.models import ScanResult
 
 _LOG: logging.Logger = logging.getLogger(__name__)
 
+_GITHUB_URL_HOSTNAME: str = "github.com"
+_BITBUCKET_URL_HOSTNAME: str = "bitbucket.org"
 _MIN_URL_PARTS_FOR_REPO_EXTRACTION: int = 5
 
 
@@ -30,10 +32,10 @@ class CircleCIAdapter(BaseCIAdapter):
             _LOG.debug("CircleCI: CIRCLE_PULL_REQUEST not set — skipping comment")
             return
 
-        if "github.com" in pr_url:
+        if _GITHUB_URL_HOSTNAME in pr_url:
             github_context = _build_github_context_from_circle(pr_url, pr_context)
             GitHubAdapter().post_pr_comment(comment_body, github_context)
-        elif "bitbucket.org" in pr_url:
+        elif _BITBUCKET_URL_HOSTNAME in pr_url:
             bitbucket_context = _build_bitbucket_context_from_circle(pr_url, pr_context)
             BitbucketAdapter().post_pr_comment(comment_body, bitbucket_context)
         else:

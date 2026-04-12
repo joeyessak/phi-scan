@@ -28,15 +28,13 @@ from phi_scan.ci import (
     CodeBuildAdapter,
     GitHubAdapter,
     GitLabAdapter,
-    HttpMethod,
-    HttpRequestConfig,
     JenkinsAdapter,
     PRContext,
     detect_platform,
-    execute_http_request,
     get_pr_context,
     resolve_adapter,
 )
+from phi_scan.ci._transport import HttpMethod, HttpRequestConfig, execute_http_request
 from phi_scan.exceptions import CIIntegrationError
 
 # ---------------------------------------------------------------------------
@@ -152,15 +150,21 @@ def test_backward_compat_import_from_ci_integration(name: str) -> None:
     assert hasattr(old_module, name), f"{name} not importable from phi_scan.ci_integration"
 
 
+_TRANSPORT_NAMES: set[str] = {"HttpMethod", "HttpRequestConfig", "execute_http_request"}
+
+
 @pytest.mark.parametrize("name", _BACKWARD_COMPAT_NAMES)
 def test_old_and_new_paths_resolve_to_same_object(name: str) -> None:
     import phi_scan.ci as new_module
+    import phi_scan.ci._transport as transport_module
     import phi_scan.ci_integration as old_module
 
     if name == "CIIntegrationError":
         import phi_scan.exceptions
 
         new_obj = phi_scan.exceptions.CIIntegrationError
+    elif name in _TRANSPORT_NAMES:
+        new_obj = getattr(transport_module, name)
     else:
         new_obj = getattr(new_module, name)
     old_obj = getattr(old_module, name)
@@ -193,7 +197,7 @@ def test_execute_http_request_wraps_network_error() -> None:
         "phi_scan.ci._transport.httpx.request",
         side_effect=httpx.ConnectError("connection refused"),
     ):
-        with pytest.raises(CIIntegrationError, match="request failed"):
+        with pytest.raises(CIIntegrationError, match="request failed.*ConnectError"):
             execute_http_request(
                 HttpRequestConfig(
                     method=HttpMethod.POST,
@@ -201,6 +205,23 @@ def test_execute_http_request_wraps_network_error() -> None:
                     operation_label="test operation",
                 )
             )
+
+
+def test_execute_http_request_network_error_excludes_url() -> None:
+    with patch(
+        "phi_scan.ci._transport.httpx.request",
+        side_effect=httpx.ConnectError("connection refused to https://secret.example.com/phi-data"),
+    ):
+        with pytest.raises(CIIntegrationError) as exc_info:
+            execute_http_request(
+                HttpRequestConfig(
+                    method=HttpMethod.POST,
+                    url="https://secret.example.com/phi-data",
+                    operation_label="test operation",
+                )
+            )
+        assert "secret.example.com" not in str(exc_info.value)
+        assert "ConnectError" in str(exc_info.value)
 
 
 # ---------------------------------------------------------------------------

@@ -43,15 +43,13 @@ from phi_scan.ci import (  # noqa: F401 — backward-compatible re-exports
     CodeBuildAdapter,
     GitHubAdapter,
     GitLabAdapter,
-    HttpMethod,
-    HttpRequestConfig,
     JenkinsAdapter,
     PRContext,
     detect_platform,
-    execute_http_request,
     get_pr_context,
     resolve_adapter,
 )
+from phi_scan.ci._transport import HttpMethod, HttpRequestConfig, execute_http_request
 from phi_scan.constants import SeverityLevel
 from phi_scan.exceptions import CIIntegrationError  # noqa: F401 — backward-compatible re-export
 from phi_scan.models import ScanResult

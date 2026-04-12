@@ -11,7 +11,7 @@ import os
 import subprocess
 
 from phi_scan.ci._base import BaseCIAdapter
-from phi_scan.ci._detect import PRContext
+from phi_scan.ci._detect import PRContext, read_env_variable
 from phi_scan.ci._transport import HttpMethod, HttpRequestConfig, execute_http_request
 from phi_scan.exceptions import CIIntegrationError
 from phi_scan.models import ScanResult
@@ -28,11 +28,7 @@ _COMMIT_STATUS_DESCRIPTION_CLEAN: str = "No PHI/PII violations found"
 _COMMIT_STATUS_DESCRIPTION_VIOLATIONS: str = "{count} PHI/PII violation(s) found"
 
 _MAX_ERROR_RESPONSE_LOG_LENGTH: int = 200
-
-
-def _env(name: str) -> str | None:
-    env_value = os.environ.get(name, "").strip()
-    return env_value if env_value else None
+_SHA_LOG_PREFIX_LENGTH: int = 8
 
 
 class GitHubAdapter(BaseCIAdapter):
@@ -48,7 +44,7 @@ class GitHubAdapter(BaseCIAdapter):
             _LOG.debug("GitHub: no PR number — skipping comment")
             return
 
-        token = _env(_ENV_GITHUB_TOKEN)
+        token = read_env_variable(_ENV_GITHUB_TOKEN)
         if not token:
             _LOG.warning("GitHub: GITHUB_TOKEN not set — skipping comment")
             return
@@ -92,7 +88,7 @@ class GitHubAdapter(BaseCIAdapter):
             _LOG.debug("GitHub: missing SHA or repository — skipping status")
             return
 
-        token = _env(_ENV_GITHUB_TOKEN)
+        token = read_env_variable(_ENV_GITHUB_TOKEN)
         if not token:
             _LOG.warning("GitHub: GITHUB_TOKEN not set — skipping commit status")
             return
@@ -129,4 +125,5 @@ class GitHubAdapter(BaseCIAdapter):
             )
         )
 
-        _LOG.debug("GitHub: commit status set to %s for %s", github_state, sha[:8])
+        sha_prefix = sha[:_SHA_LOG_PREFIX_LENGTH]
+        _LOG.debug("GitHub: commit status set to %s for %s", github_state, sha_prefix)

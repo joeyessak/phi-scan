@@ -55,17 +55,17 @@ class HttpRequestConfig:
     timeout_seconds: float = _HTTP_TIMEOUT_SECONDS
 
 
-def _build_request_keyword_arguments(request_config: HttpRequestConfig) -> dict[str, Any]:
-    request_keyword_arguments: dict[str, Any] = {"timeout": request_config.timeout_seconds}
+def _assemble_request_options(request_config: HttpRequestConfig) -> dict[str, Any]:
+    options: dict[str, Any] = {"timeout": request_config.timeout_seconds}
     if request_config.headers is not None:
-        request_keyword_arguments["headers"] = request_config.headers
+        options["headers"] = request_config.headers
     if request_config.json_body is not None:
-        request_keyword_arguments["json"] = request_config.json_body
+        options["json"] = request_config.json_body
     if request_config.binary_body is not None:
-        request_keyword_arguments["content"] = request_config.binary_body
+        options["content"] = request_config.binary_body
     if request_config.auth is not None:
-        request_keyword_arguments["auth"] = request_config.auth
-    return request_keyword_arguments
+        options["auth"] = request_config.auth
+    return options
 
 
 def execute_http_request(request_config: HttpRequestConfig) -> httpx.Response:
@@ -80,11 +80,9 @@ def execute_http_request(request_config: HttpRequestConfig) -> httpx.Response:
     Raises:
         CIIntegrationError: On HTTP 4xx/5xx or any network error.
     """
-    request_keyword_arguments = _build_request_keyword_arguments(request_config)
+    options = _assemble_request_options(request_config)
     try:
-        response = httpx.request(
-            request_config.method, request_config.url, **request_keyword_arguments
-        )
+        response = httpx.request(request_config.method, request_config.url, **options)
         response.raise_for_status()
     except httpx.HTTPStatusError as status_error:
         raise CIIntegrationError(
@@ -94,6 +92,6 @@ def execute_http_request(request_config: HttpRequestConfig) -> httpx.Response:
         ) from status_error
     except httpx.RequestError as request_error:
         raise CIIntegrationError(
-            f"{request_config.operation_label} request failed: {request_error}"
+            f"{request_config.operation_label} request failed: {type(request_error).__name__}"
         ) from request_error
     return response

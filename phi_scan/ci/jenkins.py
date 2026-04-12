@@ -18,6 +18,8 @@ from phi_scan.models import ScanResult
 
 _LOG: logging.Logger = logging.getLogger(__name__)
 
+_GITHUB_URL_HOSTNAME: str = "github.com"
+_GITLAB_URL_KEYWORD: str = "gitlab"
 _MIN_URL_PARTS_FOR_REPO_EXTRACTION: int = 5
 
 
@@ -30,10 +32,10 @@ class JenkinsAdapter(BaseCIAdapter):
             _LOG.debug("Jenkins: CHANGE_URL not set — skipping comment")
             return
 
-        if "github.com" in change_url:
+        if _GITHUB_URL_HOSTNAME in change_url:
             github_context = _build_github_context_from_jenkins(change_url, pr_context)
             GitHubAdapter().post_pr_comment(comment_body, github_context)
-        elif "gitlab" in change_url:
+        elif _GITLAB_URL_KEYWORD in change_url:
             _LOG.debug("Jenkins: GitLab VCS detected — delegating to GitLab adapter")
             GitLabAdapter().post_pr_comment(comment_body, pr_context)
         else:

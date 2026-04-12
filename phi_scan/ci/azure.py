@@ -11,10 +11,9 @@ follow-up PR.
 from __future__ import annotations
 
 import logging
-import os
 
 from phi_scan.ci._base import BaseCIAdapter
-from phi_scan.ci._detect import PRContext
+from phi_scan.ci._detect import PRContext, read_env_variable
 from phi_scan.ci._transport import HttpMethod, HttpRequestConfig, execute_http_request
 from phi_scan.models import ScanResult
 
@@ -29,11 +28,6 @@ _AZURE_PR_THREADS_PATH: str = (
 )
 
 _COMMIT_STATUS_CONTEXT: str = "phi-scan"
-
-
-def _env(name: str) -> str | None:
-    env_value = os.environ.get(name, "").strip()
-    return env_value if env_value else None
 
 
 class AzureAdapter(BaseCIAdapter):
@@ -53,7 +47,7 @@ class AzureAdapter(BaseCIAdapter):
             _LOG.debug("Azure DevOps: missing PR context — skipping comment")
             return
 
-        token = _env(_ENV_SYSTEM_ACCESSTOKEN)
+        token = read_env_variable(_ENV_SYSTEM_ACCESSTOKEN)
         if not token:
             _LOG.warning(
                 "Azure DevOps: SYSTEM_ACCESSTOKEN not set — "
