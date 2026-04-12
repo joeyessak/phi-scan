@@ -140,7 +140,9 @@ the adapter's capabilities inspectable:
 
 Platforms that support an extra MUST implement the corresponding method
 (e.g. `upload_sarif()` on `GitHubAdapter`). The base class provides a
-default that raises `NotImplementedError` for each extra.
+default that raises `CIIntegrationError` (the domain exception) for
+each extra — not `NotImplementedError`, which is a built-in and does
+not conform to the project's custom-exception-for-domain-errors rule.
 
 ---
 
@@ -212,10 +214,19 @@ transport module MUST maintain 100% coverage (it is security-critical).
    `_detect.py`.
 2. Move platform detection logic to `_detect.py`.
 3. Move shared HTTP logic to `_transport.py`.
-4. Keep `ci_integration.py` as a thin re-export shim:
+4. Keep `ci_integration.py` as a thin re-export shim with explicit
+   named imports (no wildcard `import *`):
    ```python
    # phi_scan/ci_integration.py — deprecated, will be removed in v1.3
-   from phi_scan.ci import *  # noqa: F401,F403
+   from phi_scan.ci import (  # noqa: F401
+       CIIntegrationError,
+       CIPlatform,
+       PRContext,
+       detect_platform,
+       get_pr_context,
+       post_pr_comment,
+       set_commit_status,
+   )
    ```
 5. Emit `DeprecationWarning` on import of the old module path.
 

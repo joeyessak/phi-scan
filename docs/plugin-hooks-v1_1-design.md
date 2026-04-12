@@ -88,6 +88,7 @@ The current v1.0 pipeline and the proposed v1.1 additions:
 ```python
 from phi_scan.plugin_api import ScanContext, ScanFinding
 
+@dataclass(frozen=True)
 class SuppressDecision:
     """Returned by a suppressor for each finding."""
     # True  → suppress (drop the finding from results)
@@ -127,6 +128,7 @@ class BaseSuppressor(ABC):
 | `SuppressDecision` dataclass (not bare `bool`) | Captures the reason for audit-trail logging. A suppressed finding with no reason is hard to debug in compliance reviews. |
 | Receives `line` text | Suppressors MAY need linguistic context (e.g. "this line is a comment in language X"). Passing the line avoids suppressors reading the file directly, preserving the no-file-access contract. |
 | No access to other findings | Suppressors see one finding at a time. Cross-finding correlation (e.g. "suppress if another finding on the same line has higher confidence") is intentionally out of scope for v1.1. |
+| 3-argument limit on `evaluate()` | `evaluate(finding, context, line)` is at the maximum of 3 non-self arguments per project code standards. Any future expansion MUST use a `@dataclass` parameter object rather than adding a fourth argument. |
 
 ### Prohibited Actions
 
@@ -155,7 +157,7 @@ class FinalizedFinding:
     """A scored, post-suppression finding delivered to output sinks."""
     finding: ScanFinding
     context: ScanContext
-    severity: str          # "info" | "low" | "medium" | "high"
+    severity: SeverityLevel  # Enum: INFO, LOW, MEDIUM, HIGH
     value_hash: str        # SHA-256 hex digest — never raw PHI
 
 class BaseOutputSink(ABC):
@@ -204,12 +206,15 @@ Output sinks receive `FinalizedFinding` objects that contain:
 - `value_hash` (SHA-256 hex) — **never** raw PHI.
 - `context.file_path` — the file path, which is metadata, not PHI.
 - `finding.start_offset` / `finding.end_offset` — column offsets only.
-- `severity` — a classification label.
+- `severity` — a `SeverityLevel` enum member.
 
 Sinks MUST NOT attempt to reconstruct the original PHI value from the
-hash or from the file path + offsets. The host does not pass the line
-text to sinks — this is a deliberate omission to prevent accidental PHI
-exfiltration by a sink that forwards findings to a remote service.
+hash or from the file path + offsets. Sinks MUST NOT open, read, or
+stat files at `context.file_path` — doing so would bypass the PHI
+safety boundary that the `FinalizedFinding` contract is designed to
+enforce. The host does not pass the line text to sinks — this is a
+deliberate omission to prevent accidental PHI exfiltration by a sink
+that forwards findings to a remote service.
 
 ### Remote Communication
 
@@ -318,7 +323,7 @@ all three hook types.
 | # | Question | Leaning | Status |
 |---|----------|---------|--------|
 | 1 | Should suppressors receive the full `Finding` (internal model) or only `ScanFinding` (plugin API model)? | `ScanFinding` — keeps the plugin surface minimal and avoids coupling to internal fields. | Tentative |
-| 2 | Should output sinks receive line text for context-rich reporting? | No — PHI safety outweighs convenience. Sinks that need context can read the file themselves (they already have `file_path` + offsets). | Tentative |
+| 2 | Should output sinks receive line text for context-rich reporting? | No — PHI safety outweighs convenience. Sinks MUST NOT read file content to reconstruct PHI from `file_path` + offsets; the no-line-text contract exists precisely to prevent this exfiltration path. Sinks that need richer context should request a host-redacted snippet in a future API version. | Tentative |
 | 3 | Should suppressor ordering be configurable? | Deferred to v1.2. Deterministic sort is sufficient for v1.1. | Deferred |
 | 4 | Should the host enforce performance budgets via hard timeouts? | Deferred to v1.2 pending profiling data. v1.1 documents budgets as guidance. | Deferred |
 | 5 | Should `FinalizedFinding` include the recognizer name that produced it? | Likely yes — useful for sink-side filtering ("only send NLP findings to SIEM"). Needs API surface review. | Open |
