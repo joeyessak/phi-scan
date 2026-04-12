@@ -16,7 +16,6 @@ __all__ = [
     "PRContext",
     "detect_platform",
     "get_pr_context",
-    "fetch_environment_variable",
 ]
 
 # ---------------------------------------------------------------------------
@@ -82,8 +81,8 @@ _GITHUB_PR_REF_NUMBER_INDEX: int = 2
 _CODEBUILD_PR_TRIGGER_PREFIX: str = "pr/"
 
 # Sentinel values for CI platform detection env vars
-_ENV_SENTINEL_TRUE_LOWERCASE: str = "true"
-_ENV_SENTINEL_TRUE_TITLECASE: str = "True"
+_CI_ENV_SENTINEL_TRUE: str = "true"
+_AZURE_ENV_SENTINEL_TRUE: str = "True"
 
 
 # ---------------------------------------------------------------------------
@@ -108,8 +107,8 @@ class CIPlatform(enum.Enum):
 class PRContext:
     """Platform-neutral PR/MR context extracted from environment variables.
 
-    Fields that are not available on the current platform are ``None``.
-    The CLI passes this object to ``post_pr_comment`` and ``set_commit_status``.
+    Top-level fields that are unavailable on the current platform are ``None``.
+    Values inside ``extras`` are always strings (empty string when absent).
     """
 
     platform: CIPlatform
@@ -132,13 +131,13 @@ def detect_platform() -> CIPlatform:
     Checks well-known platform sentinel variables in order of specificity.
     Returns ``CIPlatform.UNKNOWN`` when none of the known sentinels are set.
     """
-    if os.environ.get(_ENV_GITHUB_ACTIONS) == _ENV_SENTINEL_TRUE_LOWERCASE:
+    if os.environ.get(_ENV_GITHUB_ACTIONS) == _CI_ENV_SENTINEL_TRUE:
         return CIPlatform.GITHUB_ACTIONS
-    if os.environ.get(_ENV_GITLAB_CI) == _ENV_SENTINEL_TRUE_LOWERCASE:
+    if os.environ.get(_ENV_GITLAB_CI) == _CI_ENV_SENTINEL_TRUE:
         return CIPlatform.GITLAB_CI
-    if os.environ.get(_ENV_TF_BUILD) == _ENV_SENTINEL_TRUE_TITLECASE:
+    if os.environ.get(_ENV_TF_BUILD) == _AZURE_ENV_SENTINEL_TRUE:
         return CIPlatform.AZURE_DEVOPS
-    if os.environ.get(_ENV_CIRCLECI) == _ENV_SENTINEL_TRUE_LOWERCASE:
+    if os.environ.get(_ENV_CIRCLECI) == _CI_ENV_SENTINEL_TRUE:
         return CIPlatform.CIRCLECI
     if os.environ.get(_ENV_BITBUCKET_BUILD_NUMBER):
         return CIPlatform.BITBUCKET
