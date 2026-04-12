@@ -6,6 +6,7 @@ import json
 
 import typer
 from rich import box as rich_box
+from rich.markup import escape as escape_rich_markup
 from rich.table import Table
 
 from phi_scan.constants import EXIT_CODE_CLEAN
@@ -126,7 +127,7 @@ def _add_skipped_row(table: Table, skipped_plugin: SkippedPlugin) -> None:
         _EMPTY_CELL,
         _EMPTY_CELL,
         _EMPTY_CELL,
-        f"[red]{_STATUS_SKIPPED}: {skipped_plugin.reason}[/red]",
+        f"[red]{_STATUS_SKIPPED}: {escape_rich_markup(skipped_plugin.reason)}[/red]",
     )
 
 
