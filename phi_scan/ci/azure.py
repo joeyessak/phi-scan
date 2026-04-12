@@ -6,6 +6,7 @@ Uses ``SYSTEM_ACCESSTOKEN`` for authentication.
 
 from __future__ import annotations
 
+import enum
 import logging
 from typing import Any
 
@@ -32,8 +33,18 @@ _AZURE_PR_THREADS_PATH: str = (
 
 _COMMIT_STATUS_CONTEXT: str = "phi-scan"
 _AZURE_COMMENT_PARENT_ID_ROOT: int = 0
-_AZURE_COMMENT_TYPE_TEXT: int = 1  # Azure DevOps commentType: 1 = text (see REST API docs)
-_AZURE_THREAD_STATUS_ACTIVE: str = "active"
+
+
+class _AzureCommentType(enum.IntEnum):
+    """Azure DevOps PR thread comment types (REST API)."""
+
+    TEXT = 1
+
+
+class _AzureThreadStatus(enum.StrEnum):
+    """Azure DevOps PR thread statuses (REST API)."""
+
+    ACTIVE = "active"
 
 
 def _build_pr_threads_url(pr_context: PRContext) -> str:
@@ -52,10 +63,10 @@ def _build_azure_thread_payload(comment_body: str) -> dict[str, Any]:
             {
                 "parentCommentId": _AZURE_COMMENT_PARENT_ID_ROOT,
                 "content": comment_body,
-                "commentType": _AZURE_COMMENT_TYPE_TEXT,
+                "commentType": _AzureCommentType.TEXT,
             }
         ],
-        "status": _AZURE_THREAD_STATUS_ACTIVE,
+        "status": _AzureThreadStatus.ACTIVE,
     }
 
 

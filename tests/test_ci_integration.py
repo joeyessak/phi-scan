@@ -349,8 +349,8 @@ def test_get_pr_context_bitbucket_extracts_pr_id(
 
     assert context.platform == CIPlatform.BITBUCKET
     assert context.pr_number == _BITBUCKET_PR_ID
+    assert context.repository == _BITBUCKET_REPO_SLUG
     assert context.extras["workspace"] == _BITBUCKET_WORKSPACE
-    assert context.extras["repo_slug"] == _BITBUCKET_REPO_SLUG
 
 
 # ---------------------------------------------------------------------------

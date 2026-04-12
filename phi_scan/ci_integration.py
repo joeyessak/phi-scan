@@ -348,8 +348,9 @@ def post_pr_comment(scan_result: ScanResult, pr_context: PRContext) -> None:
         _LOG.debug("No PR number in context — skipping comment posting")
         return
 
-    adapter = resolve_adapter(pr_context.platform)
-    if adapter is None:
+    try:
+        adapter = resolve_adapter(pr_context.platform)
+    except CIIntegrationError:
         _LOG.warning(
             "PR comment posting not implemented for platform %s",
             pr_context.platform.value,
@@ -375,8 +376,9 @@ def set_commit_status(scan_result: ScanResult, pr_context: PRContext) -> None:
         _LOG.debug("No commit SHA in context — skipping status posting")
         return
 
-    adapter = resolve_adapter(pr_context.platform)
-    if adapter is None:
+    try:
+        adapter = resolve_adapter(pr_context.platform)
+    except CIIntegrationError:
         _LOG.warning(
             "Commit status not implemented for platform %s",
             pr_context.platform.value,

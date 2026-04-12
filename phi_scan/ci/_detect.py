@@ -249,17 +249,15 @@ def _build_circleci_context() -> PRContext:
 
 
 def _build_bitbucket_context() -> PRContext:
-    repo_slug = fetch_environment_variable(_ENV_BITBUCKET_REPO_SLUG)
     return PRContext(
         platform=CIPlatform.BITBUCKET,
         pr_number=fetch_environment_variable(_ENV_BITBUCKET_PR_ID),
-        repository=repo_slug,
+        repository=fetch_environment_variable(_ENV_BITBUCKET_REPO_SLUG),
         sha=fetch_environment_variable(_ENV_BITBUCKET_COMMIT),
         branch=None,
         base_branch=None,
         extras={
             "workspace": fetch_environment_variable(_ENV_BITBUCKET_WORKSPACE) or "",
-            "repo_slug": repo_slug or "",
         },
     )
 

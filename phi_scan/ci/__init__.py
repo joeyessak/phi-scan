@@ -26,6 +26,7 @@ from phi_scan.ci.codebuild import CodeBuildAdapter
 from phi_scan.ci.github import GitHubAdapter
 from phi_scan.ci.gitlab import GitLabAdapter
 from phi_scan.ci.jenkins import JenkinsAdapter
+from phi_scan.exceptions import CIIntegrationError
 
 _PLATFORM_ADAPTERS: dict[CIPlatform, type[BaseCIAdapter]] = {
     CIPlatform.GITHUB_ACTIONS: GitHubAdapter,
@@ -38,11 +39,18 @@ _PLATFORM_ADAPTERS: dict[CIPlatform, type[BaseCIAdapter]] = {
 }
 
 
-def resolve_adapter(platform: CIPlatform) -> BaseCIAdapter | None:
-    """Return an adapter instance for the given platform, or None if unknown."""
+_UNKNOWN_PLATFORM_MESSAGE: str = "No CI adapter available for platform: {platform}"
+
+
+def resolve_adapter(platform: CIPlatform) -> BaseCIAdapter:
+    """Return an adapter instance for the given platform.
+
+    Raises:
+        CIIntegrationError: When no adapter exists for the platform.
+    """
     adapter_class = _PLATFORM_ADAPTERS.get(platform)
     if adapter_class is None:
-        return None
+        raise CIIntegrationError(_UNKNOWN_PLATFORM_MESSAGE.format(platform=platform.value))
     return adapter_class()
 
 

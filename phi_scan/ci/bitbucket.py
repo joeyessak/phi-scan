@@ -78,7 +78,7 @@ class BitbucketAdapter(BaseCIAdapter):
     def post_pr_comment(self, comment_body: SanitisedCommentBody, pr_context: PRContext) -> None:
         pr_id = pr_context.pr_number
         workspace = pr_context.extras.get("workspace", "")
-        repo_slug = pr_context.extras.get("repo_slug", "")
+        repo_slug = pr_context.repository or ""
 
         if not all((pr_id, workspace, repo_slug)):
             _LOG.warning("Bitbucket: missing PR context — skipping comment")
@@ -110,7 +110,7 @@ class BitbucketAdapter(BaseCIAdapter):
     def set_commit_status(self, scan_result: ScanResult, pr_context: PRContext) -> None:
         sha = pr_context.sha
         workspace = pr_context.extras.get("workspace", "")
-        repo_slug = pr_context.extras.get("repo_slug", "")
+        repo_slug = pr_context.repository or ""
         if not sha or not workspace or not repo_slug:
             _LOG.warning("Bitbucket: missing context — skipping commit status")
             return

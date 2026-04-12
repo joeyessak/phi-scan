@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import enum
 from abc import ABC, abstractmethod
-from typing import NewType
+from typing import NewType, NoReturn
 
 from phi_scan.ci._detect import PRContext
 from phi_scan.exceptions import CIIntegrationError
@@ -100,7 +100,7 @@ class BaseCIAdapter(ABC):
         """Whether this platform supports AWS Security Hub import."""
         return False
 
-    def _raise_unsupported_operation_error(self, operation_name: UnsupportedOperation) -> None:
+    def _raise_unsupported_operation_error(self, operation_name: UnsupportedOperation) -> NoReturn:
         raise CIIntegrationError(
             _UNSUPPORTED_OPERATION_MESSAGE.format(
                 adapter_name=type(self).__name__,

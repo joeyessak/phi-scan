@@ -49,10 +49,10 @@ class GitLabAdapter(BaseCIAdapter):
             _LOG.warning("GitLab: missing MR IID or project ID — skipping comment")
             return
 
-        token = fetch_environment_variable(_ENV_GITLAB_TOKEN) or fetch_environment_variable(
+        gitlab_token = fetch_environment_variable(_ENV_GITLAB_TOKEN) or fetch_environment_variable(
             _ENV_CI_JOB_TOKEN
         )
-        if not token:
+        if not gitlab_token:
             _LOG.warning("GitLab: GITLAB_TOKEN and CI_JOB_TOKEN not set — skipping comment")
             return
 
@@ -61,7 +61,10 @@ class GitLabAdapter(BaseCIAdapter):
             project_id=project_id,
             mr_iid=mr_iid,
         )
-        headers = {_HTTP_HEADER_PRIVATE_TOKEN: token, _HTTP_HEADER_CONTENT_TYPE: _JSON_CONTENT_TYPE}
+        headers = {
+            _HTTP_HEADER_PRIVATE_TOKEN: gitlab_token,
+            _HTTP_HEADER_CONTENT_TYPE: _JSON_CONTENT_TYPE,
+        }
         payload = {"body": comment_body}
 
         execute_http_request(
@@ -83,10 +86,10 @@ class GitLabAdapter(BaseCIAdapter):
             _LOG.warning("GitLab: missing SHA or project ID — skipping status")
             return
 
-        token = fetch_environment_variable(_ENV_GITLAB_TOKEN) or fetch_environment_variable(
+        gitlab_token = fetch_environment_variable(_ENV_GITLAB_TOKEN) or fetch_environment_variable(
             _ENV_CI_JOB_TOKEN
         )
-        if not token:
+        if not gitlab_token:
             _LOG.warning("GitLab: no token — skipping commit status")
             return
 
@@ -113,7 +116,7 @@ class GitLabAdapter(BaseCIAdapter):
                 method=HttpMethod.POST,
                 url=url,
                 operation_label=OperationLabel.GITLAB_COMMIT_STATUS,
-                headers={_HTTP_HEADER_PRIVATE_TOKEN: token},
+                headers={_HTTP_HEADER_PRIVATE_TOKEN: gitlab_token},
                 json_body=payload,
             )
         )

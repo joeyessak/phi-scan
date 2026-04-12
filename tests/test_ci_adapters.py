@@ -70,8 +70,9 @@ def test_resolve_adapter_returns_correct_type(
     assert isinstance(adapter, expected_type)
 
 
-def test_resolve_adapter_unknown_returns_none() -> None:
-    assert resolve_adapter(CIPlatform.UNKNOWN) is None
+def test_resolve_adapter_unknown_raises_error() -> None:
+    with pytest.raises(CIIntegrationError):
+        resolve_adapter(CIPlatform.UNKNOWN)
 
 
 # ---------------------------------------------------------------------------
