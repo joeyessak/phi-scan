@@ -160,17 +160,6 @@ _PARALLEL_THREAD_NAME_PREFIX: str = "phi-scan-worker"
 # ---------------------------------------------------------------------------
 
 
-def _reload_plugin_registry_cache() -> None:
-    """Discard any cached plugin registry and warm-load a fresh one.
-
-    Called synchronously at the top of every ``execute_scan`` invocation,
-    before any worker threads are spawned, so per-file reads during the
-    scan are served from a fully-populated, no-longer-mutated cache.
-    """
-    _load_cached_plugin_registry.cache_clear()
-    _load_cached_plugin_registry()
-
-
 @cache
 def _load_cached_plugin_registry() -> PluginRegistry:
     """Return the plugin registry for the current scan, discovering once.
@@ -412,10 +401,11 @@ def execute_scan(
             [MIN_WORKER_COUNT, MAX_WORKER_COUNT].
 
     Not safe to call concurrently from multiple threads of a single
-    process: the plugin-registry cache is cleared and warm-loaded at the
-    top of this function, so an overlapping invocation would race the
-    first call's workers. This is a CLI-scoped scanner, not a service;
-    one ``execute_scan`` call per process lifecycle is the supported use.
+    process: the plugin-registry cache is cleared at the top of this
+    function, so an overlapping invocation would discard another call's
+    already-populated registry. This is a CLI-scoped scanner, not a
+    service; one ``execute_scan`` call per process lifecycle is the
+    supported use.
     """
     from phi_scan.ai_review import apply_ai_review_to_findings
 
@@ -427,7 +417,7 @@ def execute_scan(
                 maximum=MAX_WORKER_COUNT,
             ),
         )
-    _reload_plugin_registry_cache()
+    _load_cached_plugin_registry.cache_clear()
     scan_start = time.monotonic()
     all_findings = _collect_all_findings(scan_targets, config, worker_count)
     reviewed_findings, ai_usage = apply_ai_review_to_findings(all_findings, config.ai_review_config)
@@ -611,11 +601,12 @@ def _execute_scan_with_cache(
 def _execute_plugin_pass_for_file(file_content: str, file_path: Path) -> list[ScanFinding]:
     """Run the scan-scoped plugin pass against one file and return findings.
 
-    ``execute_scan`` performs ``cache_clear`` + warm-load synchronously
-    before any worker threads are spawned, so every call here is a
-    GIL-atomic dict lookup against a fully-populated, no-longer-mutated
-    cache. ``execute_scan`` is documented as single-invocation per
-    process, which is the contract that makes this lock-free read safe.
+    ``execute_scan`` clears the registry cache synchronously before any
+    worker threads are spawned. The first worker to reach this function
+    populates the cache via ``functools.cache``, whose underlying
+    ``lru_cache`` lock serialises concurrent callers so
+    ``load_plugin_registry`` runs at most once per scan; subsequent
+    readers hit the populated cache directly.
     """
     registry = _load_cached_plugin_registry()
     return execute_plugin_pass(file_content, file_path, registry)
