@@ -74,8 +74,6 @@ _EXPECTED_SKIPPED_JSON_KEYS: frozenset[str] = frozenset(
     }
 )
 
-_EMPTY_PLUGIN_COUNT: int = 0
-_SINGLE_PLUGIN_COUNT: int = 1
 _TWO_PLUGIN_COUNT: int = 2
 
 _WIDE_TERMINAL_COLUMNS: str = "200"

@@ -41,6 +41,7 @@ _COLUMN_ENTITY_TYPES: str = "Entity Types"
 _COLUMN_STATUS: str = "Status"
 
 _ENTITY_TYPE_SEPARATOR: str = ", "
+_EMPTY_CELL: str = ""
 
 _JSON_KEY_PLUGINS: str = "plugins"
 _JSON_KEY_NAME: str = "name"
@@ -122,9 +123,9 @@ def _add_loaded_row(table: Table, loaded_plugin: LoadedPlugin) -> None:
 def _add_skipped_row(table: Table, skipped_plugin: SkippedPlugin) -> None:
     table.add_row(
         skipped_plugin.entry_point_name,
-        "",
-        "",
-        "",
+        _EMPTY_CELL,
+        _EMPTY_CELL,
+        _EMPTY_CELL,
         f"[red]{_STATUS_SKIPPED_PREFIX}: {skipped_plugin.reason}[/red]",
     )
 
