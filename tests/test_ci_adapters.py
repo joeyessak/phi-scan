@@ -34,7 +34,12 @@ from phi_scan.ci import (
     get_pr_context,
     resolve_adapter,
 )
-from phi_scan.ci._transport import HttpMethod, HttpRequestConfig, execute_http_request
+from phi_scan.ci._transport import (
+    HttpMethod,
+    HttpRequestConfig,
+    OperationLabel,
+    execute_http_request,
+)
 from phi_scan.exceptions import CIIntegrationError
 
 # ---------------------------------------------------------------------------
@@ -152,6 +157,7 @@ _BACKWARD_COMPAT_NAMES: list[str] = [
     "resolve_adapter",
     "HttpMethod",
     "HttpRequestConfig",
+    "OperationLabel",
     "execute_http_request",
 ]
 
@@ -163,7 +169,12 @@ def test_backward_compat_import_from_ci_integration(name: str) -> None:
     assert hasattr(old_module, name), f"{name} not importable from phi_scan.ci_integration"
 
 
-_TRANSPORT_NAMES: set[str] = {"HttpMethod", "HttpRequestConfig", "execute_http_request"}
+_TRANSPORT_NAMES: set[str] = {
+    "HttpMethod",
+    "HttpRequestConfig",
+    "OperationLabel",
+    "execute_http_request",
+}
 
 
 @pytest.mark.parametrize("name", _BACKWARD_COMPAT_NAMES)
@@ -200,7 +211,7 @@ def test_execute_http_request_wraps_status_error() -> None:
                 HttpRequestConfig(
                     method=HttpMethod.POST,
                     url="https://example.com",
-                    operation_label="test operation",
+                    operation_label=OperationLabel.GITHUB_COMMIT_STATUS,
                 )
             )
 
@@ -215,7 +226,7 @@ def test_execute_http_request_wraps_network_error() -> None:
                 HttpRequestConfig(
                     method=HttpMethod.POST,
                     url="https://example.com",
-                    operation_label="test operation",
+                    operation_label=OperationLabel.GITHUB_COMMIT_STATUS,
                 )
             )
 
@@ -230,7 +241,7 @@ def test_execute_http_request_network_error_excludes_url() -> None:
                 HttpRequestConfig(
                     method=HttpMethod.POST,
                     url="https://secret.example.com/phi-data",
-                    operation_label="test operation",
+                    operation_label=OperationLabel.GITHUB_COMMIT_STATUS,
                 )
             )
         assert "secret.example.com" not in str(exc_info.value)
@@ -469,7 +480,7 @@ def test_http_request_config_is_frozen() -> None:
     config = HttpRequestConfig(
         method=HttpMethod.POST,
         url="https://example.com",
-        operation_label="test",
+        operation_label=OperationLabel.GITHUB_COMMIT_STATUS,
     )
     with pytest.raises(AttributeError):
         config.url = "https://other.com"  # type: ignore[misc]

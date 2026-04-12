@@ -10,7 +10,12 @@ import logging
 
 from phi_scan.ci._base import BaseCIAdapter
 from phi_scan.ci._detect import PRContext, fetch_environment_variable
-from phi_scan.ci._transport import HttpMethod, HttpRequestConfig, execute_http_request
+from phi_scan.ci._transport import (
+    HttpMethod,
+    HttpRequestConfig,
+    OperationLabel,
+    execute_http_request,
+)
 from phi_scan.models import ScanResult
 
 _LOG: logging.Logger = logging.getLogger(__name__)
@@ -62,7 +67,7 @@ class GitLabAdapter(BaseCIAdapter):
             HttpRequestConfig(
                 method=HttpMethod.POST,
                 url=url,
-                operation_label="GitLab MR comment",
+                operation_label=OperationLabel.GITLAB_MR_COMMENT,
                 headers=headers,
                 json_body=payload,
             )
@@ -106,7 +111,7 @@ class GitLabAdapter(BaseCIAdapter):
             HttpRequestConfig(
                 method=HttpMethod.POST,
                 url=url,
-                operation_label="GitLab commit status",
+                operation_label=OperationLabel.GITLAB_COMMIT_STATUS,
                 headers={_HTTP_HEADER_PRIVATE_TOKEN: token},
                 json_body=payload,
             )

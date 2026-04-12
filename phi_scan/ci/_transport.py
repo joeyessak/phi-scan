@@ -12,8 +12,8 @@ Security contract:
     responses for comment endpoints could echo back request content
     containing finding metadata.
   - ``operation_label`` propagates into exception messages and logs.
-    Callers must use static string literals only — never interpolate
-    PR content, file paths, or finding metadata into the label.
+    It is typed as ``OperationLabel`` (a ``StrEnum``) so only pre-defined
+    static labels are accepted — no dynamic content can leak into errors.
 """
 
 from __future__ import annotations
@@ -29,6 +29,7 @@ from phi_scan.exceptions import CIIntegrationError
 __all__ = [
     "HttpMethod",
     "HttpRequestConfig",
+    "OperationLabel",
     "execute_http_request",
 ]
 
@@ -42,6 +43,28 @@ class HttpMethod(enum.StrEnum):
     PUT = "PUT"
 
 
+class OperationLabel(enum.StrEnum):
+    """Labels for outbound CI/CD HTTP operations.
+
+    Each member is a static string that appears in error messages and logs.
+    Using an enum enforces the security contract: callers cannot interpolate
+    PR content, file paths, or finding metadata into error messages.
+    """
+
+    GITHUB_COMMIT_STATUS = "GitHub commit status"
+    GITHUB_SARIF_UPLOAD = "GitHub SARIF upload"
+    GITLAB_MR_COMMENT = "GitLab MR comment"
+    GITLAB_COMMIT_STATUS = "GitLab commit status"
+    AZURE_PR_COMMENT = "Azure DevOps PR comment"
+    AZURE_BUILD_TAG = "Azure DevOps build tag"
+    AZURE_PR_STATUS = "Azure DevOps PR status"
+    AZURE_WORK_ITEM = "Azure Boards work item"
+    BITBUCKET_PR_COMMENT = "Bitbucket PR comment"
+    BITBUCKET_COMMIT_STATUS = "Bitbucket commit status"
+    BITBUCKET_CODE_INSIGHTS_REPORT = "Bitbucket Code Insights report"
+    BITBUCKET_CODE_INSIGHTS_ANNOTATIONS = "Bitbucket Code Insights annotations"
+
+
 @dataclass(frozen=True)
 class HttpRequestConfig:
     """Parameters for a single outbound HTTP request.
@@ -49,14 +72,13 @@ class HttpRequestConfig:
     Bundles all variable parts of the request so that
     ``execute_http_request`` can centralise the try/except scaffolding.
 
-    ``operation_label`` appears in error messages and logs — use only
-    static string literals (e.g. ``"GitHub commit status"``), never
-    interpolated PR content, file paths, or finding metadata.
+    ``operation_label`` appears in error messages and logs — typed as
+    ``OperationLabel`` to enforce that only static labels are used.
     """
 
     method: HttpMethod
     url: str
-    operation_label: str
+    operation_label: OperationLabel
     headers: dict[str, str] | None = None
     json_body: dict[str, Any] | list[Any] | None = None
     binary_body: bytes | None = None

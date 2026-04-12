@@ -12,7 +12,12 @@ import subprocess
 
 from phi_scan.ci._base import BaseCIAdapter
 from phi_scan.ci._detect import PRContext, fetch_environment_variable
-from phi_scan.ci._transport import HttpMethod, HttpRequestConfig, execute_http_request
+from phi_scan.ci._transport import (
+    HttpMethod,
+    HttpRequestConfig,
+    OperationLabel,
+    execute_http_request,
+)
 from phi_scan.exceptions import CIIntegrationError
 from phi_scan.models import ScanResult
 
@@ -123,7 +128,7 @@ class GitHubAdapter(BaseCIAdapter):
             HttpRequestConfig(
                 method=HttpMethod.POST,
                 url=url,
-                operation_label="GitHub commit status",
+                operation_label=OperationLabel.GITHUB_COMMIT_STATUS,
                 headers={
                     _HTTP_HEADER_AUTHORIZATION: f"Bearer {token}",
                     _HTTP_HEADER_ACCEPT: _GITHUB_ACCEPT_HEADER_VALUE,

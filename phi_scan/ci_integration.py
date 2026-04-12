@@ -49,7 +49,12 @@ from phi_scan.ci import (  # noqa: F401 — backward-compatible re-exports
     get_pr_context,
     resolve_adapter,
 )
-from phi_scan.ci._transport import HttpMethod, HttpRequestConfig, execute_http_request
+from phi_scan.ci._transport import (
+    HttpMethod,
+    HttpRequestConfig,
+    OperationLabel,
+    execute_http_request,
+)
 from phi_scan.constants import SeverityLevel
 from phi_scan.exceptions import CIIntegrationError  # noqa: F401 — backward-compatible re-export
 from phi_scan.models import ScanResult
@@ -69,6 +74,7 @@ __all__ = [
     "HttpMethod",
     "HttpRequestConfig",
     "JenkinsAdapter",
+    "OperationLabel",
     "PRContext",
     "build_comment_body",
     "build_comment_body_with_baseline",
@@ -452,7 +458,7 @@ def upload_sarif_to_github(scan_result: ScanResult, pr_context: PRContext) -> No
         HttpRequestConfig(
             method=HttpMethod.POST,
             url=url,
-            operation_label="GitHub SARIF upload",
+            operation_label=OperationLabel.GITHUB_SARIF_UPLOAD,
             headers={
                 "Authorization": f"Bearer {token}",
                 "Accept": "application/vnd.github+json",
@@ -516,7 +522,7 @@ def post_bitbucket_code_insights(scan_result: ScanResult, pr_context: PRContext)
         HttpRequestConfig(
             method=HttpMethod.PUT,
             url=report_url,
-            operation_label="Bitbucket Code Insights report",
+            operation_label=OperationLabel.BITBUCKET_CODE_INSIGHTS_REPORT,
             headers=headers,
             json_body=report_payload,
         )
@@ -550,7 +556,7 @@ def post_bitbucket_code_insights(scan_result: ScanResult, pr_context: PRContext)
         HttpRequestConfig(
             method=HttpMethod.POST,
             url=annotations_url,
-            operation_label="Bitbucket Code Insights annotations",
+            operation_label=OperationLabel.BITBUCKET_CODE_INSIGHTS_ANNOTATIONS,
             headers=headers,
             json_body=annotations,
         )
@@ -574,7 +580,7 @@ def set_azure_build_tag(scan_result: ScanResult, pr_context: PRContext) -> None:
     team_project = pr_context.extras.get("team_project", "")
     build_id = pr_context.extras.get("build_id", "")
 
-    if not all([collection_uri, team_project, build_id]):
+    if not all((collection_uri, team_project, build_id)):
         _LOG.debug("Azure DevOps build tag: missing context — skipping")
         return
 
@@ -596,7 +602,7 @@ def set_azure_build_tag(scan_result: ScanResult, pr_context: PRContext) -> None:
         HttpRequestConfig(
             method=HttpMethod.PUT,
             url=url,
-            operation_label="Azure DevOps build tag",
+            operation_label=OperationLabel.AZURE_BUILD_TAG,
             binary_body=_AZURE_BUILD_TAG_EMPTY_BODY,
             basic_auth_credentials=("", token),
         )
@@ -612,7 +618,7 @@ def set_azure_pr_status(scan_result: ScanResult, pr_context: PRContext) -> None:
     collection_uri = pr_context.extras.get("collection_uri", "")
     team_project = pr_context.extras.get("team_project", "")
 
-    if not all([pr_id, repo_id, collection_uri, team_project]):
+    if not all((pr_id, repo_id, collection_uri, team_project)):
         _LOG.debug("Azure DevOps PR status: missing context — skipping")
         return
 
@@ -648,7 +654,7 @@ def set_azure_pr_status(scan_result: ScanResult, pr_context: PRContext) -> None:
         HttpRequestConfig(
             method=HttpMethod.POST,
             url=url,
-            operation_label="Azure DevOps PR status",
+            operation_label=OperationLabel.AZURE_PR_STATUS,
             json_body=payload,
             basic_auth_credentials=("", token),
         )
@@ -677,7 +683,7 @@ def create_azure_boards_work_item(scan_result: ScanResult, pr_context: PRContext
     team_project = pr_context.extras.get("team_project", "")
     pr_id = pr_context.pr_number or "unknown"
 
-    if not all([collection_uri, team_project]):
+    if not all((collection_uri, team_project)):
         _LOG.debug("Azure Boards: missing context — skipping work item")
         return
 
@@ -714,7 +720,7 @@ def create_azure_boards_work_item(scan_result: ScanResult, pr_context: PRContext
         HttpRequestConfig(
             method=HttpMethod.POST,
             url=url,
-            operation_label="Azure Boards work item",
+            operation_label=OperationLabel.AZURE_WORK_ITEM,
             headers={"Content-Type": _AZURE_PATCH_CONTENT_TYPE},
             json_body=patch_payload,
             basic_auth_credentials=("", token),

@@ -11,7 +11,12 @@ from typing import Any
 
 from phi_scan.ci._base import BaseCIAdapter
 from phi_scan.ci._detect import PRContext, fetch_environment_variable
-from phi_scan.ci._transport import HttpMethod, HttpRequestConfig, execute_http_request
+from phi_scan.ci._transport import (
+    HttpMethod,
+    HttpRequestConfig,
+    OperationLabel,
+    execute_http_request,
+)
 from phi_scan.models import ScanResult
 
 _LOG: logging.Logger = logging.getLogger(__name__)
@@ -60,7 +65,7 @@ class AzureAdapter(BaseCIAdapter):
         collection_uri = pr_context.extras.get("collection_uri", "")
         team_project = pr_context.extras.get("team_project", "")
 
-        if not all([pr_id, repo_id, collection_uri, team_project]):
+        if not all((pr_id, repo_id, collection_uri, team_project)):
             _LOG.debug("Azure DevOps: missing PR context — skipping comment")
             return
 
@@ -83,7 +88,7 @@ class AzureAdapter(BaseCIAdapter):
             HttpRequestConfig(
                 method=HttpMethod.POST,
                 url=url,
-                operation_label="Azure DevOps PR comment",
+                operation_label=OperationLabel.AZURE_PR_COMMENT,
                 json_body=_build_azure_thread_payload(comment_body),
                 basic_auth_credentials=("", token),
             )

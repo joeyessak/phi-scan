@@ -11,7 +11,12 @@ from typing import Any
 
 from phi_scan.ci._base import BaseCIAdapter
 from phi_scan.ci._detect import PRContext, fetch_environment_variable
-from phi_scan.ci._transport import HttpMethod, HttpRequestConfig, execute_http_request
+from phi_scan.ci._transport import (
+    HttpMethod,
+    HttpRequestConfig,
+    OperationLabel,
+    execute_http_request,
+)
 from phi_scan.models import ScanResult
 
 _LOG: logging.Logger = logging.getLogger(__name__)
@@ -74,7 +79,7 @@ class BitbucketAdapter(BaseCIAdapter):
         workspace = pr_context.extras.get("workspace", "")
         repo_slug = pr_context.extras.get("repo_slug", "")
 
-        if not all([pr_id, workspace, repo_slug]):
+        if not all((pr_id, workspace, repo_slug)):
             _LOG.debug("Bitbucket: missing PR context — skipping comment")
             return
 
@@ -92,7 +97,7 @@ class BitbucketAdapter(BaseCIAdapter):
             HttpRequestConfig(
                 method=HttpMethod.POST,
                 url=url,
-                operation_label="Bitbucket PR comment",
+                operation_label=OperationLabel.BITBUCKET_PR_COMMENT,
                 headers=_build_auth_headers(token),
                 json_body={
                     _BITBUCKET_COMMENT_CONTENT_KEY: {_BITBUCKET_COMMENT_RAW_KEY: comment_body},
@@ -123,7 +128,7 @@ class BitbucketAdapter(BaseCIAdapter):
             HttpRequestConfig(
                 method=HttpMethod.POST,
                 url=url,
-                operation_label="Bitbucket commit status",
+                operation_label=OperationLabel.BITBUCKET_COMMIT_STATUS,
                 headers=_build_auth_headers(token),
                 json_body=_build_commit_status_payload(scan_result),
             )

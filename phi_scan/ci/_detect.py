@@ -15,7 +15,6 @@ __all__ = [
     "CIPlatform",
     "PRContext",
     "detect_platform",
-    "fetch_environment_variable",
     "get_pr_context",
 ]
 
@@ -239,8 +238,8 @@ def _extract_pr_number_from_url(pr_url: str) -> str | None:
 
 
 def _build_circleci_context() -> PRContext:
-    pr_url = fetch_environment_variable(_ENV_CIRCLE_PULL_REQUEST) or ""
-    pr_number = _extract_pr_number_from_url(pr_url)
+    circle_pr_url = fetch_environment_variable(_ENV_CIRCLE_PULL_REQUEST) or ""
+    pr_number = _extract_pr_number_from_url(circle_pr_url)
     return PRContext(
         platform=CIPlatform.CIRCLECI,
         pr_number=pr_number,
@@ -248,7 +247,7 @@ def _build_circleci_context() -> PRContext:
         sha=fetch_environment_variable(_ENV_CIRCLE_SHA1),
         branch=fetch_environment_variable(_ENV_CIRCLE_BRANCH),
         base_branch=None,
-        extras={"circle_pull_request_url": pr_url},
+        extras={"circle_pull_request_url": circle_pr_url},
     )
 
 
@@ -268,10 +267,10 @@ def _build_bitbucket_context() -> PRContext:
 
 
 def _build_codebuild_context() -> PRContext:
-    trigger = fetch_environment_variable(_ENV_CODEBUILD_WEBHOOK_TRIGGER) or ""
+    webhook_trigger = fetch_environment_variable(_ENV_CODEBUILD_WEBHOOK_TRIGGER) or ""
     pr_number: str | None = None
-    if trigger.startswith(_CODEBUILD_PR_TRIGGER_PREFIX):
-        pr_number = trigger[len(_CODEBUILD_PR_TRIGGER_PREFIX) :]
+    if webhook_trigger.startswith(_CODEBUILD_PR_TRIGGER_PREFIX):
+        pr_number = webhook_trigger[len(_CODEBUILD_PR_TRIGGER_PREFIX) :]
     return PRContext(
         platform=CIPlatform.CODEBUILD,
         pr_number=pr_number,

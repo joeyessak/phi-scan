@@ -86,3 +86,11 @@ class BaseCIAdapter(ABC):
     def upload_sarif(self, scan_result: ScanResult, pr_context: PRContext) -> None:
         """Upload SARIF to the platform's code scanning API."""
         self._raise_unsupported("SARIF upload")
+
+    def upload_code_insights(self, scan_result: ScanResult, pr_context: PRContext) -> None:
+        """Post inline code annotations to the platform."""
+        self._raise_unsupported("code insights")
+
+    def create_work_item(self, scan_result: ScanResult, pr_context: PRContext) -> None:
+        """Create a work item or ticket from scan findings."""
+        self._raise_unsupported("work item creation")
