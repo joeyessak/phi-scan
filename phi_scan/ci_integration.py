@@ -55,6 +55,38 @@ from phi_scan.exceptions import CIIntegrationError  # noqa: F401 — backward-co
 from phi_scan.models import ScanResult
 from phi_scan.output import format_sarif
 
+__all__ = [
+    "AzureAdapter",
+    "BaseCIAdapter",
+    "BaselineComparison",
+    "BitbucketAdapter",
+    "CIIntegrationError",
+    "CIPlatform",
+    "CircleCIAdapter",
+    "CodeBuildAdapter",
+    "GitHubAdapter",
+    "GitLabAdapter",
+    "HttpMethod",
+    "HttpRequestConfig",
+    "JenkinsAdapter",
+    "PRContext",
+    "build_comment_body",
+    "build_comment_body_with_baseline",
+    "convert_findings_to_asff",
+    "create_azure_boards_work_item",
+    "detect_platform",
+    "execute_http_request",
+    "get_pr_context",
+    "import_findings_to_security_hub",
+    "post_bitbucket_code_insights",
+    "post_pr_comment",
+    "resolve_adapter",
+    "set_azure_build_tag",
+    "set_azure_pr_status",
+    "set_commit_status",
+    "upload_sarif_to_github",
+]
+
 _LOG: logging.Logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
