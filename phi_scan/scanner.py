@@ -44,7 +44,7 @@ from phi_scan.exceptions import FileReadError, PhiDetectionError, TraversalError
 from phi_scan.logging_config import get_logger
 from phi_scan.models import ScanConfig, ScanFinding, ScanResult
 from phi_scan.plugin_loader import PluginRegistry, load_plugin_registry
-from phi_scan.plugin_runtime import run_plugin_pass
+from phi_scan.plugin_runtime import execute_plugin_pass
 from phi_scan.suppression import is_finding_suppressed, load_suppressions
 
 __all__ = [
@@ -174,7 +174,7 @@ def _load_cached_plugin_registry() -> PluginRegistry:
     same registry instance.
 
     Invariant: ``execute_scan`` is the only supported entry point for this
-    cache's lifecycle. Callers that invoke ``run_plugin_pass`` directly
+    cache's lifecycle. Callers that invoke ``execute_plugin_pass`` directly
     (outside ``execute_scan``) must pass a registry they constructed
     themselves and must not rely on this function; tests that exercise
     ``execute_scan`` are responsible for clearing the cache between runs
@@ -588,19 +588,19 @@ def _execute_scan_with_cache(
     cached_raw = get_cached_result(cache_key)
     if cached_raw is not None:
         _logger.debug(_CACHE_HIT_DEBUG.format(path=file_path, count=len(cached_raw)))
-        plugin_findings = _run_plugin_pass_for_file(file_content, file_path)
+        plugin_findings = _execute_plugin_pass_for_file(file_content, file_path)
         return _apply_post_scan_filters(cached_raw + plugin_findings, file_content, config)
     scannable_content = _preprocess_content_for_scan(file_content, file_path)
     raw_findings = detect_phi_in_text_content(scannable_content, file_path)
     store_cached_result(cache_key, raw_findings)
-    plugin_findings = _run_plugin_pass_for_file(file_content, file_path)
+    plugin_findings = _execute_plugin_pass_for_file(file_content, file_path)
     return _apply_post_scan_filters(raw_findings + plugin_findings, file_content, config)
 
 
-def _run_plugin_pass_for_file(file_content: str, file_path: Path) -> list[ScanFinding]:
+def _execute_plugin_pass_for_file(file_content: str, file_path: Path) -> list[ScanFinding]:
     """Run the scan-scoped plugin pass against one file and return findings."""
     registry = _load_cached_plugin_registry()
-    return run_plugin_pass(file_content, file_path, registry)
+    return execute_plugin_pass(file_content, file_path, registry)
 
 
 def _apply_post_scan_filters(
@@ -891,7 +891,7 @@ def _scan_archive_members(
             continue
         virtual_path = _compute_display_path(archive_path) / member_name
         raw_findings = detect_phi_in_text_content(member_content, virtual_path)
-        plugin_findings = _run_plugin_pass_for_file(member_content, virtual_path)
+        plugin_findings = _execute_plugin_pass_for_file(member_content, virtual_path)
         member_findings = _apply_post_scan_filters(
             raw_findings + plugin_findings, member_content, config
         )

@@ -21,7 +21,7 @@ from phi_scan.models import ScanConfig, ScanFinding
 from phi_scan.plugin_api import BaseRecognizer, ScanContext
 from phi_scan.plugin_api import ScanFinding as PluginScanFinding
 from phi_scan.plugin_loader import LoadedPlugin, PluginRegistry
-from phi_scan.plugin_runtime import _MAX_WARNINGS_PER_RECOGNIZER, run_plugin_pass
+from phi_scan.plugin_runtime import _MAX_WARNINGS_PER_RECOGNIZER, execute_plugin_pass
 from phi_scan.scanner import _load_cached_plugin_registry, execute_scan
 
 _ACME_ENTITY_TYPE: str = "ACME_EMPLOYEE_ID"
@@ -129,19 +129,19 @@ def scan_config() -> ScanConfig:
 
 
 # ---------------------------------------------------------------------------
-# run_plugin_pass unit tests
+# execute_plugin_pass unit tests
 # ---------------------------------------------------------------------------
 
 
-def test_run_plugin_pass_returns_empty_list_when_no_plugins_loaded() -> None:
-    findings = run_plugin_pass(_PLUGIN_SAMPLE_LINE, Path("source.py"), PluginRegistry())
+def test_execute_plugin_pass_returns_empty_list_when_no_plugins_loaded() -> None:
+    findings = execute_plugin_pass(_PLUGIN_SAMPLE_LINE, Path("source.py"), PluginRegistry())
     assert findings == []
 
 
-def test_run_plugin_pass_emits_finding_with_host_computed_fields() -> None:
+def test_execute_plugin_pass_emits_finding_with_host_computed_fields() -> None:
     registry = _build_registry(_AcmeRecognizer())
 
-    findings = run_plugin_pass(_PLUGIN_SAMPLE_LINE, Path("source.py"), registry)
+    findings = execute_plugin_pass(_PLUGIN_SAMPLE_LINE, Path("source.py"), registry)
 
     assert len(findings) == 1
     finding = findings[0]
@@ -154,51 +154,51 @@ def test_run_plugin_pass_emits_finding_with_host_computed_fields() -> None:
     assert len(finding.value_hash) == 64
 
 
-def test_run_plugin_pass_isolates_exception_raised_by_detect(
+def test_execute_plugin_pass_isolates_exception_raised_by_detect(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     registry = _build_registry(_RaisingRecognizer(), _AcmeRecognizer())
 
     with caplog.at_level(logging.WARNING, logger="phi_scan.plugin_runtime"):
-        findings = run_plugin_pass(_PLUGIN_SAMPLE_LINE, Path("s.py"), registry)
+        findings = execute_plugin_pass(_PLUGIN_SAMPLE_LINE, Path("s.py"), registry)
 
     acme_findings = [f for f in findings if f.entity_type == _ACME_ENTITY_TYPE]
     assert len(acme_findings) == 1
     assert any("simulated plugin failure" in record.message for record in caplog.records)
 
 
-def test_run_plugin_pass_drops_finding_whose_end_offset_overruns_line(
+def test_execute_plugin_pass_drops_finding_whose_end_offset_overruns_line(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     registry = _build_registry(_OffsetOverrunRecognizer())
 
     with caplog.at_level(logging.WARNING, logger="phi_scan.plugin_runtime"):
-        findings = run_plugin_pass(_PLUGIN_SAMPLE_LINE, Path("s.py"), registry)
+        findings = execute_plugin_pass(_PLUGIN_SAMPLE_LINE, Path("s.py"), registry)
 
     assert findings == []
     assert any("end_offset" in record.message for record in caplog.records)
 
 
-def test_run_plugin_pass_drops_finding_with_undeclared_entity_type(
+def test_execute_plugin_pass_drops_finding_with_undeclared_entity_type(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     registry = _build_registry(_UndeclaredEntityTypeRecognizer())
 
     with caplog.at_level(logging.WARNING, logger="phi_scan.plugin_runtime"):
-        findings = run_plugin_pass(_PLUGIN_SAMPLE_LINE, Path("s.py"), registry)
+        findings = execute_plugin_pass(_PLUGIN_SAMPLE_LINE, Path("s.py"), registry)
 
     assert findings == []
     assert any("not declared in entity_types" in record.message for record in caplog.records)
 
 
-def test_run_plugin_pass_rate_limits_warnings_per_recognizer(
+def test_execute_plugin_pass_rate_limits_warnings_per_recognizer(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     registry = _build_registry(_RaisingRecognizer())
     content = "\n".join([_PLUGIN_SAMPLE_LINE] * _RATE_LIMIT_TEST_LINE_COUNT)
 
     with caplog.at_level(logging.WARNING, logger="phi_scan.plugin_runtime"):
-        run_plugin_pass(content, Path("s.py"), registry)
+        execute_plugin_pass(content, Path("s.py"), registry)
 
     per_line_records = [
         record for record in caplog.records if "simulated plugin failure" in record.message
@@ -212,7 +212,7 @@ def test_run_plugin_pass_rate_limits_warnings_per_recognizer(
     assert len(summary_records) == 1
 
 
-def test_run_plugin_pass_drops_non_list_return_value(
+def test_execute_plugin_pass_drops_non_list_return_value(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     class _ReturnsNoneRecognizer(BaseRecognizer):
@@ -226,13 +226,13 @@ def test_run_plugin_pass_drops_non_list_return_value(
     registry = _build_registry(_ReturnsNoneRecognizer())
 
     with caplog.at_level(logging.WARNING, logger="phi_scan.plugin_runtime"):
-        findings = run_plugin_pass(_PLUGIN_SAMPLE_LINE, Path("s.py"), registry)
+        findings = execute_plugin_pass(_PLUGIN_SAMPLE_LINE, Path("s.py"), registry)
 
     assert findings == []
     assert any("NoneType" in record.message for record in caplog.records)
 
 
-def test_run_plugin_pass_drops_list_entries_that_are_not_scan_findings(
+def test_execute_plugin_pass_drops_list_entries_that_are_not_scan_findings(
     caplog: pytest.LogCaptureFixture,
 ) -> None:
     class _ReturnsWrongTypeRecognizer(BaseRecognizer):
@@ -246,17 +246,17 @@ def test_run_plugin_pass_drops_list_entries_that_are_not_scan_findings(
     registry = _build_registry(_ReturnsWrongTypeRecognizer())
 
     with caplog.at_level(logging.WARNING, logger="phi_scan.plugin_runtime"):
-        findings = run_plugin_pass(_PLUGIN_SAMPLE_LINE, Path("s.py"), registry)
+        findings = execute_plugin_pass(_PLUGIN_SAMPLE_LINE, Path("s.py"), registry)
 
     assert findings == []
     assert any("expected ScanFinding" in record.message for record in caplog.records)
 
 
-def test_run_plugin_pass_sorts_findings_deterministically() -> None:
+def test_execute_plugin_pass_sorts_findings_deterministically() -> None:
     content = "\n".join([_PLUGIN_SAMPLE_LINE, _PLUGIN_SAMPLE_LINE, _PLUGIN_SAMPLE_LINE])
     registry = _build_registry(_AcmeRecognizer())
 
-    findings = run_plugin_pass(content, Path("source.py"), registry)
+    findings = execute_plugin_pass(content, Path("source.py"), registry)
 
     line_numbers = [finding.line_number for finding in findings]
     assert line_numbers == sorted(line_numbers)

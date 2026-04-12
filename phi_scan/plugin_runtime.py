@@ -35,7 +35,7 @@ from phi_scan.plugin_api import (
 )
 from phi_scan.plugin_loader import LoadedPlugin, PluginRegistry
 
-__all__ = ["run_plugin_pass"]
+__all__ = ["execute_plugin_pass"]
 
 _logger: logging.Logger = logging.getLogger(__name__)
 
@@ -64,7 +64,10 @@ class _PluginLineInvocation:
     loaded_plugin: LoadedPlugin
     line_text: str
     context: ScanContext
-    file_path: Path
+
+    @property
+    def file_path(self) -> Path:
+        return self.context.file_path
 
 
 @dataclass(frozen=True)
@@ -119,7 +122,7 @@ class _RecognizerWarningBudget:
                 )
 
 
-def run_plugin_pass(
+def execute_plugin_pass(
     file_content: str,
     file_path: Path,
     registry: PluginRegistry,
@@ -159,14 +162,13 @@ def run_plugin_pass(
                 loaded_plugin=loaded_plugin,
                 line_text=line_text,
                 context=context,
-                file_path=file_path,
             )
-            findings.extend(_run_single_plugin_on_line(invocation, warning_budget))
+            findings.extend(_execute_single_plugin_on_line(invocation, warning_budget))
     warning_budget.emit_recognizer_warning_summary()
     return _sort_plugin_findings(findings)
 
 
-def _run_single_plugin_on_line(
+def _execute_single_plugin_on_line(
     invocation: _PluginLineInvocation,
     warning_budget: _RecognizerWarningBudget,
 ) -> list[ScanFinding]:
