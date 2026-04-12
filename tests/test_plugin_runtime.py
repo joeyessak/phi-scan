@@ -19,7 +19,7 @@ import pytest
 
 from phi_scan.constants import DetectionLayer, SeverityLevel
 from phi_scan.models import ScanConfig, ScanFinding
-from phi_scan.plugin_api import BaseRecognizer, ScanContext
+from phi_scan.plugin_api import PLUGIN_API_VERSION, BaseRecognizer, ScanContext
 from phi_scan.plugin_api import ScanFinding as PluginScanFinding
 from phi_scan.plugin_loader import LoadedPlugin, PluginRegistry
 from phi_scan.plugin_runtime import _MAX_WARNINGS_PER_RECOGNIZER, execute_plugin_pass
@@ -42,7 +42,7 @@ class _AcmeRecognizer(BaseRecognizer):
 
     name = _ACME_RECOGNIZER_NAME
     entity_types = (_ACME_ENTITY_TYPE,)
-    plugin_api_version = "1.0"
+    plugin_api_version = PLUGIN_API_VERSION
     version = "0.1.0"
     description = "Test ACME employee ID recognizer."
 
@@ -63,7 +63,7 @@ class _AcmeRecognizer(BaseRecognizer):
 class _RaisingRecognizer(BaseRecognizer):
     name = "raising_recognizer"
     entity_types = ("RAISING_TEST",)
-    plugin_api_version = "1.0"
+    plugin_api_version = PLUGIN_API_VERSION
     version = _TEST_RECOGNIZER_VERSION
     description = _TEST_RECOGNIZER_DESCRIPTION
 
@@ -74,7 +74,7 @@ class _RaisingRecognizer(BaseRecognizer):
 class _OffsetOverrunRecognizer(BaseRecognizer):
     name = "offset_overrun"
     entity_types = ("OVERRUN_TEST",)
-    plugin_api_version = "1.0"
+    plugin_api_version = PLUGIN_API_VERSION
     version = _TEST_RECOGNIZER_VERSION
     description = _TEST_RECOGNIZER_DESCRIPTION
 
@@ -92,7 +92,7 @@ class _OffsetOverrunRecognizer(BaseRecognizer):
 class _UndeclaredEntityTypeRecognizer(BaseRecognizer):
     name = "undeclared_entity"
     entity_types = ("DECLARED_ONLY",)
-    plugin_api_version = "1.0"
+    plugin_api_version = PLUGIN_API_VERSION
     version = _TEST_RECOGNIZER_VERSION
     description = _TEST_RECOGNIZER_DESCRIPTION
 
@@ -228,7 +228,7 @@ def test_execute_plugin_pass_drops_non_list_return_value(
     class _ReturnsNoneRecognizer(BaseRecognizer):
         name = "returns_none"
         entity_types = ("NONE_TEST",)
-        plugin_api_version = "1.0"
+        plugin_api_version = PLUGIN_API_VERSION
 
         def detect(self, line: str, context: ScanContext) -> list[PluginScanFinding]:
             return None  # type: ignore[return-value]
@@ -248,7 +248,7 @@ def test_execute_plugin_pass_drops_list_entries_that_are_not_scan_findings(
     class _ReturnsWrongTypeRecognizer(BaseRecognizer):
         name = "returns_wrong_type"
         entity_types = ("WRONG_TYPE_TEST",)
-        plugin_api_version = "1.0"
+        plugin_api_version = PLUGIN_API_VERSION
 
         def detect(self, line: str, context: ScanContext) -> list[PluginScanFinding]:
             return ["not a scan finding"]  # type: ignore[list-item]
