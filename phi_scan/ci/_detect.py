@@ -15,6 +15,7 @@ __all__ = [
     "CIPlatform",
     "PRContext",
     "detect_platform",
+    "fetch_environment_variable",
     "get_pr_context",
 ]
 
@@ -168,14 +169,18 @@ def _extract_github_pr_number(ref: str) -> str | None:
     return ref_segments[_GITHUB_PR_REF_NUMBER_INDEX]
 
 
+def _resolve_github_pr_number() -> str | None:
+    explicit_pr_number = fetch_environment_variable(_ENV_PR_NUMBER)
+    if explicit_pr_number:
+        return explicit_pr_number
+    ref = fetch_environment_variable(_ENV_GITHUB_REF) or ""
+    return _extract_github_pr_number(ref)
+
+
 def _build_github_context() -> PRContext:
-    pr_number = fetch_environment_variable(_ENV_PR_NUMBER)
-    if not pr_number:
-        ref = fetch_environment_variable(_ENV_GITHUB_REF) or ""
-        pr_number = _extract_github_pr_number(ref)
     return PRContext(
         platform=CIPlatform.GITHUB_ACTIONS,
-        pr_number=pr_number,
+        pr_number=_resolve_github_pr_number(),
         repository=fetch_environment_variable(_ENV_GITHUB_REPOSITORY),
         sha=fetch_environment_variable(_ENV_GITHUB_SHA),
         branch=fetch_environment_variable(_ENV_GITHUB_REF),
