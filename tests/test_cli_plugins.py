@@ -40,7 +40,7 @@ _MISMATCHED_API_VERSION: str = "2.0"
 _INVALID_DISTRIBUTION: str = "phi-scan-ext-invalid"
 
 _STATUS_LOADED_LABEL: str = "loaded"
-_STATUS_SKIPPED_LABEL: str = "skipped-invalid"
+_STATUS_SKIPPED: str = "skipped-invalid"
 
 _JSON_KEY_PLUGINS: str = "plugins"
 _JSON_KEY_NAME: str = "name"
@@ -148,7 +148,7 @@ class _MismatchedVersionRecognizer(BaseRecognizer):
 # ---------------------------------------------------------------------------
 
 
-_cli_runner = CliRunner()
+_CLI_RUNNER = CliRunner()
 
 
 def _patch_entry_point_discovery(
@@ -174,7 +174,7 @@ def _invoke_plugins_list(
     cli_arguments = ["plugins", "list"]
     if is_json:
         cli_arguments.append("--json")
-    invocation_result = _cli_runner.invoke(app, cli_arguments)
+    invocation_result = _CLI_RUNNER.invoke(app, cli_arguments)
     assert invocation_result.exit_code == EXIT_CODE_CLEAN
     return invocation_result.output
 
@@ -247,7 +247,7 @@ class TestSkippedPluginsListed:
             ),
         ]
         output = _invoke_plugins_list(monkeypatch, stubs)
-        assert _STATUS_SKIPPED_LABEL in output
+        assert _STATUS_SKIPPED in output
 
     def test_invalid_plugin_shows_reason(self, monkeypatch: pytest.MonkeyPatch) -> None:
         stubs = [
@@ -271,7 +271,7 @@ class TestSkippedPluginsListed:
         ]
         output = _invoke_plugins_list(monkeypatch, stubs)
         assert _ALPHA_RECOGNIZER_NAME in output
-        assert _STATUS_SKIPPED_LABEL in output
+        assert _STATUS_SKIPPED in output
 
 
 # ---------------------------------------------------------------------------
@@ -366,7 +366,7 @@ class TestJsonOutput:
         output = _invoke_plugins_list(monkeypatch, stubs, is_json=True)
         parsed_output = json.loads(output)
         plugin_record = parsed_output[_JSON_KEY_PLUGINS][0]
-        assert plugin_record[_JSON_KEY_STATUS] == _STATUS_SKIPPED_LABEL
+        assert plugin_record[_JSON_KEY_STATUS] == _STATUS_SKIPPED
         assert "plugin_api_version" in plugin_record[_JSON_KEY_REASON]
 
     def test_mixed_plugins_json_count_matches(self, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -391,10 +391,10 @@ class TestJsonOutput:
 class TestCommandIntegration:
     def test_plugins_list_exits_cleanly(self, monkeypatch: pytest.MonkeyPatch) -> None:
         _patch_entry_point_discovery(monkeypatch, [])
-        invocation_result = _cli_runner.invoke(app, ["plugins", "list"])
+        invocation_result = _CLI_RUNNER.invoke(app, ["plugins", "list"])
         assert invocation_result.exit_code == EXIT_CODE_CLEAN
 
     def test_plugins_help_shows_subcommand(self, monkeypatch: pytest.MonkeyPatch) -> None:
         _patch_entry_point_discovery(monkeypatch, [])
-        invocation_result = _cli_runner.invoke(app, ["plugins", "--help"])
+        invocation_result = _CLI_RUNNER.invoke(app, ["plugins", "--help"])
         assert "list" in invocation_result.output

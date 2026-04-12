@@ -31,7 +31,7 @@ plugins_app = typer.Typer(
 _NO_PLUGINS_MESSAGE: str = "No recognizer plugins discovered."
 
 _STATUS_LOADED: str = "loaded"
-_STATUS_SKIPPED_PREFIX: str = "skipped-invalid"
+_STATUS_SKIPPED: str = "skipped-invalid"
 
 _TABLE_TITLE: str = "Installed Recognizer Plugins"
 _COLUMN_NAME: str = "Name"
@@ -126,7 +126,7 @@ def _add_skipped_row(table: Table, skipped_plugin: SkippedPlugin) -> None:
         _EMPTY_CELL,
         _EMPTY_CELL,
         _EMPTY_CELL,
-        f"[red]{_STATUS_SKIPPED_PREFIX}: {skipped_plugin.reason}[/red]",
+        f"[red]{_STATUS_SKIPPED}: {skipped_plugin.reason}[/red]",
     )
 
 
@@ -141,7 +141,7 @@ def _print_json_output(registry: PluginRegistry) -> None:
         {_JSON_KEY_PLUGINS: plugin_records},
         indent=_JSON_INDENT,
     )
-    typer.echo(serialized_output)
+    get_console().print(serialized_output, highlight=False)
 
 
 def _build_json_records(registry: PluginRegistry) -> list[dict[str, object]]:
@@ -166,7 +166,7 @@ def _serialize_loaded_plugin(loaded_plugin: LoadedPlugin) -> dict[str, object]:
 def _serialize_skipped_plugin(skipped_plugin: SkippedPlugin) -> dict[str, object]:
     return {
         _JSON_KEY_NAME: skipped_plugin.entry_point_name,
-        _JSON_KEY_STATUS: _STATUS_SKIPPED_PREFIX,
+        _JSON_KEY_STATUS: _STATUS_SKIPPED,
         _JSON_KEY_REASON: skipped_plugin.reason,
         _JSON_KEY_DISTRIBUTION: skipped_plugin.distribution_name,
         _JSON_KEY_ENTRY_POINT: skipped_plugin.entry_point_name,
