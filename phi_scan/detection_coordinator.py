@@ -186,8 +186,6 @@ def _is_name_finding(finding: ScanFinding) -> bool:
 
 
 def _is_age_over_threshold_finding(finding: ScanFinding) -> bool:
-    # entity_type "AGE_OVER_THRESHOLD" is produced by the regex layer for ages
-    # strictly above HIPAA_AGE_RESTRICTION_THRESHOLD (i.e., 91+).
     return finding.entity_type == _AGE_OVER_THRESHOLD_ENTITY_TYPE
 
 
