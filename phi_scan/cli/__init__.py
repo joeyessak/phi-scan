@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import logging
 import time
 from collections import deque
@@ -10,15 +9,12 @@ from pathlib import Path
 from typing import Annotated, Any
 
 import typer
-from rich.live import Live
 from watchdog.observers import Observer
 
 from phi_scan import __version__
 from phi_scan.audit import (
     ensure_current_schema,
-    get_last_scan,
     insert_scan_event,
-    query_recent_scans,
 )
 from phi_scan.ci_integration import (
     CIIntegrationError,
@@ -88,7 +84,6 @@ from phi_scan.compliance import (
     parse_framework_flag,
 )
 from phi_scan.constants import (
-    DEFAULT_DATABASE_PATH,
     EXIT_CODE_CLEAN,
     EXIT_CODE_ERROR,
     OutputFormat,
@@ -107,7 +102,6 @@ from phi_scan.notifier import (
 )
 from phi_scan.output import (
     WatchEvent,
-    build_dashboard_layout,
     create_scan_progress,
     display_banner,
     display_file_type_summary,
@@ -146,6 +140,7 @@ __all__ = [
     "_ScanExecutionOptions",
     "_ScanPhaseOptions",
     "_ScanTargetOptions",
+    "_aggregate_category_totals",
     "_VERSION_FLAG_HELP",
     "_VERSION_OUTPUT_FORMAT",
     "_WORKERS_ABOVE_MAXIMUM_ERROR",
@@ -222,20 +217,6 @@ _FRAMEWORK_PARSE_ERROR: str = "Invalid --framework value: {error}"
 # ---------------------------------------------------------------------------
 
 _WATCH_PATH_HELP: str = "Directory to watch for file system changes."
-
-# ---------------------------------------------------------------------------
-# Dashboard
-# ---------------------------------------------------------------------------
-
-_DASHBOARD_REFRESH_SECONDS: float = 2.0
-_DASHBOARD_REFRESH_RATE: float = 4.0
-_DASHBOARD_HISTORY_COUNT: int = 10
-_DASHBOARD_LOOKBACK_DAYS: int = 30
-_DASHBOARD_FINDINGS_JSON_KEY: str = "findings_json"
-_DASHBOARD_CATEGORY_KEY: str = "hipaa_category"
-_DASHBOARD_UNKNOWN_CATEGORY: str = "unknown"
-# Sentinel used when a scan row has no findings_json blob — parse as empty list.
-_DASHBOARD_EMPTY_FINDINGS_JSON: str = "[]"
 
 _SPINNER_CONFIG_LOAD_MESSAGE: str = "Loading configuration…"
 _SPINNER_AUDIT_WRITE_MESSAGE: str = "Writing audit log…"
@@ -831,58 +812,9 @@ app.command("init")(initialize_project)
 app.command("setup")(download_models)
 
 
-def _aggregate_category_totals(recent_scans: list[dict[str, Any]]) -> dict[str, int]:
-    """Sum HIPAA category occurrences across all recent scan findings_json blobs.
+from phi_scan.cli.dashboard import _aggregate_category_totals, display_dashboard  # noqa: E402
 
-    PHI safety guarantee: findings_json blobs written by audit.py contain only
-    value_hash (SHA-256), file_path_hash (SHA-256), hipaa_category, severity,
-    confidence, and line_number. Raw PHI values and code_context are explicitly
-    excluded at the write path (see audit.py::_serialize_finding_for_storage).
-    This function reads category metadata only — no raw PHI is ever present.
-
-    Args:
-        recent_scans: Scan rows from the audit DB as returned by query_recent_scans.
-
-    Returns:
-        Mapping of HIPAA category value string to total finding count.
-    """
-    totals: dict[str, int] = {}
-    for row in recent_scans:
-        category_finding_records = json.loads(
-            row.get(_DASHBOARD_FINDINGS_JSON_KEY, _DASHBOARD_EMPTY_FINDINGS_JSON)
-        )
-        for finding_record in category_finding_records:
-            category = finding_record.get(_DASHBOARD_CATEGORY_KEY, _DASHBOARD_UNKNOWN_CATEGORY)
-            totals[category] = totals.get(category, 0) + 1
-    return totals
-
-
-@app.command("dashboard")
-def display_dashboard() -> None:
-    """Rich Live real-time scan dashboard.
-
-    Ctrl+C (KeyboardInterrupt) is the expected and only exit mechanism for this
-    command. The signal is caught here as an intentional boundary — not a domain
-    error — solely to stop the Rich Live display cleanly before process exit.
-    """
-    database_path = Path(DEFAULT_DATABASE_PATH)
-    try:
-        with Live(refresh_per_second=_DASHBOARD_REFRESH_RATE, screen=True) as live:
-            while True:
-                recent_scans = query_recent_scans(database_path, _DASHBOARD_LOOKBACK_DAYS)
-                last_scan = get_last_scan(database_path)
-                category_totals = _aggregate_category_totals(recent_scans)
-                layout = build_dashboard_layout(
-                    recent_scans[:_DASHBOARD_HISTORY_COUNT],
-                    category_totals,
-                    last_scan,
-                )
-                live.update(layout)
-                time.sleep(_DASHBOARD_REFRESH_SECONDS)
-    except KeyboardInterrupt:
-        # Ctrl+C is the standard exit for a live dashboard — caught here to
-        # suppress the default traceback and allow Rich to close the screen buffer.
-        raise typer.Exit(code=EXIT_CODE_CLEAN)
+app.command("dashboard")(display_dashboard)
 
 
 # ---------------------------------------------------------------------------

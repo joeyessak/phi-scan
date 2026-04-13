@@ -488,14 +488,16 @@ def test_setup_command_prints_stub_message() -> None:
 def test_dashboard_command_exits_cleanly_on_keyboard_interrupt(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    monkeypatch.setattr("phi_scan.cli.DEFAULT_DATABASE_PATH", str(tmp_path / "audit.db"))
-    monkeypatch.setattr("phi_scan.cli.query_recent_scans", lambda *_: [])
-    monkeypatch.setattr("phi_scan.cli.get_last_scan", lambda *_: None)
+    monkeypatch.setattr(
+        "phi_scan.cli.dashboard.DEFAULT_DATABASE_PATH", str(tmp_path / "audit.db")
+    )
+    monkeypatch.setattr("phi_scan.cli.dashboard.query_recent_scans", lambda *_: [])
+    monkeypatch.setattr("phi_scan.cli.dashboard.get_last_scan", lambda *_: None)
 
     def _raise_keyboard_interrupt(_: float) -> None:
         raise KeyboardInterrupt
 
-    monkeypatch.setattr("phi_scan.cli.time.sleep", _raise_keyboard_interrupt)
+    monkeypatch.setattr("phi_scan.cli.dashboard.time.sleep", _raise_keyboard_interrupt)
 
     result = _runner.invoke(app, ["dashboard"])
 
