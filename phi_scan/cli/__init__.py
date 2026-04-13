@@ -6,6 +6,9 @@ from typing import Annotated
 
 import typer
 
+# Imported as a module (not `from .scan import scan, watch`) so the submodule
+# attribute `phi_scan.cli.watch` continues to resolve to the watch-helpers
+# module, not the watch command function. Used below in app.command wiring.
 from phi_scan.cli import scan as _scan_module
 from phi_scan.cli._shared import (
     _DEFAULT_WORKER_COUNT,
