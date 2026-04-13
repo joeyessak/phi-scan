@@ -43,11 +43,39 @@ import json
 import logging
 import os
 import sqlite3
-import subprocess
+import subprocess  # noqa: F401 — re-exported so tests can patch phi_scan.audit.subprocess.run
 from pathlib import Path
 from typing import Any, NamedTuple
 
 from phi_scan import __version__
+from phi_scan.audit._shared import (
+    _BOOLEAN_FALSE,
+    _BOOLEAN_TRUE,
+    _CREATED_AT_KEY,
+    _DATABASE_ERROR,
+    _EVENT_TYPE_SCAN,
+    _GIT_COMMITTER_EMAIL_ARGS,
+    _GIT_COMMITTER_NAME_ARGS,
+    _LAST_SCAN_LIMIT,
+    _NOTIFICATIONS_EMPTY_JSON,
+    _SCAN_EVENTS_TABLE,
+    _SCHEMA_META_TABLE,
+    _SCHEMA_VERSION_KEY,
+    _SCHEMA_VERSION_MISSING_ERROR,
+    _detect_pipeline,
+    _detect_pr_number,
+    _get_current_branch,
+    _get_current_repository_path,
+    _get_current_timestamp,
+    _hash_git_committer_field,
+    _open_database,
+)
+from phi_scan.audit._shared import (
+    _UNKNOWN_BRANCH as _UNKNOWN_BRANCH,
+)
+from phi_scan.audit._shared import (
+    _reject_symlink_database_path as _reject_symlink_database_path,
+)
 from phi_scan.constants import (
     ACTION_TAKEN_FAIL,
     ACTION_TAKEN_PASS,
@@ -106,10 +134,6 @@ _logger: logging.Logger = get_logger("audit")
 # Log and error message templates
 # ---------------------------------------------------------------------------
 
-_SYMLINK_DATABASE_PATH_ERROR: str = (
-    "Audit database path {path!r} is a symlink — symlinks are prohibited "
-    "to prevent log-redirection attacks"
-)
 _SCHEMA_DOWNGRADE_ERROR: str = (
     "Cannot downgrade audit schema from version {from_version} to {to_version}"
 )
@@ -117,8 +141,6 @@ _UNKNOWN_MIGRATION_ERROR: str = (
     "No migration path exists from schema version {from_version} "
     "to {to_version} — add the SQL to _MIGRATIONS"
 )
-_SCHEMA_VERSION_MISSING_ERROR: str = "schema_meta table exists but the schema_version key is absent"
-_DATABASE_ERROR: str = "Audit database operation failed: {detail}"
 _CHAIN_TAMPER_ERROR: str = (
     "Audit chain verification failed at row id={row_id}: "
     "stored hash does not match recomputed hash — the audit log may have been tampered with"
@@ -151,52 +173,10 @@ _KEY_READ_ERROR: str = "Cannot read audit key from {redacted_key_path}: {io_stre
 # Implementation constants
 # ---------------------------------------------------------------------------
 
-_SCAN_EVENTS_TABLE: str = "scan_events"
-_SCHEMA_META_TABLE: str = "schema_meta"
-_SCHEMA_VERSION_KEY: str = "schema_version"
-_CREATED_AT_KEY: str = "created_at"
-_UNKNOWN_REPOSITORY: str = "unknown"
-_UNKNOWN_BRANCH: str = "unknown"
-_BOOLEAN_TRUE: int = 1
-_BOOLEAN_FALSE: int = 0
-_EVENT_TYPE_SCAN: str = "scan"
 _CHAIN_HASH_PLACEHOLDER: str = ""
-_NOTIFICATIONS_EMPTY_JSON: str = "[]"
-# O_NOFOLLOW is POSIX-only (Linux/macOS). On Windows it does not exist;
-# _reject_symlink_database_path falls back to Path.is_symlink() there.
-_O_NOFOLLOW: int | None = getattr(os, "O_NOFOLLOW", None)
 # O_BINARY is Windows-only. On POSIX it is 0 (no-op). Without it, os.open on
 # Windows opens in text mode and translates \n → \r\n, corrupting binary key data.
 _O_BINARY: int = getattr(os, "O_BINARY", 0)
-_PRAGMA_WAL_MODE: str = "PRAGMA journal_mode=WAL"
-_LAST_SCAN_LIMIT: int = 1
-_GIT_SUBPROCESS_TIMEOUT_SECONDS: int = 5
-_GIT_BRANCH_ARGS: tuple[str, ...] = ("git", "branch", "--show-current")
-_GIT_TOPLEVEL_ARGS: tuple[str, ...] = ("git", "rev-parse", "--show-toplevel")
-# git log pretty-format specifiers used for committer identity.
-# %cn = committer name (the person who applied the commit, not the author)
-# %ce = committer email
-# These are hashed before storage — raw values are never persisted.
-_GIT_FORMAT_COMMITTER_NAME: str = "--format=%cn"
-_GIT_FORMAT_COMMITTER_EMAIL: str = "--format=%ce"
-_GIT_COMMITTER_NAME_ARGS: tuple[str, ...] = ("git", "log", "-1", _GIT_FORMAT_COMMITTER_NAME)
-_GIT_COMMITTER_EMAIL_ARGS: tuple[str, ...] = ("git", "log", "-1", _GIT_FORMAT_COMMITTER_EMAIL)
-
-# CI/CD environment variable names for PR number and pipeline detection.
-_ENV_PR_NUMBER_GITHUB: str = "GITHUB_PR_NUMBER"
-_ENV_PR_NUMBER_GITLAB: str = "CI_MERGE_REQUEST_IID"
-_ENV_PR_NUMBER_BITBUCKET: str = "BITBUCKET_PR_ID"
-_ENV_PIPELINE_GITHUB: str = "GITHUB_ACTIONS"
-_ENV_PIPELINE_GITLAB: str = "GITLAB_CI"
-_ENV_PIPELINE_JENKINS: str = "JENKINS_URL"
-_ENV_PIPELINE_CIRCLECI: str = "CIRCLECI"
-_ENV_PIPELINE_BITBUCKET: str = "BITBUCKET_PIPELINE_UUID"
-_PIPELINE_GITHUB_NAME: str = "github-actions"
-_PIPELINE_GITLAB_NAME: str = "gitlab-ci"
-_PIPELINE_JENKINS_NAME: str = "jenkins"
-_PIPELINE_CIRCLECI_NAME: str = "circleci"
-_PIPELINE_BITBUCKET_NAME: str = "bitbucket-pipelines"
-_PIPELINE_LOCAL: str = "local"
 
 # ScanFinding field names that carry raw or PHI-adjacent values and must NEVER
 # appear as JSON keys in a serialised findings record stored to the audit DB.
@@ -777,105 +757,6 @@ def _apply_migration_steps(
         current_version += 1
 
 
-def _reject_symlink_database_path(database_path: Path) -> None:
-    """Raise AuditLogError if database_path is a symbolic link.
-
-    Symlinks are rejected to prevent log-redirection attacks: an attacker
-    who can create a symlink at the expected database path could redirect
-    all audit writes to an arbitrary file (e.g. /dev/null or a file they
-    control), silently discarding the audit trail or poisoning a different
-    file. Rejecting symlinks forces the path to resolve to a real file.
-
-    On POSIX (Linux/macOS), uses ``os.open`` with ``O_NOFOLLOW`` to detect
-    symlinks atomically. ``Path.is_symlink()`` + ``sqlite3.connect()`` has a
-    TOCTOU race window; ``O_NOFOLLOW`` closes it because the kernel rejects
-    the symlink in a single syscall (``errno.ELOOP``). ``ENOENT`` is not an
-    error — new databases are created by ``sqlite3.connect``.
-
-    On Windows, ``O_NOFOLLOW`` is not available; the function falls back to
-    ``Path.is_symlink()``. The TOCTOU window remains on Windows but symlink
-    attacks are mitigated by the OS security model.
-
-    Args:
-        database_path: Resolved path to validate.
-
-    Raises:
-        AuditLogError: If database_path is a symbolic link.
-    """
-    if _O_NOFOLLOW is not None:
-        # POSIX: O_NOFOLLOW atomically rejects symlinks in a single syscall.
-        try:
-            fd = os.open(str(database_path), os.O_RDONLY | _O_NOFOLLOW)
-            os.close(fd)
-        except OSError as os_error:
-            if os_error.errno == errno.ELOOP:
-                raise AuditLogError(
-                    _SYMLINK_DATABASE_PATH_ERROR.format(path=database_path)
-                ) from os_error
-            if os_error.errno != errno.ENOENT:
-                # Unexpected OS error (e.g. EACCES, EPERM) — surface as AuditLogError.
-                raise AuditLogError(_DATABASE_ERROR.format(detail=os_error)) from os_error
-            # ENOENT is intentionally ignored — new databases created by sqlite3.connect.
-    else:
-        # Windows fallback: O_NOFOLLOW unavailable; is_symlink() has a small TOCTOU
-        # window but is the best available check on this platform.
-        if database_path.is_symlink():
-            raise AuditLogError(_SYMLINK_DATABASE_PATH_ERROR.format(path=database_path))
-
-
-def _ensure_database_parent_exists(database_path: Path) -> None:
-    """Create the parent directory of database_path if it does not exist.
-
-    Args:
-        database_path: Path to the SQLite file whose parent must exist.
-
-    Raises:
-        AuditLogError: If the directory cannot be created (e.g. permission
-            denied or a file already occupies the expected directory path).
-    """
-    try:
-        database_path.parent.mkdir(parents=True, exist_ok=True)
-    except OSError as io_error:
-        raise AuditLogError(_DATABASE_ERROR.format(detail=io_error)) from io_error
-
-
-def _open_database(database_path: Path) -> sqlite3.Connection:
-    """Open and configure a SQLite connection to the audit database.
-
-    Symlink detection uses O_NOFOLLOW (see _reject_symlink_database_path),
-    which closes the TOCTOU race that existed between is_symlink() and
-    sqlite3.connect() in earlier versions.
-
-    Args:
-        database_path: Path to the SQLite file to open or create.
-
-    Returns:
-        An open sqlite3.Connection with row_factory and WAL mode configured.
-
-    Raises:
-        AuditLogError: If the path is a symlink, the parent directory cannot
-            be created, or the database cannot be opened or configured.
-    """
-    _reject_symlink_database_path(database_path)
-    _ensure_database_parent_exists(database_path)
-    try:
-        connection = sqlite3.connect(str(database_path))
-    except sqlite3.Error as db_error:
-        raise AuditLogError(_DATABASE_ERROR.format(detail=db_error)) from db_error
-    try:
-        connection.row_factory = sqlite3.Row
-        connection.execute(_PRAGMA_WAL_MODE)
-    except sqlite3.Error as config_error:
-        connection.close()
-        raise AuditLogError(_DATABASE_ERROR.format(detail=config_error)) from config_error
-    return connection
-
-
-def _get_current_timestamp() -> str:
-    """Return the current UTC time as an ISO 8601 string."""
-    return datetime.datetime.now(datetime.UTC).isoformat()
-
-
 def _serialize_findings(findings: tuple[ScanFinding, ...]) -> str:
     """Serialise findings to a JSON string for audit storage.
 
@@ -902,118 +783,6 @@ def _serialize_findings(findings: tuple[ScanFinding, ...]) -> str:
         for finding in findings
     ]
     return json.dumps(serialized_findings)
-
-
-def _get_current_branch() -> str:
-    """Return the current git branch name, or 'unknown' if unavailable.
-
-    Security note: the raw branch name is never stored or logged. Callers
-    hash it with SHA-256 before persisting to the audit database because
-    branch names can be PHI-revealing (e.g. feature/patient-john-doe-ssn-fix).
-    Only the type of the subprocess exception is logged on failure — not any
-    path or argument value — to avoid leaking filesystem layout.
-
-    Returns:
-        The branch name string for hashing, or 'unknown' when git is
-        unavailable, returns a non-zero exit code, or times out.
-    """
-    try:
-        completed_process = subprocess.run(
-            _GIT_BRANCH_ARGS,
-            capture_output=True,
-            text=True,
-            timeout=_GIT_SUBPROCESS_TIMEOUT_SECONDS,
-        )
-        if completed_process.returncode == 0:
-            branch = completed_process.stdout.strip()
-            return branch if branch else _UNKNOWN_BRANCH
-    except (OSError, subprocess.TimeoutExpired) as git_error:
-        _logger.warning("Could not determine git branch: %s", type(git_error).__name__)
-    return _UNKNOWN_BRANCH
-
-
-def _get_current_repository_path() -> str:
-    """Return the git repository root path, or the current directory if unavailable.
-
-    Security note: the raw path is never stored or logged. Callers hash it
-    with SHA-256 before persisting because repository paths can be PHI-
-    revealing (e.g. /home/nurse_jones/patient_records). The exception type
-    only is logged on failure — not the path — to avoid leaking filesystem
-    layout in log files.
-
-    Returns:
-        The absolute repository root path string for hashing, or the
-        current working directory when git is unavailable or times out.
-    """
-    try:
-        completed_process = subprocess.run(
-            _GIT_TOPLEVEL_ARGS,
-            capture_output=True,
-            text=True,
-            timeout=_GIT_SUBPROCESS_TIMEOUT_SECONDS,
-        )
-        if completed_process.returncode == 0:
-            return completed_process.stdout.strip()
-    except (OSError, subprocess.TimeoutExpired) as git_error:
-        _logger.warning("Could not determine git repository path: %s", type(git_error).__name__)
-    return str(Path.cwd())
-
-
-def _fetch_git_command_stdout(args: tuple[str, ...]) -> str:
-    """Run a git log format command and return its stdout, or empty string on failure."""
-    try:
-        completed_process = subprocess.run(
-            args,
-            capture_output=True,
-            text=True,
-            timeout=_GIT_SUBPROCESS_TIMEOUT_SECONDS,
-        )
-        if completed_process.returncode == 0:
-            return completed_process.stdout.strip()
-    except (OSError, subprocess.TimeoutExpired) as git_error:
-        _logger.warning("Could not run git format command: %s", type(git_error).__name__)
-    return ""
-
-
-def _hash_git_committer_field(args: tuple[str, ...]) -> str:
-    """Return SHA-256 hash of a git log committer field, or empty string if unavailable.
-
-    Args:
-        args: Full argument tuple for the git log command (e.g. _GIT_COMMITTER_NAME_ARGS).
-
-    Returns:
-        64-char hex digest, or empty string when git is unavailable or returns no output.
-    """
-    field_value = _fetch_git_command_stdout(args)
-    return hashlib.sha256(field_value.encode()).hexdigest() if field_value else ""
-
-
-def _detect_pr_number() -> str:
-    """Return the PR/MR number from CI environment variables, or empty string."""
-    for env_var in (
-        _ENV_PR_NUMBER_GITHUB,
-        _ENV_PR_NUMBER_GITLAB,
-        _ENV_PR_NUMBER_BITBUCKET,
-    ):
-        pr_number_string = os.environ.get(env_var, "")
-        if pr_number_string:
-            return pr_number_string
-    return ""
-
-
-def _detect_pipeline() -> str:
-    """Return the CI/CD pipeline name from environment variables, or 'local'."""
-    if os.environ.get(_ENV_PIPELINE_GITHUB):
-        return _PIPELINE_GITHUB_NAME
-    if os.environ.get(_ENV_PIPELINE_GITLAB):
-        return _PIPELINE_GITLAB_NAME
-    if os.environ.get(_ENV_PIPELINE_JENKINS):
-        return _PIPELINE_JENKINS_NAME
-    if os.environ.get(_ENV_PIPELINE_CIRCLECI):
-        return _PIPELINE_CIRCLECI_NAME
-    if os.environ.get(_ENV_PIPELINE_BITBUCKET):
-        return _PIPELINE_BITBUCKET_NAME
-    return _PIPELINE_LOCAL
 
 
 def _collect_repository_identity() -> tuple[str, str]:
