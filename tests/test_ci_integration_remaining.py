@@ -1466,6 +1466,6 @@ def test_sarif_symbols_reexported_from_ci_integration() -> None:
         "_gzip_compress_sarif",
         "_base64_encode_bytes",
     ):
-        assert getattr(ci_integration_module, symbol_name) is getattr(
-            sarif_module, symbol_name
-        ), f"{symbol_name} no longer re-exported from phi_scan.ci_integration"
+        assert getattr(ci_integration_module, symbol_name) is getattr(sarif_module, symbol_name), (
+            f"{symbol_name} no longer re-exported from phi_scan.ci_integration"
+        )
