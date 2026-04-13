@@ -29,6 +29,14 @@ pass).
   CI integration dispatch (`_run_ci_integration`, `_call_ci_integration`),
   and all scan-related constants.
 
+Cleanup items to fold into the scan slice:
+
+- Rename `_prepare_scan_phase` to a clear verb-noun pair
+  (e.g. `_collect_scan_targets_for_phase`) — "phase" alone is vague.
+- Move the orphaned `_SPINNER_NOTIFY_MESSAGE` and
+  `_SPINNER_CONFIG_LOAD_MESSAGE` constants out of `__init__.py`; they are
+  scan-command concerns.
+
 The scan slice is the largest (~500 lines) and the most coupled — it
 touches notification, audit, CI-integration, and rich/verbose UX surfaces
 simultaneously. Extraction was deferred this pass to keep the
