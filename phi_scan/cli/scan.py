@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import time
 from collections import deque
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -11,7 +12,12 @@ import typer
 from watchdog.observers import Observer
 
 from phi_scan import __version__
-from phi_scan.audit import ensure_current_schema, insert_scan_event
+from phi_scan.audit import (
+    _get_current_branch,
+    _get_current_repository_path,
+    ensure_current_schema,
+    insert_scan_event,
+)
 from phi_scan.ci_integration import (
     CIIntegrationError,
     CIPlatform,
@@ -277,8 +283,6 @@ def _dispatch_notifications(
     should_notify = not config.notify_on_violation_only or not scan_result.is_clean
     if not should_notify:
         return []
-    from phi_scan.audit import _get_current_branch, _get_current_repository_path
-
     repository = _get_current_repository_path()
     branch = _get_current_branch()
     notification_request = NotificationRequest(
@@ -372,27 +376,40 @@ def _call_ci_integration(
             )
 
 
+@dataclass(frozen=True)
+class _CIIntegrationOptions:
+    """Flags controlling which CI/CD integrations run after a scan."""
+
+    should_post_comment: bool
+    should_set_status: bool
+    should_upload_sarif: bool
+
+
 def _run_ci_integration(
     scan_result: ScanResult,
-    should_post_comment: bool,
-    should_set_status: bool,
-    should_upload_sarif: bool,
+    integration_options: _CIIntegrationOptions,
     is_rich_mode: bool,
 ) -> None:
     """Run all enabled CI/CD platform integrations after a scan completes."""
-    if not any([should_post_comment, should_set_status, should_upload_sarif]):
+    if not any(
+        [
+            integration_options.should_post_comment,
+            integration_options.should_set_status,
+            integration_options.should_upload_sarif,
+        ]
+    ):
         return
 
     pr_context = get_pr_context()
 
-    if should_post_comment:
+    if integration_options.should_post_comment:
         _call_ci_integration(
             lambda: post_pr_comment(scan_result, pr_context),
             _CI_LABEL_PR_COMMENT,
             is_rich_mode,
         )
 
-    if should_set_status:
+    if integration_options.should_set_status:
         _call_ci_integration(
             lambda: set_commit_status(scan_result, pr_context),
             _CI_LABEL_COMMIT_STATUS,
@@ -422,7 +439,7 @@ def _run_ci_integration(
                 is_rich_mode,
             )
 
-    if should_upload_sarif:
+    if integration_options.should_upload_sarif:
         _call_ci_integration(
             lambda: upload_sarif_to_github(scan_result, pr_context),
             _CI_LABEL_SARIF_UPLOAD,
@@ -522,13 +539,12 @@ def scan(
     )
     _display_audit_phase_header(output_options, phase_options)
     _persist_audit_record(scan_result, scan_config, output_options)
-    _run_ci_integration(
-        scan_result,
-        should_post_comment,
-        should_set_status,
-        should_upload_sarif,
-        is_rich_mode,
+    integration_options = _CIIntegrationOptions(
+        should_post_comment=should_post_comment,
+        should_set_status=should_set_status,
+        should_upload_sarif=should_upload_sarif,
     )
+    _run_ci_integration(scan_result, integration_options, is_rich_mode)
     display_report_phase_header(output_options, phase_options.is_verbose)
     emit_report_output(scan_result, output_options, phase_options.should_use_baseline)
 
