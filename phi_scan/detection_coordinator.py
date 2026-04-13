@@ -22,6 +22,7 @@ from __future__ import annotations
 import dataclasses
 import logging
 import re
+from collections.abc import Callable
 from pathlib import Path
 
 from phi_scan.constants import (
@@ -172,6 +173,92 @@ def detect_quasi_identifier_combination(
     return combination_findings
 
 
+def _is_geographic_finding(finding: ScanFinding) -> bool:
+    return finding.hipaa_category == PhiCategory.GEOGRAPHIC
+
+
+def _is_date_finding(finding: ScanFinding) -> bool:
+    return finding.hipaa_category == PhiCategory.DATE
+
+
+def _is_name_finding(finding: ScanFinding) -> bool:
+    return finding.hipaa_category == PhiCategory.NAME
+
+
+def _is_age_over_threshold_finding(finding: ScanFinding) -> bool:
+    # entity_type "AGE_OVER_THRESHOLD" is produced by the regex layer for ages
+    # strictly above HIPAA_AGE_RESTRICTION_THRESHOLD (i.e., 91+).
+    return finding.entity_type == _AGE_OVER_THRESHOLD_ENTITY_TYPE
+
+
+@dataclasses.dataclass(frozen=True)
+class _TwoCategoryRule:
+    """Shared skeleton for two-category quasi-identifier combination evaluators."""
+
+    predicate_a: Callable[[ScanFinding], bool]
+    predicate_b: Callable[[ScanFinding], bool]
+    combination_label: str
+    note: str
+
+
+def _evaluate_two_category_rule(
+    findings: list[ScanFinding],
+    rule: _TwoCategoryRule,
+) -> list[ScanFinding]:
+    """Apply a two-category combination rule and return any triggered finding.
+
+    Selects up to ``COMBINATION_REPRESENTATIVE_COUNT`` findings from each
+    category (first-seen order) to avoid combinatorial explosion, then fires
+    the rule only when both categories are present and all representatives
+    fall within the proximity window.
+    """
+    category_a = [f for f in findings if rule.predicate_a(f)]
+    category_b = [f for f in findings if rule.predicate_b(f)]
+    if not category_a or not category_b:
+        return []
+    representative_count = COMBINATION_REPRESENTATIVE_COUNT
+    candidate_group = category_a[:representative_count] + category_b[:representative_count]
+    if not _findings_within_proximity_window(candidate_group):
+        return []
+    return [
+        _build_combination_finding(
+            source_findings=candidate_group,
+            combination_label=rule.combination_label,
+            note=rule.note,
+        )
+    ]
+
+
+_ZIP_DOB_RULE: _TwoCategoryRule = _TwoCategoryRule(
+    predicate_a=_is_geographic_finding,
+    predicate_b=_is_date_finding,
+    combination_label="ZIP + DOB",
+    note=(
+        f"ZIP code + date of birth combination re-identifies "
+        f"{SWEENEY_REIDENTIFICATION_PERCENTAGE}% of the "
+        "US population (Sweeney 2000). Generalize at least one field."
+    ),
+)
+
+_NAME_DATE_RULE: _TwoCategoryRule = _TwoCategoryRule(
+    predicate_a=_is_name_finding,
+    predicate_b=_is_date_finding,
+    combination_label="NAME + DATE",
+    note="Name and date together are uniquely identifying. Remove or generalize one.",
+)
+
+_AGE_GEOGRAPHIC_RULE: _TwoCategoryRule = _TwoCategoryRule(
+    predicate_a=_is_age_over_threshold_finding,
+    predicate_b=_is_geographic_finding,
+    combination_label=f"AGE_OVER_{HIPAA_AGE_RESTRICTION_THRESHOLD} + GEOGRAPHIC",
+    note=(
+        f"HIPAA §164.514(b)(2)(i): ages over {HIPAA_AGE_RESTRICTION_THRESHOLD} "
+        "combined with geographic data re-identify individuals. "
+        "Generalize the age to a range or remove the geographic field."
+    ),
+)
+
+
 def evaluate_zip_dob_sex_combination(
     findings: list[ScanFinding],
 ) -> list[ScanFinding]:
@@ -190,27 +277,7 @@ def evaluate_zip_dob_sex_combination(
         A single-element list with a QUASI_IDENTIFIER_COMBINATION finding, or
         an empty list if the combination is absent or outside the proximity window.
     """
-    geographic = [f for f in findings if f.hipaa_category == PhiCategory.GEOGRAPHIC]
-    dates = [f for f in findings if f.hipaa_category == PhiCategory.DATE]
-    if not geographic or not dates:
-        return []
-    # Only the first representative of each category is used to avoid
-    # combinatorial explosion when multiple geographic or date findings exist.
-    representative_count = COMBINATION_REPRESENTATIVE_COUNT
-    candidate_group = geographic[:representative_count] + dates[:representative_count]
-    if not _findings_within_proximity_window(candidate_group):
-        return []
-    return [
-        _build_combination_finding(
-            source_findings=candidate_group,
-            combination_label="ZIP + DOB",
-            note=(
-                f"ZIP code + date of birth combination re-identifies "
-                f"{SWEENEY_REIDENTIFICATION_PERCENTAGE}% of the "
-                "US population (Sweeney 2000). Generalize at least one field."
-            ),
-        )
-    ]
+    return _evaluate_two_category_rule(findings, _ZIP_DOB_RULE)
 
 
 def evaluate_name_date_combination(
@@ -228,23 +295,7 @@ def evaluate_name_date_combination(
         A single-element list with a QUASI_IDENTIFIER_COMBINATION finding, or
         an empty list if the combination is absent or outside the proximity window.
     """
-    names = [f for f in findings if f.hipaa_category == PhiCategory.NAME]
-    dates = [f for f in findings if f.hipaa_category == PhiCategory.DATE]
-    if not names or not dates:
-        return []
-    # Only the first representative of each category is used to avoid
-    # combinatorial explosion when multiple name or date findings exist.
-    representative_count = COMBINATION_REPRESENTATIVE_COUNT
-    candidate_group = names[:representative_count] + dates[:representative_count]
-    if not _findings_within_proximity_window(candidate_group):
-        return []
-    return [
-        _build_combination_finding(
-            source_findings=candidate_group,
-            combination_label="NAME + DATE",
-            note="Name and date together are uniquely identifying. Remove or generalize one.",
-        )
-    ]
+    return _evaluate_two_category_rule(findings, _NAME_DATE_RULE)
 
 
 def evaluate_age_geographic_combination(
@@ -263,28 +314,7 @@ def evaluate_age_geographic_combination(
         A single-element list with a QUASI_IDENTIFIER_COMBINATION finding, or
         an empty list if the combination is absent or outside the proximity window.
     """
-    # entity_type "AGE_OVER_THRESHOLD" is produced by the regex layer for ages
-    # strictly above HIPAA_AGE_RESTRICTION_THRESHOLD (i.e., 91+). Never compare
-    # against the literal threshold value here — reference the constant.
-    age_findings = [f for f in findings if f.entity_type == _AGE_OVER_THRESHOLD_ENTITY_TYPE]
-    geographic = [f for f in findings if f.hipaa_category == PhiCategory.GEOGRAPHIC]
-    if not age_findings or not geographic:
-        return []
-    representative_count = COMBINATION_REPRESENTATIVE_COUNT
-    candidate_group = age_findings[:representative_count] + geographic[:representative_count]
-    if not _findings_within_proximity_window(candidate_group):
-        return []
-    return [
-        _build_combination_finding(
-            source_findings=candidate_group,
-            combination_label=f"AGE_OVER_{HIPAA_AGE_RESTRICTION_THRESHOLD} + GEOGRAPHIC",
-            note=(
-                f"HIPAA §164.514(b)(2)(i): ages over {HIPAA_AGE_RESTRICTION_THRESHOLD} "
-                "combined with geographic data re-identify individuals. "
-                "Generalize the age to a range or remove the geographic field."
-            ),
-        )
-    ]
+    return _evaluate_two_category_rule(findings, _AGE_GEOGRAPHIC_RULE)
 
 
 def evaluate_colocated_identifier_combination(

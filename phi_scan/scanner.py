@@ -925,9 +925,7 @@ def _scan_archive_members(
             continue
         virtual_path = _compute_display_path(archive_path) / member_name
         raw_findings = detect_phi_in_text_content(member_content, virtual_path)
-        member_findings = _compose_file_findings(
-            raw_findings, member_content, virtual_path, config
-        )
+        member_findings = _compose_file_findings(raw_findings, member_content, virtual_path, config)
         findings.extend(member_findings)
     return findings
 

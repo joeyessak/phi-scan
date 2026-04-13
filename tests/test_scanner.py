@@ -800,9 +800,7 @@ def _make_finding_for_compose_test(
         detection_layer=detection_layer,
         value_hash=value_hash_seed * 64,
         severity=(
-            SeverityLevel.HIGH
-            if confidence >= _COMPOSE_TEST_HIGH_CONFIDENCE
-            else SeverityLevel.LOW
+            SeverityLevel.HIGH if confidence >= _COMPOSE_TEST_HIGH_CONFIDENCE else SeverityLevel.LOW
         ),
         code_context="sample [REDACTED]",
         remediation_hint="hint",
