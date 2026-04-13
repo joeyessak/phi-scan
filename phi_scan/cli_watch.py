@@ -5,7 +5,9 @@ This top-level re-export preserves the historical import path
 package. New code should import from `phi_scan.cli.watch` directly.
 """
 
-from phi_scan.cli import watch as _module
+from phi_scan.cli import watch as _watch_module
 from phi_scan.cli.watch import *  # noqa: F401,F403
 
-__all__ = getattr(_module, "__all__", [name for name in dir(_module) if not name.startswith("_")])
+__all__ = getattr(
+    _watch_module, "__all__", [name for name in dir(_watch_module) if not name.startswith("_")]
+)
