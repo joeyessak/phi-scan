@@ -297,7 +297,7 @@ def test_history_invalid_period_non_numeric_raises_bad_parameter(tmp_path: Path)
 def test_install_hook_creates_hook_file(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     hook_path = tmp_path / ".git" / "hooks" / "pre-commit"
     (tmp_path / ".git").mkdir()
-    monkeypatch.setattr("phi_scan.cli._GIT_DIR_PATH", tmp_path / ".git")
+    monkeypatch.setattr("phi_scan.cli._shared._GIT_DIR_PATH", tmp_path / ".git")
     monkeypatch.setattr("phi_scan.cli._PRE_COMMIT_HOOK_PATH", str(hook_path))
 
     result = _runner.invoke(app, ["install-hook"])
@@ -312,7 +312,7 @@ def test_install_hook_prints_installed_message(
 ) -> None:
     hook_path = tmp_path / ".git" / "hooks" / "pre-commit"
     (tmp_path / ".git").mkdir()
-    monkeypatch.setattr("phi_scan.cli._GIT_DIR_PATH", tmp_path / ".git")
+    monkeypatch.setattr("phi_scan.cli._shared._GIT_DIR_PATH", tmp_path / ".git")
     monkeypatch.setattr("phi_scan.cli._PRE_COMMIT_HOOK_PATH", str(hook_path))
 
     result = _runner.invoke(app, ["install-hook"])
@@ -327,7 +327,7 @@ def test_install_hook_does_not_overwrite_existing_hook(
     (tmp_path / ".git").mkdir()
     hook_path.parent.mkdir(parents=True, exist_ok=True)
     hook_path.write_text(_FOREIGN_HOOK_CONTENT)
-    monkeypatch.setattr("phi_scan.cli._GIT_DIR_PATH", tmp_path / ".git")
+    monkeypatch.setattr("phi_scan.cli._shared._GIT_DIR_PATH", tmp_path / ".git")
     monkeypatch.setattr("phi_scan.cli._PRE_COMMIT_HOOK_PATH", str(hook_path))
 
     result = _runner.invoke(app, ["install-hook"])
@@ -341,7 +341,7 @@ def test_uninstall_hook_removes_our_hook(tmp_path: Path, monkeypatch: pytest.Mon
     (tmp_path / ".git").mkdir()
     hook_path.parent.mkdir(parents=True, exist_ok=True)
     hook_path.write_text(_EXPECTED_HOOK_SCRIPT, encoding="utf-8")
-    monkeypatch.setattr("phi_scan.cli._GIT_DIR_PATH", tmp_path / ".git")
+    monkeypatch.setattr("phi_scan.cli._shared._GIT_DIR_PATH", tmp_path / ".git")
     monkeypatch.setattr("phi_scan.cli._PRE_COMMIT_HOOK_PATH", str(hook_path))
 
     result = _runner.invoke(app, ["uninstall-hook"])
@@ -357,7 +357,7 @@ def test_uninstall_hook_prints_removed_message(
     (tmp_path / ".git").mkdir()
     hook_path.parent.mkdir(parents=True, exist_ok=True)
     hook_path.write_text(_EXPECTED_HOOK_SCRIPT, encoding="utf-8")
-    monkeypatch.setattr("phi_scan.cli._GIT_DIR_PATH", tmp_path / ".git")
+    monkeypatch.setattr("phi_scan.cli._shared._GIT_DIR_PATH", tmp_path / ".git")
     monkeypatch.setattr("phi_scan.cli._PRE_COMMIT_HOOK_PATH", str(hook_path))
 
     result = _runner.invoke(app, ["uninstall-hook"])
@@ -370,7 +370,7 @@ def test_uninstall_hook_prints_not_found_when_absent(
 ) -> None:
     hook_path = tmp_path / ".git" / "hooks" / "pre-commit"
     (tmp_path / ".git").mkdir()
-    monkeypatch.setattr("phi_scan.cli._GIT_DIR_PATH", tmp_path / ".git")
+    monkeypatch.setattr("phi_scan.cli._shared._GIT_DIR_PATH", tmp_path / ".git")
     monkeypatch.setattr("phi_scan.cli._PRE_COMMIT_HOOK_PATH", str(hook_path))
 
     result = _runner.invoke(app, ["uninstall-hook"])
@@ -386,7 +386,7 @@ def test_uninstall_hook_does_not_remove_foreign_hook(
     (tmp_path / ".git").mkdir()
     hook_path.parent.mkdir(parents=True, exist_ok=True)
     hook_path.write_text(_FOREIGN_HOOK_CONTENT)
-    monkeypatch.setattr("phi_scan.cli._GIT_DIR_PATH", tmp_path / ".git")
+    monkeypatch.setattr("phi_scan.cli._shared._GIT_DIR_PATH", tmp_path / ".git")
     monkeypatch.setattr("phi_scan.cli._PRE_COMMIT_HOOK_PATH", str(hook_path))
 
     result = _runner.invoke(app, ["uninstall-hook"])
@@ -399,7 +399,7 @@ def test_install_hook_exits_with_error_when_not_in_git_repo(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     hook_path = tmp_path / ".git" / "hooks" / "pre-commit"
-    monkeypatch.setattr("phi_scan.cli._GIT_DIR_PATH", tmp_path / ".git")
+    monkeypatch.setattr("phi_scan.cli._shared._GIT_DIR_PATH", tmp_path / ".git")
     monkeypatch.setattr("phi_scan.cli._PRE_COMMIT_HOOK_PATH", str(hook_path))
 
     result = _runner.invoke(app, ["install-hook"])
@@ -416,7 +416,7 @@ def test_uninstall_hook_exits_with_error_when_not_in_git_repo(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     hook_path = tmp_path / ".git" / "hooks" / "pre-commit"
-    monkeypatch.setattr("phi_scan.cli._GIT_DIR_PATH", tmp_path / ".git")
+    monkeypatch.setattr("phi_scan.cli._shared._GIT_DIR_PATH", tmp_path / ".git")
     monkeypatch.setattr("phi_scan.cli._PRE_COMMIT_HOOK_PATH", str(hook_path))
 
     result = _runner.invoke(app, ["uninstall-hook"])

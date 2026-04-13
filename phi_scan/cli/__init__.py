@@ -7,14 +7,11 @@ import json
 import logging
 import time
 from collections import deque
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated, Any
 
-import pathspec
 import typer
 from rich.live import Live
-from rich.progress import Progress, TaskID
 from watchdog.observers import Observer
 
 from phi_scan import __version__
@@ -37,6 +34,37 @@ from phi_scan.ci_integration import (
     set_azure_pr_status,
     set_commit_status,
     upload_sarif_to_github,
+)
+from phi_scan.cli._shared import (
+    _DEFAULT_WORKER_COUNT,
+    _GIT_DIR_NOT_FOUND_MESSAGE,
+    _GIT_DIR_PATH,
+    _HOOK_SYMLINKED_COMPONENT_ERROR,
+    _LOG_LEVEL_DEBUG,
+    _LOG_LEVEL_ERROR,
+    _LOG_LEVEL_INFO,
+    _LOG_LEVEL_MAP,
+    _LOG_LEVEL_WARNING,
+    _PARALLEL_SCAN_PROGRESS_LABEL,
+    _PROGRESS_FILENAME_ELLIPSIS,
+    _PROGRESS_FILENAME_MAX_CHARS,
+    _VERSION_FLAG_HELP,
+    _VERSION_OUTPUT_FORMAT,
+    _WORKERS_ABOVE_MAXIMUM_ERROR,
+    _WORKERS_BELOW_MINIMUM_ERROR,
+    _configure_logging,
+    _echo_version,
+    _load_combined_ignore_patterns,
+    _normalize_diff_path,
+    _ProgressScanContext,
+    _reject_hook_path_with_symlinked_component,
+    _reject_missing_git_directory,
+    _resolve_scan_targets,
+    _ScanExecutionOptions,
+    _ScanPhaseOptions,
+    _ScanTargetOptions,
+    _truncate_filename_for_progress,
+    _validate_worker_count,
 )
 from phi_scan.cli.baseline import baseline_app
 from phi_scan.cli.config import config_app
@@ -64,15 +92,12 @@ from phi_scan.compliance import (
 )
 from phi_scan.constants import (
     DEFAULT_DATABASE_PATH,
-    DEFAULT_IGNORE_FILENAME,
     DEFAULT_TEXT_ENCODING,
     EXIT_CODE_CLEAN,
     EXIT_CODE_ERROR,
     EXIT_CODE_VIOLATION,
     OutputFormat,
-    PathspecMatchStyle,
 )
-from phi_scan.diff import get_changed_files_from_diff
 from phi_scan.exceptions import (
     AuditKeyMissingError,
     AuditLogError,
@@ -87,7 +112,7 @@ from phi_scan.fixer import (
     collect_file_replacements,
     fix_file,
 )
-from phi_scan.logging_config import get_logger, replace_logger_handlers
+from phi_scan.logging_config import get_logger
 from phi_scan.models import ScanConfig, ScanFinding, ScanResult
 from phi_scan.notifier import (
     NotificationRequest,
@@ -111,15 +136,45 @@ from phi_scan.scanner import (
     MAX_WORKER_COUNT,
     MIN_WORKER_COUNT,
     build_scan_result,
-    collect_scan_targets,
     execute_scan,
-    is_path_excluded,
-    load_ignore_patterns,
     run_parallel_scan,
     scan_file,
 )
 
-__all__ = ["app"]
+# Private helpers re-exported for backwards-compatible imports from
+# ``phi_scan.cli`` (tests and historical callers reach for these names).
+__all__ = [
+    "_DEFAULT_WORKER_COUNT",
+    "_GIT_DIR_NOT_FOUND_MESSAGE",
+    "_GIT_DIR_PATH",
+    "_HOOK_SYMLINKED_COMPONENT_ERROR",
+    "_LOG_LEVEL_DEBUG",
+    "_LOG_LEVEL_ERROR",
+    "_LOG_LEVEL_INFO",
+    "_LOG_LEVEL_MAP",
+    "_LOG_LEVEL_WARNING",
+    "_PARALLEL_SCAN_PROGRESS_LABEL",
+    "_PROGRESS_FILENAME_ELLIPSIS",
+    "_PROGRESS_FILENAME_MAX_CHARS",
+    "_ProgressScanContext",
+    "_ScanExecutionOptions",
+    "_ScanPhaseOptions",
+    "_ScanTargetOptions",
+    "_VERSION_FLAG_HELP",
+    "_VERSION_OUTPUT_FORMAT",
+    "_WORKERS_ABOVE_MAXIMUM_ERROR",
+    "_WORKERS_BELOW_MINIMUM_ERROR",
+    "_configure_logging",
+    "_echo_version",
+    "_load_combined_ignore_patterns",
+    "_normalize_diff_path",
+    "_reject_hook_path_with_symlinked_component",
+    "_reject_missing_git_directory",
+    "_resolve_scan_targets",
+    "_truncate_filename_for_progress",
+    "_validate_worker_count",
+    "app",
+]
 
 _logger: logging.Logger = get_logger("cli")
 
@@ -137,13 +192,6 @@ app.add_typer(config_app)
 app.add_typer(explain_app)
 app.add_typer(baseline_app)
 app.add_typer(plugins_app)
-
-# ---------------------------------------------------------------------------
-# Version flag
-# ---------------------------------------------------------------------------
-
-_VERSION_OUTPUT_FORMAT: str = "phi-scan {version}"
-_VERSION_FLAG_HELP: str = "Show version and exit."
 
 # ---------------------------------------------------------------------------
 # Scan command help strings
@@ -247,12 +295,6 @@ _HOOK_REMOVED_MESSAGE: str = "Pre-commit hook removed: {path}"
 _HOOK_NOT_FOUND_MESSAGE: str = "No phi-scan hook found at {path}."
 _HOOK_NOT_OURS_MESSAGE: str = "Hook at {path} was not installed by phi-scan — not removing."
 _HOOK_IS_SYMLINK_MESSAGE: str = "Hook at {path} is a symlink — not reading or removing."
-_HOOK_SYMLINKED_COMPONENT_ERROR: str = (
-    "Hook path component {component!r} is a symlink — refusing to write."
-)
-# CWD-relative by design: hook commands are always run from the repo root.
-_GIT_DIR_PATH: Path = Path(".git")
-_GIT_DIR_NOT_FOUND_MESSAGE: str = "Not a git repository — .git directory not found."
 # Marker written into every hook we install; used to identify our hooks on uninstall.
 _HOOK_MARKER: str = "phi-scan scan"
 _HOOK_FILE_PERMISSIONS: int = 0o755
@@ -318,20 +360,6 @@ _SCAN_WORKERS_HELP: str = (
     "Output ordering is deterministic regardless of thread completion order."
 )
 
-# Maximum characters of a file path shown in the progress bar description column.
-# Longer paths are truncated with a leading ellipsis so the bar layout stays stable.
-_PROGRESS_FILENAME_MAX_CHARS: int = 38
-_PROGRESS_FILENAME_ELLIPSIS: str = "…"
-# Label shown in the progress bar description column when parallel scanning is active.
-# Replaces the per-file name shown in sequential mode (multiple files run simultaneously
-# so a single filename would be misleading).
-_PARALLEL_SCAN_PROGRESS_LABEL: str = f"scanning{_PROGRESS_FILENAME_ELLIPSIS}"
-# Default worker count accepted by the --workers option.
-_DEFAULT_WORKER_COUNT: int = MIN_WORKER_COUNT
-# Error messages for out-of-range --workers values.
-_WORKERS_BELOW_MINIMUM_ERROR: str = f"--workers must be at least {MIN_WORKER_COUNT}"
-_WORKERS_ABOVE_MAXIMUM_ERROR: str = f"--workers must not exceed {MAX_WORKER_COUNT}"
-
 # ---------------------------------------------------------------------------
 # Error and warning messages
 # ---------------------------------------------------------------------------
@@ -359,22 +387,6 @@ _AUDIT_CHAIN_VERIFY_FLAG: str = "--verify"
 _SPINNER_NOTIFY_MESSAGE: str = "Sending notifications…"
 
 # ---------------------------------------------------------------------------
-# Log level configuration
-# ---------------------------------------------------------------------------
-
-_LOG_LEVEL_DEBUG: str = "debug"
-_LOG_LEVEL_INFO: str = "info"
-_LOG_LEVEL_WARNING: str = "warning"
-_LOG_LEVEL_ERROR: str = "error"
-
-_LOG_LEVEL_MAP: dict[str, int] = {
-    _LOG_LEVEL_DEBUG: logging.DEBUG,
-    _LOG_LEVEL_INFO: logging.INFO,
-    _LOG_LEVEL_WARNING: logging.WARNING,
-    _LOG_LEVEL_ERROR: logging.ERROR,
-}
-
-# ---------------------------------------------------------------------------
 # Verbose phase messages (kept here — used by scan command orchestration)
 # ---------------------------------------------------------------------------
 
@@ -385,167 +397,6 @@ _VERBOSE_PHASE_AUDIT: str = "writing audit record"
 # ---------------------------------------------------------------------------
 # Internal helpers — scan command
 # ---------------------------------------------------------------------------
-
-
-@dataclass
-class _ScanTargetOptions:
-    """Options that control which files are selected for scanning.
-
-    Groups four related inputs so _resolve_scan_targets stays within the
-    three-argument limit required by CLAUDE.md.
-    """
-
-    scan_root: Path
-    diff_ref: str | None
-    single_file: Path | None
-    config: ScanConfig
-
-
-@dataclass(frozen=True)
-class _ScanPhaseOptions:
-    """Execution-phase flags controlling phase headers and data selection.
-
-    Kept separate from ScanOutputOptions because these flags control when and
-    how scan phases execute, not how results are rendered.
-    """
-
-    is_verbose: bool = False
-    should_use_baseline: bool = False
-
-
-@dataclass(frozen=True)
-class _ScanExecutionOptions:
-    """Execution parameters threaded from the scan command into the scan loop.
-
-    Bundles worker_count and should_show_progress so _execute_scan_with_progress
-    stays within the three-argument limit required by CLAUDE.md.
-    """
-
-    worker_count: int = _DEFAULT_WORKER_COUNT
-    should_show_progress: bool = False
-
-
-@dataclass(frozen=True)
-class _ProgressScanContext:
-    """Arguments for _run_scan_with_progress and its sequential/parallel sub-helpers.
-
-    Bundles all five inputs required by the progress-bar scan path into a single
-    object so each helper stays within the three-argument limit. ``scan_targets``
-    is stored as a tuple so the frozen=True guarantee extends to the ordered
-    collection itself — preventing in-place mutation of the scan target list
-    after the context has been constructed.
-    """
-
-    scan_targets: tuple[Path, ...]
-    config: ScanConfig
-    worker_count: int
-    progress: Progress
-    task_id: TaskID
-
-
-def _configure_logging(log_level: str, log_file: Path | None, is_quiet: bool) -> None:
-    """Apply logging configuration from CLI flags.
-
-    Args:
-        log_level: One of debug, info, warning, error.
-        log_file: Optional path for a rotating file handler.
-        is_quiet: Suppress console output when True.
-    """
-    level = _LOG_LEVEL_MAP.get(log_level.lower(), logging.WARNING)
-    replace_logger_handlers(console_level=level, log_file_path=log_file, is_quiet=is_quiet)
-
-
-def _load_combined_ignore_patterns(scan_config: ScanConfig) -> list[str]:
-    """Return .phi-scanignore patterns merged with any config-level exclude_paths.
-
-    Args:
-        scan_config: Active scan configuration (provides optional exclude_paths).
-
-    Returns:
-        Flat list of gitignore-style exclusion patterns ready for pathspec.
-    """
-    ignore_patterns = load_ignore_patterns(Path(DEFAULT_IGNORE_FILENAME))
-    if scan_config.exclude_paths:
-        ignore_patterns.extend(scan_config.exclude_paths)
-    return ignore_patterns
-
-
-def _resolve_scan_targets(options: _ScanTargetOptions) -> list[Path]:
-    """Return the list of files to scan based on the mode flags in options.
-
-    Priority order: --file > --diff > directory traversal.
-
-    Args:
-        options: Grouped scan target options (root, diff ref, single file, config).
-
-    Returns:
-        Ordered list of file paths to pass to execute_scan.
-    """
-    if options.single_file is not None:
-        return [options.single_file]
-    ignore_patterns = _load_combined_ignore_patterns(options.config)
-    if options.diff_ref is not None:
-        exclusion_spec = pathspec.PathSpec.from_lines(PathspecMatchStyle.GITIGNORE, ignore_patterns)
-        scan_root = options.scan_root.resolve()
-        return [
-            diff_file
-            for diff_file in get_changed_files_from_diff(options.diff_ref)
-            if not is_path_excluded(_normalize_diff_path(diff_file, scan_root), exclusion_spec)
-        ]
-    return collect_scan_targets(options.scan_root, ignore_patterns, options.config)
-
-
-def _normalize_diff_path(diff_file: Path, scan_root: Path) -> Path:
-    """Return diff_file as a path relative to scan_root for exclusion matching.
-
-    get_changed_files_from_diff returns absolute paths. Gitignore-style exclusion
-    patterns require relative paths to match correctly — an absolute path like
-    /home/user/project/tests/test_audit.py will never match the pattern
-    tests/test_audit.py. Falling back to the absolute path preserves behaviour
-    for files outside the scan root.
-
-    Args:
-        diff_file: Absolute path returned by get_changed_files_from_diff.
-        scan_root: Resolved absolute scan root used to make the path relative.
-
-    Returns:
-        Path relative to scan_root when diff_file is inside it, otherwise diff_file.
-    """
-    if diff_file.is_relative_to(scan_root):
-        return diff_file.relative_to(scan_root)
-    return diff_file
-
-
-def _truncate_filename_for_progress(file_path: Path) -> str:
-    """Return the file path as a string, truncated to fit the progress bar column.
-
-    Args:
-        file_path: Path to the file currently being scanned.
-
-    Returns:
-        Path string, truncated with a leading ellipsis when over the column width.
-    """
-    # as_posix() normalises to forward slashes on all platforms — consistent
-    # display in progress bars regardless of OS path separator.
-    path_string = file_path.as_posix()
-    if len(path_string) <= _PROGRESS_FILENAME_MAX_CHARS:
-        return path_string
-    return _PROGRESS_FILENAME_ELLIPSIS + path_string[-_PROGRESS_FILENAME_MAX_CHARS:]
-
-
-def _validate_worker_count(worker_count: int) -> None:
-    """Raise typer.BadParameter if worker_count is outside the permitted range.
-
-    Args:
-        worker_count: Value supplied by the --workers CLI option.
-
-    Raises:
-        typer.BadParameter: If worker_count < MIN_WORKER_COUNT or > MAX_WORKER_COUNT.
-    """
-    if worker_count < MIN_WORKER_COUNT:
-        raise typer.BadParameter(_WORKERS_BELOW_MINIMUM_ERROR)
-    if worker_count > MAX_WORKER_COUNT:
-        raise typer.BadParameter(_WORKERS_ABOVE_MAXIMUM_ERROR)
 
 
 def _run_sequential_scan_with_progress(
@@ -841,64 +692,6 @@ def _display_scan_history(scan_events: list[dict[str, Any]]) -> None:
 # ---------------------------------------------------------------------------
 # Internal helpers — install-hook / uninstall-hook
 # ---------------------------------------------------------------------------
-
-
-def _reject_hook_path_with_symlinked_component(hook_path: Path) -> None:
-    """Reject if any existing ancestor directory of hook_path is itself a symlink.
-
-    Walks each path component individually instead of calling Path.resolve(),
-    which would follow symlinks — prohibited by the security policy. A symlinked
-    .git directory (common in git worktrees) would redirect hook writes to an
-    unintended location; this guard catches that before any write occurs.
-
-    Args:
-        hook_path: The hook file path to validate before writing.
-
-    Raises:
-        typer.Exit: If any ancestor directory component is a symlink.
-    """
-    for ancestor in reversed(list(hook_path.parents)):
-        if ancestor.is_symlink():
-            typer.echo(
-                _HOOK_SYMLINKED_COMPONENT_ERROR.format(component=str(ancestor)),
-                err=True,
-            )
-            raise typer.Exit(code=EXIT_CODE_ERROR)
-
-
-def _reject_missing_git_directory() -> None:
-    """Reject if the .git directory is absent in the current working directory.
-
-    Hook operations require a .git directory — running install-hook or
-    uninstall-hook outside a git repository would silently write into a
-    non-standard path. This guard catches that before any read or write occurs.
-
-    Note: git worktrees replace .git with a plain file (gitdir: ...);
-    is_dir() returns False in that case, so hook commands are intentionally
-    unsupported in worktrees until the guard is extended.
-
-    Raises:
-        typer.Exit: If _GIT_DIR_PATH does not exist as a directory.
-    """
-    if not _GIT_DIR_PATH.is_dir():
-        typer.echo(_GIT_DIR_NOT_FOUND_MESSAGE, err=True)
-        raise typer.Exit(code=EXIT_CODE_ERROR)
-
-
-# ---------------------------------------------------------------------------
-# --version callback
-# ---------------------------------------------------------------------------
-
-
-def _echo_version(is_version_requested: bool) -> None:
-    """Print the installed phi-scan version and exit.
-
-    Args:
-        is_version_requested: True when --version / -V was passed.
-    """
-    if is_version_requested:
-        typer.echo(_VERSION_OUTPUT_FORMAT.format(version=__version__))
-        raise typer.Exit()
 
 
 # ---------------------------------------------------------------------------
