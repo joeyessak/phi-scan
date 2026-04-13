@@ -1,8 +1,51 @@
 # `phi_scan/cli/__init__.py` — next-slice split plan
 
-**Status:** PLANNED — deferred from the pristine-closure pass.
-**Module size:** ~1490 lines (the former `phi_scan/cli.py`, now
-`phi_scan/cli/__init__.py`).
+**Status:** PARTIALLY COMPLETED — 2026-04-12.
+**Current module size:** ~826 lines (down from 1492 at the start of the
+pass).
+
+## Completed slices
+
+- `_shared.py` — leaf helpers, option dataclasses, log-level map,
+  progress-bar config, worker-count validation, hook path guards, version
+  flag. (commit 103b159)
+- `fix.py` — fix command, three helpers, and fix-specific constants.
+  (commit 743a466)
+- `hooks.py` — install-hook, uninstall-hook, init, setup commands and
+  their hook-script / stub-message constants. (commit b80a0a6)
+- `history.py` — history and report commands, scan-event display
+  helpers, audit-event / audit-chain / history constants. (commit
+  d94751c)
+- `dashboard.py` — dashboard command, `_aggregate_category_totals`
+  helper, eight `_DASHBOARD_*` constants. (commit 42060a1)
+
+## Remaining slice
+
+- `scan.py` — scan and watch commands, scan-progress helpers
+  (sequential/parallel dispatch), audit persistence (`_write_audit_record`,
+  `_persist_audit_record`, `_display_audit_phase_header`), notification
+  dispatch (`_dispatch_notifications`), framework flag resolution
+  (`_resolve_framework_flag`), phase preparation (`_prepare_scan_phase`),
+  CI integration dispatch (`_run_ci_integration`, `_call_ci_integration`),
+  and all scan-related constants.
+
+Cleanup items to fold into the scan slice:
+
+- Rename `_prepare_scan_phase` to a clear verb-noun pair
+  (e.g. `_collect_scan_targets_for_phase`) — "phase" alone is vague.
+- Move the orphaned `_SPINNER_NOTIFY_MESSAGE` and
+  `_SPINNER_CONFIG_LOAD_MESSAGE` constants out of `__init__.py`; they are
+  scan-command concerns.
+
+The scan slice is the largest (~500 lines) and the most coupled — it
+touches notification, audit, CI-integration, and rich/verbose UX surfaces
+simultaneously. Extraction was deferred this pass to keep the
+multi-slice PR bounded; it can be done mechanically in a dedicated
+follow-up.
+
+## Original plan (preserved for the remaining slice)
+
+**Module size at start of pass:** 1492 lines.
 
 The pristine-closure pass absorbed the seven satellite `cli_*.py` modules
 into `phi_scan/cli/` and preserved import compatibility via top-level

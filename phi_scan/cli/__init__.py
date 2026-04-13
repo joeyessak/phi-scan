@@ -2,29 +2,19 @@
 
 from __future__ import annotations
 
-import hashlib
-import json
 import logging
 import time
 from collections import deque
-from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated, Any
 
-import pathspec
 import typer
-from rich.live import Live
-from rich.progress import Progress, TaskID
 from watchdog.observers import Observer
 
 from phi_scan import __version__
 from phi_scan.audit import (
-    ChainVerifyResult,
     ensure_current_schema,
-    get_last_scan,
     insert_scan_event,
-    query_recent_scans,
-    verify_audit_chain,
 )
 from phi_scan.ci_integration import (
     CIIntegrationError,
@@ -37,6 +27,37 @@ from phi_scan.ci_integration import (
     set_azure_pr_status,
     set_commit_status,
     upload_sarif_to_github,
+)
+from phi_scan.cli._shared import (
+    _DEFAULT_WORKER_COUNT,
+    _GIT_DIR_NOT_FOUND_MESSAGE,
+    _GIT_DIR_PATH,
+    _HOOK_SYMLINKED_COMPONENT_ERROR,
+    _LOG_LEVEL_DEBUG,
+    _LOG_LEVEL_ERROR,
+    _LOG_LEVEL_INFO,
+    _LOG_LEVEL_MAP,
+    _LOG_LEVEL_WARNING,
+    _PARALLEL_SCAN_PROGRESS_LABEL,
+    _PROGRESS_FILENAME_ELLIPSIS,
+    _PROGRESS_FILENAME_MAX_CHARS,
+    _VERSION_FLAG_HELP,
+    _VERSION_OUTPUT_FORMAT,
+    _WORKERS_ABOVE_MAXIMUM_ERROR,
+    _WORKERS_BELOW_MINIMUM_ERROR,
+    _configure_logging,
+    _echo_version,
+    _load_combined_ignore_patterns,
+    _normalize_diff_path,
+    _ProgressScanContext,
+    _reject_hook_path_with_symlinked_component,
+    _reject_missing_git_directory,
+    _resolve_scan_targets,
+    _ScanExecutionOptions,
+    _ScanPhaseOptions,
+    _ScanTargetOptions,
+    _truncate_filename_for_progress,
+    _validate_worker_count,
 )
 from phi_scan.cli.baseline import baseline_app
 from phi_scan.cli.config import config_app
@@ -63,31 +84,16 @@ from phi_scan.compliance import (
     parse_framework_flag,
 )
 from phi_scan.constants import (
-    DEFAULT_DATABASE_PATH,
-    DEFAULT_IGNORE_FILENAME,
-    DEFAULT_TEXT_ENCODING,
     EXIT_CODE_CLEAN,
     EXIT_CODE_ERROR,
-    EXIT_CODE_VIOLATION,
     OutputFormat,
-    PathspecMatchStyle,
 )
-from phi_scan.diff import get_changed_files_from_diff
 from phi_scan.exceptions import (
     AuditKeyMissingError,
     AuditLogError,
-    MissingOptionalDependencyError,
     NotificationError,
 )
-from phi_scan.fixer import (
-    FixMode,
-    FixReplacement,
-    FixResult,
-    apply_approved_replacements,
-    collect_file_replacements,
-    fix_file,
-)
-from phi_scan.logging_config import get_logger, replace_logger_handlers
+from phi_scan.logging_config import get_logger
 from phi_scan.models import ScanConfig, ScanFinding, ScanResult
 from phi_scan.notifier import (
     NotificationRequest,
@@ -96,7 +102,6 @@ from phi_scan.notifier import (
 )
 from phi_scan.output import (
     WatchEvent,
-    build_dashboard_layout,
     create_scan_progress,
     display_banner,
     display_file_type_summary,
@@ -111,15 +116,46 @@ from phi_scan.scanner import (
     MAX_WORKER_COUNT,
     MIN_WORKER_COUNT,
     build_scan_result,
-    collect_scan_targets,
     execute_scan,
-    is_path_excluded,
-    load_ignore_patterns,
     run_parallel_scan,
     scan_file,
 )
 
-__all__ = ["app"]
+# Private helpers re-exported for backwards-compatible imports from
+# ``phi_scan.cli`` (tests and historical callers reach for these names).
+__all__ = [
+    "_DEFAULT_WORKER_COUNT",
+    "_GIT_DIR_NOT_FOUND_MESSAGE",
+    "_GIT_DIR_PATH",
+    "_HOOK_SYMLINKED_COMPONENT_ERROR",
+    "_LOG_LEVEL_DEBUG",
+    "_LOG_LEVEL_ERROR",
+    "_LOG_LEVEL_INFO",
+    "_LOG_LEVEL_MAP",
+    "_LOG_LEVEL_WARNING",
+    "_PARALLEL_SCAN_PROGRESS_LABEL",
+    "_PROGRESS_FILENAME_ELLIPSIS",
+    "_PROGRESS_FILENAME_MAX_CHARS",
+    "_ProgressScanContext",
+    "_ScanExecutionOptions",
+    "_ScanPhaseOptions",
+    "_ScanTargetOptions",
+    "_aggregate_category_totals",
+    "_VERSION_FLAG_HELP",
+    "_VERSION_OUTPUT_FORMAT",
+    "_WORKERS_ABOVE_MAXIMUM_ERROR",
+    "_WORKERS_BELOW_MINIMUM_ERROR",
+    "_configure_logging",
+    "_echo_version",
+    "_load_combined_ignore_patterns",
+    "_normalize_diff_path",
+    "_reject_hook_path_with_symlinked_component",
+    "_reject_missing_git_directory",
+    "_resolve_scan_targets",
+    "_truncate_filename_for_progress",
+    "_validate_worker_count",
+    "app",
+]
 
 _logger: logging.Logger = get_logger("cli")
 
@@ -137,13 +173,6 @@ app.add_typer(config_app)
 app.add_typer(explain_app)
 app.add_typer(baseline_app)
 app.add_typer(plugins_app)
-
-# ---------------------------------------------------------------------------
-# Version flag
-# ---------------------------------------------------------------------------
-
-_VERSION_OUTPUT_FORMAT: str = "phi-scan {version}"
-_VERSION_FLAG_HELP: str = "Show version and exit."
 
 # ---------------------------------------------------------------------------
 # Scan command help strings
@@ -189,105 +218,6 @@ _FRAMEWORK_PARSE_ERROR: str = "Invalid --framework value: {error}"
 
 _WATCH_PATH_HELP: str = "Directory to watch for file system changes."
 
-# ---------------------------------------------------------------------------
-# History command
-# ---------------------------------------------------------------------------
-
-_HISTORY_LAST_HELP: str = "Show scans from the last N days (e.g. 30d)."
-_HISTORY_VERIFY_HELP: str = (
-    "Recompute HMAC-SHA256 hash chain and report PASS or FAIL. "
-    "Exits with code 1 if the chain is broken (tamper detected)."
-)
-_HISTORY_REPO_HELP: str = (
-    "Filter by repository path (e.g. /home/user/my-repo). "
-    "The path is SHA-256 hashed before comparison against stored repository_hash values."
-)
-_HISTORY_VIOLATIONS_ONLY_HELP: str = (
-    "Show only scans where PHI findings were detected (is_clean=false)."
-)
-_DEFAULT_HISTORY_PERIOD: str = "30d"
-_DAYS_PERIOD_SUFFIX: str = "d"
-_HISTORY_PERIOD_FORMAT_ERROR: str = (
-    "Period must be in the format '30d' (number of days), got {period!r}"
-)
-_NO_SCAN_HISTORY_MESSAGE: str = "No scan history found."
-_HISTORY_ROW_FORMAT: str = "{scanned_at}  {status}  risk={risk_level}  files={files_scanned}"
-_ZERO_FILES_SCANNED: int = 0
-
-# ---------------------------------------------------------------------------
-# Report command
-# ---------------------------------------------------------------------------
-
-_NO_LAST_SCAN_MESSAGE: str = "No scan record found. Run `phi-scan scan` first."
-_LAST_SCAN_HEADER: str = "Last scan result:"
-
-# ---------------------------------------------------------------------------
-# Audit event dict keys (matching column names in the audit SQLite schema)
-# ---------------------------------------------------------------------------
-
-_AUDIT_KEY_SCANNED_AT: str = "scanned_at"
-_AUDIT_KEY_IS_CLEAN: str = "is_clean"
-_AUDIT_KEY_RISK_LEVEL: str = "risk_level"
-_AUDIT_KEY_FILES_SCANNED: str = "files_scanned"
-_CLEAN_STATUS_LABEL: str = "CLEAN"
-_VIOLATION_STATUS_LABEL: str = "VIOLATION"
-_UNKNOWN_LABEL: str = "unknown"
-
-# ---------------------------------------------------------------------------
-# Install / uninstall hook
-# ---------------------------------------------------------------------------
-
-_PRE_COMMIT_HOOK_PATH: str = ".git/hooks/pre-commit"
-_HOOK_INSTALLED_MESSAGE: str = "Pre-commit hook installed: {path}"
-_HOOK_ALREADY_EXISTS_MESSAGE: str = (
-    "Pre-commit hook already exists at {path} — not overwriting. "
-    "Remove it manually or run `phi-scan uninstall-hook` first."
-)
-_HOOK_REMOVED_MESSAGE: str = "Pre-commit hook removed: {path}"
-_HOOK_NOT_FOUND_MESSAGE: str = "No phi-scan hook found at {path}."
-_HOOK_NOT_OURS_MESSAGE: str = "Hook at {path} was not installed by phi-scan — not removing."
-_HOOK_IS_SYMLINK_MESSAGE: str = "Hook at {path} is a symlink — not reading or removing."
-_HOOK_SYMLINKED_COMPONENT_ERROR: str = (
-    "Hook path component {component!r} is a symlink — refusing to write."
-)
-# CWD-relative by design: hook commands are always run from the repo root.
-_GIT_DIR_PATH: Path = Path(".git")
-_GIT_DIR_NOT_FOUND_MESSAGE: str = "Not a git repository — .git directory not found."
-# Marker written into every hook we install; used to identify our hooks on uninstall.
-_HOOK_MARKER: str = "phi-scan scan"
-_HOOK_FILE_PERMISSIONS: int = 0o755
-_HOOK_SCRIPT_CONTENT: str = (
-    "#!/bin/sh\n"
-    "# phi-scan pre-commit hook — installed by phi-scan install-hook\n"
-    "phi-scan scan --diff HEAD --quiet\n"
-    "if [ $? -ne 0 ]; then\n"
-    "  echo 'phi-scan: PHI/PII detected — commit blocked'\n"
-    "  exit 1\n"
-    "fi\n"
-)
-
-# ---------------------------------------------------------------------------
-# Stub messages for Phase 2+ features
-# ---------------------------------------------------------------------------
-
-_INIT_STUB_MESSAGE: str = (
-    "phi-scan init: full guided setup wizard is coming in Phase 3. "
-    "Run `phi-scan config init` to generate a config file now."
-)
-_SETUP_STUB_MESSAGE: str = (
-    "phi-scan setup downloads spaCy NLP models. "
-    "Run `pip install phi-scan[nlp]` first, then re-run (available from Phase 2)."
-)
-_DASHBOARD_REFRESH_SECONDS: float = 2.0
-_DASHBOARD_REFRESH_RATE: float = 4.0
-_DASHBOARD_HISTORY_COUNT: int = 10
-_DASHBOARD_LOOKBACK_DAYS: int = 30
-_DASHBOARD_FINDINGS_JSON_KEY: str = "findings_json"
-_DASHBOARD_CATEGORY_KEY: str = "hipaa_category"
-_DASHBOARD_UNKNOWN_CATEGORY: str = "unknown"
-# Sentinel used when a scan row has no findings_json blob — parse as empty list.
-_DASHBOARD_EMPTY_FINDINGS_JSON: str = "[]"
-
 _SPINNER_CONFIG_LOAD_MESSAGE: str = "Loading configuration…"
 _SPINNER_AUDIT_WRITE_MESSAGE: str = "Writing audit log…"
 
@@ -318,20 +248,6 @@ _SCAN_WORKERS_HELP: str = (
     "Output ordering is deterministic regardless of thread completion order."
 )
 
-# Maximum characters of a file path shown in the progress bar description column.
-# Longer paths are truncated with a leading ellipsis so the bar layout stays stable.
-_PROGRESS_FILENAME_MAX_CHARS: int = 38
-_PROGRESS_FILENAME_ELLIPSIS: str = "…"
-# Label shown in the progress bar description column when parallel scanning is active.
-# Replaces the per-file name shown in sequential mode (multiple files run simultaneously
-# so a single filename would be misleading).
-_PARALLEL_SCAN_PROGRESS_LABEL: str = f"scanning{_PROGRESS_FILENAME_ELLIPSIS}"
-# Default worker count accepted by the --workers option.
-_DEFAULT_WORKER_COUNT: int = MIN_WORKER_COUNT
-# Error messages for out-of-range --workers values.
-_WORKERS_BELOW_MINIMUM_ERROR: str = f"--workers must be at least {MIN_WORKER_COUNT}"
-_WORKERS_ABOVE_MAXIMUM_ERROR: str = f"--workers must not exceed {MAX_WORKER_COUNT}"
-
 # ---------------------------------------------------------------------------
 # Error and warning messages
 # ---------------------------------------------------------------------------
@@ -342,37 +258,7 @@ _AUDIT_KEY_MISSING_DEBUG: str = (
 )
 _NOTIFICATION_EMAIL_FAILURE_WARNING: str = "Email notification failed: {error}"
 _NOTIFICATION_WEBHOOK_FAILURE_WARNING: str = "Webhook notification failed: {error}"
-_AUDIT_CHAIN_PASS_MESSAGE: str = "Audit chain integrity: PASS — all row hashes verified."
-_AUDIT_CHAIN_FAIL_MESSAGE: str = (
-    "Audit chain integrity: FAIL — one or more rows failed hash verification. "
-    "The audit log may have been tampered with."
-)
-_AUDIT_CHAIN_SKIP_MESSAGE: str = (
-    "Audit chain verification skipped — no audit key found. "
-    "Run 'phi-scan setup' to generate the key."
-)
-_AUDIT_CHAIN_SKIPPED_ROWS_WARNING: str = (
-    "Warning: {skipped_rows} row(s) had no chain hash and were not verified. "
-    "Treat this audit as partially unverified."
-)
-_AUDIT_CHAIN_VERIFY_FLAG: str = "--verify"
 _SPINNER_NOTIFY_MESSAGE: str = "Sending notifications…"
-
-# ---------------------------------------------------------------------------
-# Log level configuration
-# ---------------------------------------------------------------------------
-
-_LOG_LEVEL_DEBUG: str = "debug"
-_LOG_LEVEL_INFO: str = "info"
-_LOG_LEVEL_WARNING: str = "warning"
-_LOG_LEVEL_ERROR: str = "error"
-
-_LOG_LEVEL_MAP: dict[str, int] = {
-    _LOG_LEVEL_DEBUG: logging.DEBUG,
-    _LOG_LEVEL_INFO: logging.INFO,
-    _LOG_LEVEL_WARNING: logging.WARNING,
-    _LOG_LEVEL_ERROR: logging.ERROR,
-}
 
 # ---------------------------------------------------------------------------
 # Verbose phase messages (kept here — used by scan command orchestration)
@@ -385,167 +271,6 @@ _VERBOSE_PHASE_AUDIT: str = "writing audit record"
 # ---------------------------------------------------------------------------
 # Internal helpers — scan command
 # ---------------------------------------------------------------------------
-
-
-@dataclass
-class _ScanTargetOptions:
-    """Options that control which files are selected for scanning.
-
-    Groups four related inputs so _resolve_scan_targets stays within the
-    three-argument limit required by CLAUDE.md.
-    """
-
-    scan_root: Path
-    diff_ref: str | None
-    single_file: Path | None
-    config: ScanConfig
-
-
-@dataclass(frozen=True)
-class _ScanPhaseOptions:
-    """Execution-phase flags controlling phase headers and data selection.
-
-    Kept separate from ScanOutputOptions because these flags control when and
-    how scan phases execute, not how results are rendered.
-    """
-
-    is_verbose: bool = False
-    should_use_baseline: bool = False
-
-
-@dataclass(frozen=True)
-class _ScanExecutionOptions:
-    """Execution parameters threaded from the scan command into the scan loop.
-
-    Bundles worker_count and should_show_progress so _execute_scan_with_progress
-    stays within the three-argument limit required by CLAUDE.md.
-    """
-
-    worker_count: int = _DEFAULT_WORKER_COUNT
-    should_show_progress: bool = False
-
-
-@dataclass(frozen=True)
-class _ProgressScanContext:
-    """Arguments for _run_scan_with_progress and its sequential/parallel sub-helpers.
-
-    Bundles all five inputs required by the progress-bar scan path into a single
-    object so each helper stays within the three-argument limit. ``scan_targets``
-    is stored as a tuple so the frozen=True guarantee extends to the ordered
-    collection itself — preventing in-place mutation of the scan target list
-    after the context has been constructed.
-    """
-
-    scan_targets: tuple[Path, ...]
-    config: ScanConfig
-    worker_count: int
-    progress: Progress
-    task_id: TaskID
-
-
-def _configure_logging(log_level: str, log_file: Path | None, is_quiet: bool) -> None:
-    """Apply logging configuration from CLI flags.
-
-    Args:
-        log_level: One of debug, info, warning, error.
-        log_file: Optional path for a rotating file handler.
-        is_quiet: Suppress console output when True.
-    """
-    level = _LOG_LEVEL_MAP.get(log_level.lower(), logging.WARNING)
-    replace_logger_handlers(console_level=level, log_file_path=log_file, is_quiet=is_quiet)
-
-
-def _load_combined_ignore_patterns(scan_config: ScanConfig) -> list[str]:
-    """Return .phi-scanignore patterns merged with any config-level exclude_paths.
-
-    Args:
-        scan_config: Active scan configuration (provides optional exclude_paths).
-
-    Returns:
-        Flat list of gitignore-style exclusion patterns ready for pathspec.
-    """
-    ignore_patterns = load_ignore_patterns(Path(DEFAULT_IGNORE_FILENAME))
-    if scan_config.exclude_paths:
-        ignore_patterns.extend(scan_config.exclude_paths)
-    return ignore_patterns
-
-
-def _resolve_scan_targets(options: _ScanTargetOptions) -> list[Path]:
-    """Return the list of files to scan based on the mode flags in options.
-
-    Priority order: --file > --diff > directory traversal.
-
-    Args:
-        options: Grouped scan target options (root, diff ref, single file, config).
-
-    Returns:
-        Ordered list of file paths to pass to execute_scan.
-    """
-    if options.single_file is not None:
-        return [options.single_file]
-    ignore_patterns = _load_combined_ignore_patterns(options.config)
-    if options.diff_ref is not None:
-        exclusion_spec = pathspec.PathSpec.from_lines(PathspecMatchStyle.GITIGNORE, ignore_patterns)
-        scan_root = options.scan_root.resolve()
-        return [
-            diff_file
-            for diff_file in get_changed_files_from_diff(options.diff_ref)
-            if not is_path_excluded(_normalize_diff_path(diff_file, scan_root), exclusion_spec)
-        ]
-    return collect_scan_targets(options.scan_root, ignore_patterns, options.config)
-
-
-def _normalize_diff_path(diff_file: Path, scan_root: Path) -> Path:
-    """Return diff_file as a path relative to scan_root for exclusion matching.
-
-    get_changed_files_from_diff returns absolute paths. Gitignore-style exclusion
-    patterns require relative paths to match correctly — an absolute path like
-    /home/user/project/tests/test_audit.py will never match the pattern
-    tests/test_audit.py. Falling back to the absolute path preserves behaviour
-    for files outside the scan root.
-
-    Args:
-        diff_file: Absolute path returned by get_changed_files_from_diff.
-        scan_root: Resolved absolute scan root used to make the path relative.
-
-    Returns:
-        Path relative to scan_root when diff_file is inside it, otherwise diff_file.
-    """
-    if diff_file.is_relative_to(scan_root):
-        return diff_file.relative_to(scan_root)
-    return diff_file
-
-
-def _truncate_filename_for_progress(file_path: Path) -> str:
-    """Return the file path as a string, truncated to fit the progress bar column.
-
-    Args:
-        file_path: Path to the file currently being scanned.
-
-    Returns:
-        Path string, truncated with a leading ellipsis when over the column width.
-    """
-    # as_posix() normalises to forward slashes on all platforms — consistent
-    # display in progress bars regardless of OS path separator.
-    path_string = file_path.as_posix()
-    if len(path_string) <= _PROGRESS_FILENAME_MAX_CHARS:
-        return path_string
-    return _PROGRESS_FILENAME_ELLIPSIS + path_string[-_PROGRESS_FILENAME_MAX_CHARS:]
-
-
-def _validate_worker_count(worker_count: int) -> None:
-    """Raise typer.BadParameter if worker_count is outside the permitted range.
-
-    Args:
-        worker_count: Value supplied by the --workers CLI option.
-
-    Raises:
-        typer.BadParameter: If worker_count < MIN_WORKER_COUNT or > MAX_WORKER_COUNT.
-    """
-    if worker_count < MIN_WORKER_COUNT:
-        raise typer.BadParameter(_WORKERS_BELOW_MINIMUM_ERROR)
-    if worker_count > MAX_WORKER_COUNT:
-        raise typer.BadParameter(_WORKERS_ABOVE_MAXIMUM_ERROR)
 
 
 def _run_sequential_scan_with_progress(
@@ -780,125 +505,8 @@ def _prepare_scan_phase(
 
 
 # ---------------------------------------------------------------------------
-# Internal helpers — history and report commands
-# ---------------------------------------------------------------------------
-
-
-def _parse_lookback_days(period: str) -> int:
-    """Parse a period string like '30d' into an integer number of days.
-
-    Args:
-        period: A string ending in 'd' with a positive integer prefix.
-
-    Returns:
-        Number of lookback days as an integer.
-
-    Raises:
-        typer.BadParameter: If period is not in the expected format.
-    """
-    if not period.endswith(_DAYS_PERIOD_SUFFIX):
-        raise typer.BadParameter(_HISTORY_PERIOD_FORMAT_ERROR.format(period=period))
-    day_count_str = period[: -len(_DAYS_PERIOD_SUFFIX)]
-    if not day_count_str.isdigit():
-        raise typer.BadParameter(_HISTORY_PERIOD_FORMAT_ERROR.format(period=period))
-    return int(day_count_str)
-
-
-def _display_scan_event_row(scan_event_record: dict[str, Any]) -> None:
-    """Print a single audit scan event as a one-line summary.
-
-    Args:
-        scan_event_record: Audit row dict as returned by get_last_scan or query_recent_scans.
-    """
-    scanned_at = scan_event_record.get(_AUDIT_KEY_SCANNED_AT, _UNKNOWN_LABEL)
-    is_clean = scan_event_record.get(_AUDIT_KEY_IS_CLEAN, False)
-    risk_level = scan_event_record.get(_AUDIT_KEY_RISK_LEVEL, _UNKNOWN_LABEL)
-    files_scanned = scan_event_record.get(_AUDIT_KEY_FILES_SCANNED, _ZERO_FILES_SCANNED)
-    status = _CLEAN_STATUS_LABEL if is_clean else _VIOLATION_STATUS_LABEL
-    typer.echo(
-        _HISTORY_ROW_FORMAT.format(
-            scanned_at=scanned_at,
-            status=status,
-            risk_level=risk_level,
-            files_scanned=files_scanned,
-        )
-    )
-
-
-def _display_scan_history(scan_events: list[dict[str, Any]]) -> None:
-    """Print a list of audit scan events, or a no-history message if empty.
-
-    Args:
-        scan_events: List of audit row dicts from query_recent_scans.
-    """
-    if not scan_events:
-        typer.echo(_NO_SCAN_HISTORY_MESSAGE)
-        return
-    for scan_event in scan_events:
-        _display_scan_event_row(scan_event)
-
-
-# ---------------------------------------------------------------------------
 # Internal helpers — install-hook / uninstall-hook
 # ---------------------------------------------------------------------------
-
-
-def _reject_hook_path_with_symlinked_component(hook_path: Path) -> None:
-    """Reject if any existing ancestor directory of hook_path is itself a symlink.
-
-    Walks each path component individually instead of calling Path.resolve(),
-    which would follow symlinks — prohibited by the security policy. A symlinked
-    .git directory (common in git worktrees) would redirect hook writes to an
-    unintended location; this guard catches that before any write occurs.
-
-    Args:
-        hook_path: The hook file path to validate before writing.
-
-    Raises:
-        typer.Exit: If any ancestor directory component is a symlink.
-    """
-    for ancestor in reversed(list(hook_path.parents)):
-        if ancestor.is_symlink():
-            typer.echo(
-                _HOOK_SYMLINKED_COMPONENT_ERROR.format(component=str(ancestor)),
-                err=True,
-            )
-            raise typer.Exit(code=EXIT_CODE_ERROR)
-
-
-def _reject_missing_git_directory() -> None:
-    """Reject if the .git directory is absent in the current working directory.
-
-    Hook operations require a .git directory — running install-hook or
-    uninstall-hook outside a git repository would silently write into a
-    non-standard path. This guard catches that before any read or write occurs.
-
-    Note: git worktrees replace .git with a plain file (gitdir: ...);
-    is_dir() returns False in that case, so hook commands are intentionally
-    unsupported in worktrees until the guard is extended.
-
-    Raises:
-        typer.Exit: If _GIT_DIR_PATH does not exist as a directory.
-    """
-    if not _GIT_DIR_PATH.is_dir():
-        typer.echo(_GIT_DIR_NOT_FOUND_MESSAGE, err=True)
-        raise typer.Exit(code=EXIT_CODE_ERROR)
-
-
-# ---------------------------------------------------------------------------
-# --version callback
-# ---------------------------------------------------------------------------
-
-
-def _echo_version(is_version_requested: bool) -> None:
-    """Print the installed phi-scan version and exit.
-
-    Args:
-        is_version_requested: True when --version / -V was passed.
-    """
-    if is_version_requested:
-        typer.echo(_VERSION_OUTPUT_FORMAT.format(version=__version__))
-        raise typer.Exit()
 
 
 # ---------------------------------------------------------------------------
@@ -1188,305 +796,31 @@ def watch(
         observer.join()
 
 
-@app.command("report")
-def display_last_scan() -> None:
-    """Display the most recent scan result from the audit log."""
-    database_path = Path(DEFAULT_DATABASE_PATH).expanduser()
-    ensure_current_schema(database_path)
-    last_scan_event = get_last_scan(database_path)
-    if last_scan_event is None:
-        typer.echo(_NO_LAST_SCAN_MESSAGE)
-        return
-    typer.echo(_LAST_SCAN_HEADER)
-    _display_scan_event_row(last_scan_event)
+from phi_scan.cli.history import display_history, display_last_scan  # noqa: E402
+from phi_scan.cli.hooks import (  # noqa: E402
+    download_models,
+    initialize_project,
+    install_hook,
+    uninstall_hook,
+)
+
+app.command("report")(display_last_scan)
+app.command("history")(display_history)
+app.command("install-hook")(install_hook)
+app.command("uninstall-hook")(uninstall_hook)
+app.command("init")(initialize_project)
+app.command("setup")(download_models)
 
 
-@app.command("history")
-def display_history(
-    last: Annotated[str, typer.Option("--last", help=_HISTORY_LAST_HELP)] = _DEFAULT_HISTORY_PERIOD,
-    should_verify: Annotated[
-        bool, typer.Option(_AUDIT_CHAIN_VERIFY_FLAG, help=_HISTORY_VERIFY_HELP)
-    ] = False,
-    repository_path: Annotated[str | None, typer.Option("--repo", help=_HISTORY_REPO_HELP)] = None,
-    should_show_violations_only: Annotated[
-        bool, typer.Option("--violations-only", help=_HISTORY_VIOLATIONS_ONLY_HELP)
-    ] = False,
-) -> None:
-    """Query the audit log for recent scan history."""
-    lookback_days = _parse_lookback_days(last)
-    database_path = Path(DEFAULT_DATABASE_PATH).expanduser()
-    ensure_current_schema(database_path)
-    if should_verify:
-        verify_result: ChainVerifyResult = verify_audit_chain(database_path)
-        if not verify_result.key_present:
-            typer.echo(_AUDIT_CHAIN_SKIP_MESSAGE, err=True)
-        elif verify_result.is_intact:
-            typer.echo(_AUDIT_CHAIN_PASS_MESSAGE)
-            if verify_result.skipped_rows > 0:
-                typer.echo(
-                    _AUDIT_CHAIN_SKIPPED_ROWS_WARNING.format(
-                        skipped_rows=verify_result.skipped_rows
-                    ),
-                    err=True,
-                )
-        else:
-            typer.echo(_AUDIT_CHAIN_FAIL_MESSAGE, err=True)
-            raise typer.Exit(code=EXIT_CODE_VIOLATION)
-    repository_hash = (
-        hashlib.sha256(repository_path.encode("utf-8")).hexdigest() if repository_path else None
-    )
-    scan_events = query_recent_scans(
-        database_path,
-        lookback_days,
-        repository_hash=repository_hash,
-        should_show_violations_only=should_show_violations_only,
-    )
-    _display_scan_history(scan_events)
+from phi_scan.cli.dashboard import _aggregate_category_totals, display_dashboard  # noqa: E402
 
-
-@app.command("install-hook")
-def install_hook() -> None:
-    """Install phi-scan as a git pre-commit hook."""
-    hook_path = Path(_PRE_COMMIT_HOOK_PATH)
-    _reject_missing_git_directory()
-    if hook_path.exists() or hook_path.is_symlink():
-        typer.echo(_HOOK_ALREADY_EXISTS_MESSAGE.format(path=hook_path))
-        return
-    _reject_hook_path_with_symlinked_component(hook_path)
-    hook_path.parent.mkdir(parents=True, exist_ok=True)
-    hook_path.write_text(_HOOK_SCRIPT_CONTENT, encoding=DEFAULT_TEXT_ENCODING)
-    hook_path.chmod(_HOOK_FILE_PERMISSIONS)
-    typer.echo(_HOOK_INSTALLED_MESSAGE.format(path=hook_path))
-
-
-@app.command("uninstall-hook")
-def uninstall_hook() -> None:
-    """Remove the phi-scan git pre-commit hook."""
-    hook_path = Path(_PRE_COMMIT_HOOK_PATH)
-    _reject_missing_git_directory()
-    if not hook_path.exists():
-        typer.echo(_HOOK_NOT_FOUND_MESSAGE.format(path=hook_path))
-        return
-    if hook_path.is_symlink():
-        typer.echo(_HOOK_IS_SYMLINK_MESSAGE.format(path=hook_path))
-        return
-    hook_content = hook_path.read_text(encoding=DEFAULT_TEXT_ENCODING)
-    if _HOOK_MARKER not in hook_content:
-        typer.echo(_HOOK_NOT_OURS_MESSAGE.format(path=hook_path))
-        return
-    hook_path.unlink()
-    typer.echo(_HOOK_REMOVED_MESSAGE.format(path=hook_path))
-
-
-@app.command("init")
-def initialize_project() -> None:
-    """Guided first-run wizard: config, ignore file, hook, model download."""
-    typer.echo(_INIT_STUB_MESSAGE)
-
-
-@app.command("setup")
-def download_models() -> None:
-    """Download spaCy NLP models and verify optional dependencies."""
-    typer.echo(_SETUP_STUB_MESSAGE)
-
-
-def _aggregate_category_totals(recent_scans: list[dict[str, Any]]) -> dict[str, int]:
-    """Sum HIPAA category occurrences across all recent scan findings_json blobs.
-
-    PHI safety guarantee: findings_json blobs written by audit.py contain only
-    value_hash (SHA-256), file_path_hash (SHA-256), hipaa_category, severity,
-    confidence, and line_number. Raw PHI values and code_context are explicitly
-    excluded at the write path (see audit.py::_serialize_finding_for_storage).
-    This function reads category metadata only — no raw PHI is ever present.
-
-    Args:
-        recent_scans: Scan rows from the audit DB as returned by query_recent_scans.
-
-    Returns:
-        Mapping of HIPAA category value string to total finding count.
-    """
-    totals: dict[str, int] = {}
-    for row in recent_scans:
-        category_finding_records = json.loads(
-            row.get(_DASHBOARD_FINDINGS_JSON_KEY, _DASHBOARD_EMPTY_FINDINGS_JSON)
-        )
-        for finding_record in category_finding_records:
-            category = finding_record.get(_DASHBOARD_CATEGORY_KEY, _DASHBOARD_UNKNOWN_CATEGORY)
-            totals[category] = totals.get(category, 0) + 1
-    return totals
-
-
-@app.command("dashboard")
-def display_dashboard() -> None:
-    """Rich Live real-time scan dashboard.
-
-    Ctrl+C (KeyboardInterrupt) is the expected and only exit mechanism for this
-    command. The signal is caught here as an intentional boundary — not a domain
-    error — solely to stop the Rich Live display cleanly before process exit.
-    """
-    database_path = Path(DEFAULT_DATABASE_PATH)
-    try:
-        with Live(refresh_per_second=_DASHBOARD_REFRESH_RATE, screen=True) as live:
-            while True:
-                recent_scans = query_recent_scans(database_path, _DASHBOARD_LOOKBACK_DAYS)
-                last_scan = get_last_scan(database_path)
-                category_totals = _aggregate_category_totals(recent_scans)
-                layout = build_dashboard_layout(
-                    recent_scans[:_DASHBOARD_HISTORY_COUNT],
-                    category_totals,
-                    last_scan,
-                )
-                live.update(layout)
-                time.sleep(_DASHBOARD_REFRESH_SECONDS)
-    except KeyboardInterrupt:
-        # Ctrl+C is the standard exit for a live dashboard — caught here to
-        # suppress the default traceback and allow Rich to close the screen buffer.
-        raise typer.Exit(code=EXIT_CODE_CLEAN)
+app.command("dashboard")(display_dashboard)
 
 
 # ---------------------------------------------------------------------------
-# Fix command
+# Fix command — registered from phi_scan.cli.fix
 # ---------------------------------------------------------------------------
 
-_FIX_PATH_HELP: str = "File or directory to fix. Scans recursively when a directory is given."
-_FIX_DRY_RUN_HELP: str = "Preview replacements as a unified diff without modifying files."
-_FIX_APPLY_HELP: str = "Apply replacements in place after confirmation."
-_FIX_PATCH_HELP: str = "Write a .patch file for each modified file instead of editing in place."
-_FIX_INTERACTIVE_HELP: str = "Prompt for each replacement: Replace? [y/n/a(ll)/s(kip file)]"
-_FIX_NO_MODE_ERROR: str = "Specify exactly one mode: --dry-run, --apply, --patch, or --interactive."
-_FIX_MULTI_MODE_ERROR: str = (
-    "Only one of --dry-run, --apply, --patch, or --interactive may be given at a time."
-)
-_FIX_CONFIRM_PROMPT: str = "Apply {count} replacement(s) to {path}? [y/N]"
-_FIX_NO_FINDINGS_MESSAGE: str = "No PHI found in {path} — nothing to fix."
-_FIX_PATCH_WRITTEN_MESSAGE: str = "Patch written: {path}"
-_FIX_APPLIED_MESSAGE: str = "Applied {count} replacement(s) to {path}."
-_FIX_SKIPPED_DRY_RUN_MESSAGE: str = "(dry-run) {count} replacement(s) found in {path}."
-_FIX_INTERACTIVE_PROMPT: str = "[{index}/{total}] {path}:{line} — {category} — Replace? [y/n/a/s]: "
-_FIX_INTERACTIVE_APPLY_ALL: str = "a"
-_FIX_INTERACTIVE_SKIP_FILE: str = "s"
-_FIX_INTERACTIVE_YES: str = "y"
-_FIX_INTERACTIVE_NO: str = "n"
-_FIX_FAKER_MISSING_MESSAGE: str = (
-    "faker is required for `phi-scan fix`. Install it with: pip install phi-scan[dev]"
-)
-_FIX_RGLOB_PATTERN: str = "*"
-# Starting index for enumerate() in the interactive per-replacement loop.
-_FIX_ENUMERATE_START: int = 1
+from phi_scan.cli.fix import fix_command  # noqa: E402
 
-
-def _collect_target_files(path: Path) -> list[Path]:
-    """Return scannable files under path (recursive) or [path] when path is a file.
-
-    Args:
-        path: File or directory to collect from.
-
-    Returns:
-        List of regular, non-symlink file paths.
-    """
-    if path.is_file() and not path.is_symlink():
-        return [path]
-    return [
-        candidate
-        for candidate in path.rglob(_FIX_RGLOB_PATTERN)
-        if candidate.is_file() and not candidate.is_symlink()
-    ]
-
-
-def _print_fix_result(fix_result: FixResult, mode: FixMode) -> None:
-    """Print a human-readable summary of a fix operation for one file.
-
-    Args:
-        fix_result: The result of the fix operation.
-        mode: The mode under which the fix was run.
-    """
-    console = get_console()
-    file_path = fix_result.file_path
-    count = len(fix_result.replacements_applied)
-    if count == 0:
-        console.print(_FIX_NO_FINDINGS_MESSAGE.format(path=file_path))
-        return
-    if mode == FixMode.DRY_RUN:
-        console.print(fix_result.unified_diff)
-        console.print(_FIX_SKIPPED_DRY_RUN_MESSAGE.format(count=count, path=file_path))
-    elif mode == FixMode.APPLY:
-        console.print(_FIX_APPLIED_MESSAGE.format(count=count, path=file_path))
-    elif mode == FixMode.PATCH and fix_result.patch_path is not None:
-        console.print(_FIX_PATCH_WRITTEN_MESSAGE.format(path=fix_result.patch_path))
-
-
-def _run_interactive_fix(file_path: Path) -> None:
-    """Prompt the user for each replacement in file_path and apply approved ones.
-
-    Args:
-        file_path: File to interactively fix.
-    """
-    console = get_console()
-    try:
-        replacements = collect_file_replacements(file_path)
-    except MissingOptionalDependencyError:
-        typer.echo(_FIX_FAKER_MISSING_MESSAGE, err=True)
-        raise typer.Exit(code=EXIT_CODE_ERROR) from None
-    if not replacements:
-        console.print(_FIX_NO_FINDINGS_MESSAGE.format(path=file_path))
-        return
-    approved: list[FixReplacement] = []
-    total = len(replacements)
-    for index, replacement in enumerate(replacements, start=_FIX_ENUMERATE_START):
-        prompt = _FIX_INTERACTIVE_PROMPT.format(
-            index=index,
-            total=total,
-            path=file_path,
-            line=replacement.line_number,
-            category=replacement.hipaa_category,
-        )
-        raw_answer = typer.prompt(prompt, default=_FIX_INTERACTIVE_NO).strip().lower()
-        if raw_answer == _FIX_INTERACTIVE_APPLY_ALL:
-            approved.extend(replacements[index - _FIX_ENUMERATE_START :])
-            break
-        if raw_answer == _FIX_INTERACTIVE_SKIP_FILE:
-            return
-        if raw_answer == _FIX_INTERACTIVE_YES:
-            approved.append(replacement)
-    if approved:
-        fix_result = apply_approved_replacements(file_path, approved)
-        console.print(
-            _FIX_APPLIED_MESSAGE.format(count=len(fix_result.replacements_applied), path=file_path)
-        )
-
-
-@app.command("fix")
-def fix_command(
-    path: Annotated[Path, typer.Argument(help=_FIX_PATH_HELP)] = Path("."),
-    dry_run: Annotated[bool, typer.Option("--dry-run", help=_FIX_DRY_RUN_HELP)] = False,
-    apply: Annotated[bool, typer.Option("--apply", help=_FIX_APPLY_HELP)] = False,
-    patch: Annotated[bool, typer.Option("--patch", help=_FIX_PATCH_HELP)] = False,
-    interactive: Annotated[bool, typer.Option("--interactive", help=_FIX_INTERACTIVE_HELP)] = False,
-) -> None:
-    """Replace detected PHI with synthetic data (dry-run, apply, patch, or interactive)."""
-    selected_modes = [dry_run, apply, patch, interactive]
-    mode_count = sum(selected_modes)
-    if mode_count == 0:
-        typer.echo(_FIX_NO_MODE_ERROR, err=True)
-        raise typer.Exit(code=EXIT_CODE_ERROR)
-    if mode_count > 1:
-        typer.echo(_FIX_MULTI_MODE_ERROR, err=True)
-        raise typer.Exit(code=EXIT_CODE_ERROR)
-    target_files = _collect_target_files(path)
-    if interactive:
-        for target_file in target_files:
-            _run_interactive_fix(target_file)
-        return
-    if dry_run:
-        fix_mode = FixMode.DRY_RUN
-    elif apply:
-        fix_mode = FixMode.APPLY
-    else:
-        fix_mode = FixMode.PATCH
-    for target_file in target_files:
-        try:
-            fix_result = fix_file(target_file, fix_mode)
-        except MissingOptionalDependencyError:
-            typer.echo(_FIX_FAKER_MISSING_MESSAGE, err=True)
-            raise typer.Exit(code=EXIT_CODE_ERROR) from None
-        _print_fix_result(fix_result, fix_mode)
+app.command("fix")(fix_command)
