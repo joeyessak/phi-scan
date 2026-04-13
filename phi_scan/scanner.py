@@ -601,7 +601,7 @@ def _execute_scan_with_cache(
     if cached_raw is not None:
         _logger.debug(_CACHE_HIT_DEBUG.format(path=file_path, count=len(cached_raw)))
         return _compose_file_findings(
-            _FileScanContext(
+            _FileScanInputs(
                 raw_findings=cached_raw, file_content=file_content, file_path=file_path
             ),
             config,
@@ -610,13 +610,13 @@ def _execute_scan_with_cache(
     raw_findings = detect_phi_in_text_content(scannable_content, file_path)
     store_cached_result(cache_key, raw_findings)
     return _compose_file_findings(
-        _FileScanContext(raw_findings=raw_findings, file_content=file_content, file_path=file_path),
+        _FileScanInputs(raw_findings=raw_findings, file_content=file_content, file_path=file_path),
         config,
     )
 
 
 @dataclass(frozen=True)
-class _FileScanContext:
+class _FileScanInputs:
     """Bundles the per-file inputs to :func:`_compose_file_findings`."""
 
     raw_findings: list[ScanFinding]
@@ -625,7 +625,7 @@ class _FileScanContext:
 
 
 def _compose_file_findings(
-    scan_context: _FileScanContext,
+    scan_inputs: _FileScanInputs,
     config: ScanConfig,
 ) -> list[ScanFinding]:
     """Merge built-in and plugin findings and apply post-scan filters.
@@ -635,12 +635,10 @@ def _compose_file_findings(
     confidence, and severity filters. Shared by the cache-hit, cache-miss,
     and archive-member paths so that a single composition stays drift-free.
     """
-    plugin_findings = _execute_plugin_pass_for_file(
-        scan_context.file_content, scan_context.file_path
-    )
+    plugin_findings = _execute_plugin_pass_for_file(scan_inputs.file_content, scan_inputs.file_path)
     return _apply_post_scan_filters(
-        scan_context.raw_findings + plugin_findings,
-        scan_context.file_content,
+        scan_inputs.raw_findings + plugin_findings,
+        scan_inputs.file_content,
         config,
     )
 
@@ -948,7 +946,7 @@ def _scan_archive_members(
         virtual_path = _compute_display_path(archive_path) / member_name
         raw_findings = detect_phi_in_text_content(member_content, virtual_path)
         member_findings = _compose_file_findings(
-            _FileScanContext(
+            _FileScanInputs(
                 raw_findings=raw_findings,
                 file_content=member_content,
                 file_path=virtual_path,

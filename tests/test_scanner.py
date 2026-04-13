@@ -26,17 +26,18 @@ from phi_scan.constants import (
     SeverityLevel,
 )
 from phi_scan.exceptions import TraversalError
+from phi_scan.hashing import compute_value_hash, severity_from_confidence
 from phi_scan.models import ScanConfig, ScanFinding, ScanResult
 
 # noqa: PLC2701 — these private symbols are tested directly because the
-# composition seam (_FileScanContext / _compose_file_findings) unifies three
+# composition seam (_FileScanInputs / _compose_file_findings) unifies three
 # call sites (cache-hit, cache-miss, archive-member) and must stay drift-free;
 # the bomb-guard and sequential-scan helpers likewise have no public equivalent.
 from phi_scan.scanner import (
     MAX_WORKER_COUNT,
     MIN_WORKER_COUNT,
     _compose_file_findings,  # noqa: PLC2701
-    _FileScanContext,  # noqa: PLC2701
+    _FileScanInputs,  # noqa: PLC2701
     _passes_decompression_bomb_guards,  # noqa: PLC2701
     _run_sequential_scan,  # noqa: PLC2701
     collect_scan_targets,
@@ -90,9 +91,6 @@ _COMPOSE_TEST_LOW_CONFIDENCE: float = 0.3
 # irrelevant because the plugin pass is patched out; only its presence matters.
 _COMPOSE_TEST_FILE_CONTENT: str = "sample content"
 _COMPOSE_TEST_FILE_PATH: Path = Path("sample.py")
-# SHA-256 digest length in hex characters — used to synthesise deterministic
-# value_hash strings from a single-character seed.
-_SHA256_HEX_DIGEST_LENGTH: int = 64
 
 
 def _build_exclusion_spec(patterns: list[str]) -> pathspec.PathSpec:
@@ -801,7 +799,6 @@ def _build_compose_test_finding(
     entity_type: str,
     confidence: float,
     detection_layer: DetectionLayer,
-    value_hash_seed: str,
 ) -> ScanFinding:
     """Build a minimal ScanFinding for the composition seam tests."""
     return ScanFinding(
@@ -811,17 +808,15 @@ def _build_compose_test_finding(
         hipaa_category=PhiCategory.UNIQUE_ID,
         confidence=confidence,
         detection_layer=detection_layer,
-        value_hash=value_hash_seed * _SHA256_HEX_DIGEST_LENGTH,
-        severity=(
-            SeverityLevel.HIGH if confidence >= _COMPOSE_TEST_HIGH_CONFIDENCE else SeverityLevel.LOW
-        ),
+        value_hash=compute_value_hash(entity_type),
+        severity=severity_from_confidence(confidence),
         code_context="sample [REDACTED]",
         remediation_hint="hint",
     )
 
 
-def _build_compose_test_context(raw_findings: list[ScanFinding]) -> _FileScanContext:
-    return _FileScanContext(
+def _build_compose_test_context(raw_findings: list[ScanFinding]) -> _FileScanInputs:
+    return _FileScanInputs(
         raw_findings=raw_findings,
         file_content=_COMPOSE_TEST_FILE_CONTENT,
         file_path=_COMPOSE_TEST_FILE_PATH,
@@ -831,10 +826,10 @@ def _build_compose_test_context(raw_findings: list[ScanFinding]) -> _FileScanCon
 def test_compose_file_findings_merges_raw_with_plugin_and_applies_filters() -> None:
     """_compose_file_findings must call the plugin pass and apply post-scan filters."""
     raw_finding = _build_compose_test_finding(
-        "TEST_ENTITY", _COMPOSE_TEST_HIGH_CONFIDENCE, DetectionLayer.REGEX, "a"
+        "TEST_ENTITY", _COMPOSE_TEST_HIGH_CONFIDENCE, DetectionLayer.REGEX
     )
     plugin_finding = _build_compose_test_finding(
-        "PLUGIN_ENTITY", _COMPOSE_TEST_HIGH_CONFIDENCE, DetectionLayer.PLUGIN, "b"
+        "PLUGIN_ENTITY", _COMPOSE_TEST_HIGH_CONFIDENCE, DetectionLayer.PLUGIN
     )
     config = ScanConfig(confidence_threshold=0.0, severity_threshold=SeverityLevel.INFO)
 
@@ -847,7 +842,7 @@ def test_compose_file_findings_merges_raw_with_plugin_and_applies_filters() -> N
 def test_compose_file_findings_drops_findings_below_confidence_threshold() -> None:
     """Low-confidence findings must be filtered out by _compose_file_findings."""
     low_confidence_finding = _build_compose_test_finding(
-        "TEST_ENTITY", _COMPOSE_TEST_LOW_CONFIDENCE, DetectionLayer.REGEX, "a"
+        "TEST_ENTITY_LOW", _COMPOSE_TEST_LOW_CONFIDENCE, DetectionLayer.REGEX
     )
     config = ScanConfig(
         confidence_threshold=_COMPOSE_TEST_HIGH_CONFIDENCE,
