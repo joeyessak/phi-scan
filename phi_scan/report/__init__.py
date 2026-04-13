@@ -22,8 +22,6 @@ Usage::
 
 from __future__ import annotations
 
-import base64
-import functools
 import io
 import textwrap
 import types
@@ -32,7 +30,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from operator import itemgetter
 from pathlib import Path
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING
 
 from phi_scan import __version__
 from phi_scan.constants import (
@@ -40,10 +38,26 @@ from phi_scan.constants import (
     HIPAA_REMEDIATION_GUIDANCE,
     SEVERITY_RANK,
     PhiCategory,
-    RiskLevel,
     SeverityLevel,
 )
 from phi_scan.logging_config import get_logger
+from phi_scan.report._shared import (
+    _CHART_HEIGHT_CATEGORY_INCHES,
+    _CHART_HEIGHT_FILES_INCHES,
+    _CHART_HEIGHT_PIE_INCHES,
+    _CHART_HEIGHT_TREND_INCHES,
+    _CHART_WIDTH_INCHES,
+    _GENERAL_REMEDIATION_CHECKLIST,
+    _HEX_CRITICAL_RED,
+    _HEX_HIGH_ORANGE,
+    _HEX_LOW_GREEN,
+    _configure_matplotlib_backend,
+    _convert_hex_to_rgb,
+    _get_risk_colour,
+    _MatplotlibFigure,
+    _render_chart_to_base64,
+    _render_chart_to_bytes,
+)
 
 if TYPE_CHECKING:
     from collections.abc import Mapping
@@ -61,21 +75,6 @@ _logger = get_logger("report")
 # ---------------------------------------------------------------------------
 # Layout and colour constants
 # ---------------------------------------------------------------------------
-
-# Canonical raw hex values (no leading #) shared between PDF and chart contexts.
-# fpdf2 requires bare hex strings; matplotlib requires the "#" prefix.
-# A single canonical constant is the source of truth so a colour change propagates
-# to both rendering backends automatically.
-_HEX_CRITICAL_RED: str = "C0392B"  # flat red — CRITICAL risk, HIGH severity, active chart bars
-_HEX_HIGH_ORANGE: str = "E67E22"  # warm orange — HIGH risk, MEDIUM severity
-_HEX_LOW_GREEN: str = "27AE60"  # muted green — LOW risk, LOW severity
-
-# Risk-level colours for PDF (fpdf2 format: hex, no leading #)
-_COLOUR_CRITICAL: str = _HEX_CRITICAL_RED
-_COLOUR_HIGH: str = _HEX_HIGH_ORANGE
-_COLOUR_MODERATE: str = "F1C40F"
-_COLOUR_LOW: str = _HEX_LOW_GREEN
-_COLOUR_CLEAN: str = "2ECC71"
 
 # Severity row colours for PDF table fill (light tint variants)
 _COLOUR_HIGH_TINT: str = "FADBD8"
@@ -99,25 +98,6 @@ _FONT_BODY: int = 9
 _FONT_SMALL: int = 8
 _FONT_TABLE_HEADER: int = 8
 _FONT_TABLE_BODY: int = 7
-
-# Chart dimensions
-_CHART_WIDTH_INCHES: float = 7.0
-_CHART_HEIGHT_CATEGORY_INCHES: float = 4.0
-_CHART_HEIGHT_PIE_INCHES: float = 3.5
-_CHART_HEIGHT_FILES_INCHES: float = 3.5
-_CHART_HEIGHT_TREND_INCHES: float = 3.0
-_CHART_DPI: int = 120
-
-# Remediation checklist items at end of every report
-_GENERAL_REMEDIATION_CHECKLIST: tuple[str, ...] = (
-    "Run `phi-scan fix --dry-run <path>` to preview synthetic replacements for all findings.",
-    "Add `phi-scan scan --diff HEAD` as a required pre-commit hook via `phi-scan install-hook`.",
-    "Run `phi-scan baseline create` after resolving all findings to establish a clean baseline.",
-    "Enable `phi-scan scan --baseline` in CI to block only new regressions going forward.",
-    "Rotate any credentials or tokens that were exposed — treat them as compromised.",
-    "Review the HIPAA Safe Harbor checklist in `phi-scan explain hipaa` for each category found.",
-    "Document remediation actions taken in your organisation's HIPAA risk management plan.",
-)
 
 # Maximum code-context characters shown per finding in reports
 _MAX_CONTEXT_CHARS: int = 200
@@ -218,34 +198,8 @@ class _TrendDataPoint:
 
 
 # ---------------------------------------------------------------------------
-# Matplotlib Protocol — structural interface for chart figure objects
-# ---------------------------------------------------------------------------
-
-
-class _MatplotlibFigure(Protocol):
-    """Structural interface for matplotlib Figure objects used in chart rendering.
-
-    Defines only the savefig method consumed by _render_chart_to_buffer.
-    Avoids a hard type dependency on matplotlib, which is an optional reports
-    dependency — the Protocol is satisfied by any object with a compatible
-    savefig method regardless of import availability at type-check time.
-    """
-
-    def savefig(self, fname: object, **kwargs: object) -> None: ...
-
-
-# ---------------------------------------------------------------------------
 # Colour helpers
 # ---------------------------------------------------------------------------
-
-# Byte slice positions within a 6-character hex colour string (e.g. "C0392B").
-# Each colour channel occupies 2 hex digits (1 byte = 8 bits = 2 hex chars).
-_HEX_RED_START: int = 0
-_HEX_RED_END: int = 2
-_HEX_GREEN_START: int = 2
-_HEX_GREEN_END: int = 4
-_HEX_BLUE_START: int = 4
-_HEX_BLUE_END: int = 6
 
 # Named RGB tuples for direct fpdf2 set_fill_color / set_text_color calls.
 # fpdf2 core font rendering requires integer (R, G, B) tuples — hex strings cannot be
@@ -260,15 +214,6 @@ _COLOUR_DARK_BLUE_RGB: tuple[int, int, int] = (52, 73, 94)  # table header fill
 # Y-axis positions on the PDF cover page (millimetres from top of page).
 _PDF_COVER_TITLE_Y_MM: float = 18.0  # vertical position for the report title
 _PDF_COVER_RISK_Y_MM: float = 72.0  # vertical position for the risk-level label
-
-
-def _convert_hex_to_rgb(hex_colour: str) -> tuple[int, int, int]:
-    """Convert a 6-char hex colour string to an (R, G, B) int tuple."""
-    return (
-        int(hex_colour[_HEX_RED_START:_HEX_RED_END], 16),
-        int(hex_colour[_HEX_GREEN_START:_HEX_GREEN_END], 16),
-        int(hex_colour[_HEX_BLUE_START:_HEX_BLUE_END], 16),
-    )
 
 
 # Map of Unicode characters that Helvetica (latin-1) cannot encode → ASCII fallbacks.
@@ -298,18 +243,6 @@ def _encode_pdf_text_as_latin1(text: str) -> str:
         text = text.replace(char, replacement)
     # Final fallback: drop any remaining non-latin-1 characters
     return text.encode("latin-1", errors="replace").decode("latin-1")
-
-
-def _get_risk_colour(risk_level: RiskLevel) -> str:
-    """Return the hex colour string for a given RiskLevel."""
-    colour_map: dict[RiskLevel, str] = {
-        RiskLevel.CRITICAL: _COLOUR_CRITICAL,
-        RiskLevel.HIGH: _COLOUR_HIGH,
-        RiskLevel.MODERATE: _COLOUR_MODERATE,
-        RiskLevel.LOW: _COLOUR_LOW,
-        RiskLevel.CLEAN: _COLOUR_CLEAN,
-    }
-    return colour_map.get(risk_level, _COLOUR_LOW)
 
 
 def _get_severity_row_colour(severity: SeverityLevel) -> str:
@@ -366,52 +299,6 @@ def _truncate_chart_label(label: str) -> str:
     if len(label) <= _MAX_LABEL_CHARS:
         return label
     return "..." + label[-(_MAX_LABEL_CHARS - 1) :]
-
-
-@functools.cache
-def _configure_matplotlib_backend() -> None:
-    """Configure the non-interactive Agg backend — executed exactly once per process.
-
-    lru_cache with no arguments makes this a call-once function: the first
-    invocation sets the backend; every subsequent call is a cache hit that
-    returns immediately.  Chart builders must not call this directly — it is
-    called once before the chart-building block in each public report entry point
-    so that individual chart builders have a single responsibility.
-    """
-    import matplotlib
-
-    matplotlib.use("Agg")
-
-
-def _render_chart_to_buffer(figure: _MatplotlibFigure) -> io.BytesIO:
-    """Render a matplotlib Figure into an in-memory PNG buffer.
-
-    Args:
-        figure: A matplotlib Figure instance.
-
-    Returns:
-        BytesIO buffer positioned at the start of the PNG data.
-    """
-    buffer = io.BytesIO()
-    figure.savefig(buffer, format="png", bbox_inches="tight", dpi=_CHART_DPI)
-    buffer.seek(0)
-    return buffer
-
-
-def _render_chart_to_base64(figure: _MatplotlibFigure) -> str:
-    """Render a matplotlib Figure to a base64-encoded PNG string."""
-    buffer = _render_chart_to_buffer(figure)
-    encoded = base64.b64encode(buffer.read()).decode("ascii")
-    buffer.close()
-    return encoded
-
-
-def _render_chart_to_bytes(figure: _MatplotlibFigure) -> bytes:
-    """Render a matplotlib Figure to raw PNG bytes."""
-    buffer = _render_chart_to_buffer(figure)
-    png_bytes = buffer.read()
-    buffer.close()
-    return png_bytes
 
 
 @dataclass(frozen=True)
