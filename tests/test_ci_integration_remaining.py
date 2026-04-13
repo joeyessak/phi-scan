@@ -1460,12 +1460,6 @@ def test_sarif_symbols_reexported_from_ci_integration() -> None:
     import phi_scan.ci.sarif as sarif_module
     import phi_scan.ci_integration as ci_integration_module
 
-    for symbol_name in (
-        "upload_sarif_to_github",
-        "_verify_sarif_excludes_code_snippets",
-        "_gzip_compress_sarif",
-        "_base64_encode_bytes",
-    ):
-        assert getattr(ci_integration_module, symbol_name) is getattr(sarif_module, symbol_name), (
-            f"{symbol_name} no longer re-exported from phi_scan.ci_integration"
-        )
+    assert ci_integration_module.upload_sarif_to_github is sarif_module.upload_sarif_to_github, (
+        "upload_sarif_to_github no longer re-exported from phi_scan.ci_integration"
+    )

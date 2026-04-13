@@ -53,18 +53,7 @@ from phi_scan.ci._transport import (
     OperationLabel,
     execute_http_request,
 )
-from phi_scan.ci.sarif import (
-    _base64_encode_bytes as _base64_encode_bytes,
-)
-from phi_scan.ci.sarif import (
-    _gzip_compress_sarif as _gzip_compress_sarif,
-)
-from phi_scan.ci.sarif import (
-    _verify_sarif_excludes_code_snippets as _verify_sarif_excludes_code_snippets,
-)
-from phi_scan.ci.sarif import (
-    upload_sarif_to_github as upload_sarif_to_github,
-)
+from phi_scan.ci.sarif import upload_sarif_to_github as upload_sarif_to_github
 from phi_scan.constants import SeverityLevel
 from phi_scan.exceptions import CIIntegrationError  # noqa: F401 — backward-compatible re-export
 from phi_scan.models import ScanResult

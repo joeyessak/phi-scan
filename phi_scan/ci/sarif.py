@@ -14,10 +14,10 @@ import base64
 import gzip
 import json
 import logging
-import os
 from typing import Any
 
 from phi_scan.ci import PullRequestContext
+from phi_scan.ci._env import fetch_environment_variable
 from phi_scan.ci._transport import (
     HttpMethod,
     HttpRequestConfig,
@@ -39,11 +39,7 @@ _SARIF_TOOL_NAME: str = "phi-scan"
 _GITHUB_API_ACCEPT_HEADER: str = "application/vnd.github+json"
 _GITHUB_API_VERSION_HEADER_VALUE: str = "2022-11-28"
 _AUTHORIZATION_BEARER_PREFIX: str = "Bearer "
-
-
-def _read_environment_variable(variable_name: str) -> str | None:
-    env_value = os.environ.get(variable_name, "").strip()
-    return env_value if env_value else None
+_SHA_LOG_PREFIX_LENGTH: int = 8
 
 
 def _verify_sarif_location_excludes_snippet(location: dict[str, Any]) -> None:
@@ -94,7 +90,7 @@ def upload_sarif_to_github(scan_result: ScanResult, pr_context: PullRequestConte
         _LOG.debug("GitHub SARIF upload: missing repository or SHA — skipping")
         return
 
-    token = _read_environment_variable(_ENV_GITHUB_TOKEN)
+    token = fetch_environment_variable(_ENV_GITHUB_TOKEN)
     if not token:
         _LOG.warning("GitHub SARIF upload: GITHUB_TOKEN not set — skipping")
         return
@@ -125,4 +121,4 @@ def upload_sarif_to_github(scan_result: ScanResult, pr_context: PullRequestConte
         )
     )
 
-    _LOG.debug("GitHub: SARIF uploaded to Code Scanning for %s", sha[:8])
+    _LOG.debug("GitHub: SARIF uploaded to Code Scanning for %s", sha[:_SHA_LOG_PREFIX_LENGTH])
