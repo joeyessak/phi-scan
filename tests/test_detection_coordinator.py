@@ -22,6 +22,8 @@ from phi_scan.detection_coordinator import (
     _apply_variable_name_confidence_boost as apply_variable_name_confidence_boost,
 )
 from phi_scan.detection_coordinator import (
+    _evaluate_two_category_rule,
+    _TwoCategoryRule,
     deduplicate_overlapping_findings,
     detect_phi_in_text_content,
     detect_quasi_identifier_combination,
@@ -572,3 +574,44 @@ def test_detect_phi_in_text_content_deduplicates_cross_layer_duplicates():
     findings_with_shared_hash = [f for f in result if f.value_hash == shared_hash]
     assert len(findings_with_shared_hash) == 1
     assert findings_with_shared_hash[0].detection_layer == DetectionLayer.REGEX
+
+
+# ---------------------------------------------------------------------------
+# _evaluate_two_category_rule (shared skeleton)
+# ---------------------------------------------------------------------------
+
+
+_RULE_UNDER_TEST: _TwoCategoryRule = _TwoCategoryRule(
+    predicate_a=lambda f: f.hipaa_category == PhiCategory.NAME,
+    predicate_b=lambda f: f.hipaa_category == PhiCategory.DATE,
+    combination_label="TEST_A + TEST_B",
+    note="test note",
+)
+
+
+def test_evaluate_two_category_rule_fires_when_both_categories_present_and_proximal():
+    findings = [
+        _make_finding(hipaa_category=PhiCategory.NAME, line_number=_LINE_ONE),
+        _make_finding(hipaa_category=PhiCategory.DATE, line_number=_LINE_TWO),
+    ]
+
+    result = _evaluate_two_category_rule(findings, _RULE_UNDER_TEST)
+
+    assert len(result) == 1
+    assert result[0].entity_type == "TEST_A + TEST_B"
+    assert result[0].hipaa_category == PhiCategory.QUASI_IDENTIFIER_COMBINATION
+
+
+def test_evaluate_two_category_rule_returns_empty_when_only_one_category_present():
+    findings = [_make_finding(hipaa_category=PhiCategory.NAME, line_number=_LINE_ONE)]
+
+    assert _evaluate_two_category_rule(findings, _RULE_UNDER_TEST) == []
+
+
+def test_evaluate_two_category_rule_returns_empty_when_outside_proximity_window():
+    findings = [
+        _make_finding(hipaa_category=PhiCategory.NAME, line_number=_LINE_ONE),
+        _make_finding(hipaa_category=PhiCategory.DATE, line_number=_LINE_FAR_AWAY),
+    ]
+
+    assert _evaluate_two_category_rule(findings, _RULE_UNDER_TEST) == []

@@ -19,15 +19,25 @@ from phi_scan.constants import (
     DEFAULT_TEXT_ENCODING,
     KNOWN_BINARY_EXTENSIONS,
     MAX_FILE_SIZE_MB,
+    DetectionLayer,
     PathspecMatchStyle,
+    PhiCategory,
     RiskLevel,
     SeverityLevel,
 )
 from phi_scan.exceptions import TraversalError
-from phi_scan.models import ScanConfig, ScanResult
+from phi_scan.hashing import compute_value_hash, severity_from_confidence
+from phi_scan.models import ScanConfig, ScanFinding, ScanResult
+
+# noqa: PLC2701 — these private symbols are tested directly because the
+# composition seam (_FileScanInputs / _compose_file_findings) unifies three
+# call sites (cache-hit, cache-miss, archive-member) and must stay drift-free;
+# the bomb-guard and sequential-scan helpers likewise have no public equivalent.
 from phi_scan.scanner import (
     MAX_WORKER_COUNT,
     MIN_WORKER_COUNT,
+    _compose_file_findings,  # noqa: PLC2701
+    _FileScanInputs,  # noqa: PLC2701
     _passes_decompression_bomb_guards,  # noqa: PLC2701
     _run_sequential_scan,  # noqa: PLC2701
     collect_scan_targets,
@@ -74,6 +84,13 @@ _PARITY_PHI_FIXTURE_PATH: Path = Path(__file__).parent / "fixtures" / "phi" / "p
 # test_load_ignore_patterns_skips_blank_lines: _SAMPLE_IGNORE_PATTERN ("*.log") and "*.tmp".
 # Update this constant if that test's fixture content changes.
 _EXPECTED_NON_BLANK_NON_COMMENT_PATTERN_COUNT: int = 2
+# Confidence values used by the _compose_file_findings seam tests.
+_COMPOSE_TEST_HIGH_CONFIDENCE: float = 0.9
+_COMPOSE_TEST_LOW_CONFIDENCE: float = 0.3
+# File content passed to the _compose_file_findings seam tests. The body is
+# irrelevant because the plugin pass is patched out; only its presence matters.
+_COMPOSE_TEST_FILE_CONTENT: str = "sample content"
+_COMPOSE_TEST_FILE_PATH: Path = Path("sample.py")
 
 
 def _build_exclusion_spec(patterns: list[str]) -> pathspec.PathSpec:
@@ -776,3 +793,65 @@ def test_scan_file_skips_bomb_member_in_real_zip(
         findings = _scan_file(archive_path, config)
 
     assert findings == []
+
+
+def _build_compose_test_finding(
+    entity_type: str,
+    confidence: float,
+    detection_layer: DetectionLayer,
+) -> ScanFinding:
+    """Build a minimal ScanFinding for the composition seam tests."""
+    return ScanFinding(
+        file_path=_COMPOSE_TEST_FILE_PATH,
+        line_number=1,
+        entity_type=entity_type,
+        hipaa_category=PhiCategory.UNIQUE_ID,
+        confidence=confidence,
+        detection_layer=detection_layer,
+        value_hash=compute_value_hash(entity_type),
+        severity=severity_from_confidence(confidence),
+        code_context="sample [REDACTED]",
+        remediation_hint="hint",
+    )
+
+
+def _build_compose_test_context(raw_findings: list[ScanFinding]) -> _FileScanInputs:
+    return _FileScanInputs(
+        raw_findings=raw_findings,
+        file_content=_COMPOSE_TEST_FILE_CONTENT,
+        file_path=_COMPOSE_TEST_FILE_PATH,
+    )
+
+
+def test_compose_file_findings_merges_raw_with_plugin_and_applies_filters() -> None:
+    """_compose_file_findings must call the plugin pass and apply post-scan filters."""
+    raw_finding = _build_compose_test_finding(
+        "TEST_ENTITY", _COMPOSE_TEST_HIGH_CONFIDENCE, DetectionLayer.REGEX
+    )
+    plugin_finding = _build_compose_test_finding(
+        "PLUGIN_ENTITY", _COMPOSE_TEST_HIGH_CONFIDENCE, DetectionLayer.PLUGIN
+    )
+    config = ScanConfig(confidence_threshold=0.0, severity_threshold=SeverityLevel.INFO)
+
+    with patch("phi_scan.scanner._execute_plugin_pass_for_file", return_value=[plugin_finding]):
+        result = _compose_file_findings(_build_compose_test_context([raw_finding]), config)
+
+    assert {f.entity_type for f in result} == {"TEST_ENTITY", "PLUGIN_ENTITY"}
+
+
+def test_compose_file_findings_drops_findings_below_confidence_threshold() -> None:
+    """Low-confidence findings must be filtered out by _compose_file_findings."""
+    low_confidence_finding = _build_compose_test_finding(
+        "TEST_ENTITY_LOW", _COMPOSE_TEST_LOW_CONFIDENCE, DetectionLayer.REGEX
+    )
+    config = ScanConfig(
+        confidence_threshold=_COMPOSE_TEST_HIGH_CONFIDENCE,
+        severity_threshold=SeverityLevel.INFO,
+    )
+
+    with patch("phi_scan.scanner._execute_plugin_pass_for_file", return_value=[]):
+        result = _compose_file_findings(
+            _build_compose_test_context([low_confidence_finding]), config
+        )
+
+    assert result == []
