@@ -5,6 +5,11 @@ until every repo-pristine blocker is merged and the maintainer gives an
 explicit "migration go" approval. This document is the operational
 runbook for that future transfer.
 
+Pre-flight execution is recorded in
+[`docs/org-migration-preflight-report.md`](org-migration-preflight-report.md),
+which captures the §1 snapshot, the hardcoded-reference sweep, the
+external-dependency inventory, and the go/no-go readiness matrix.
+
 ## Scope
 
 - `joeyessak/phi-scan` → `phiscanhq/phi-scan`
