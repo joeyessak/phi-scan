@@ -49,7 +49,7 @@ def _run_parallel_scan_with_progress(
 ) -> list[ScanFinding]:
     """Scan files concurrently, advancing the progress bar as each file completes."""
 
-    def _advance_progress_bar(completed_file_path: Path) -> None:
+    def _advance_progress_bar(_completed_file_path: Path) -> None:
         scan_context.progress.update(
             scan_context.task_id,
             description=_PARALLEL_SCAN_PROGRESS_LABEL,
@@ -64,7 +64,7 @@ def _run_parallel_scan_with_progress(
     )
 
 
-def _run_scan_with_progress(
+def _dispatch_scan_with_progress(
     scan_context: _ProgressScanContext,
 ) -> list[ScanFinding]:
     """Dispatch to sequential or parallel progress scanning based on worker_count."""
@@ -90,6 +90,6 @@ def execute_scan_with_progress(
             progress=progress,
             task_id=task_id,
         )
-        accumulated_findings = _run_scan_with_progress(progress_scan_context)
+        accumulated_findings = _dispatch_scan_with_progress(progress_scan_context)
     scan_duration = time.monotonic() - scan_start
     return build_scan_result(tuple(accumulated_findings), len(scan_targets), scan_duration)
