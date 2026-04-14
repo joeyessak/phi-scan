@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import time
 from pathlib import Path
 from typing import Annotated
 
@@ -19,14 +18,11 @@ from phi_scan.cli._shared import (
     _DEFAULT_WORKER_COUNT,
     _LOG_LEVEL_DEBUG,
     _LOG_LEVEL_WARNING,
-    _PARALLEL_SCAN_PROGRESS_LABEL,
     _configure_logging,
-    _ProgressScanContext,
     _resolve_scan_targets,
     _ScanExecutionOptions,
     _ScanPhaseOptions,
     _ScanTargetOptions,
-    _truncate_filename_for_progress,
     _validate_worker_count,
 )
 from phi_scan.cli.ci_dispatch import CIIntegrationOptions, dispatch_ci_integrations
@@ -38,6 +34,7 @@ from phi_scan.cli.report import (
     resolve_output_format,
 )
 from phi_scan.cli.scan_config import load_scan_config
+from phi_scan.cli.scan_progress import execute_scan_with_progress
 from phi_scan.compliance import (
     ComplianceFramework,
     InvalidFrameworkError,
@@ -47,14 +44,13 @@ from phi_scan.compliance import (
 from phi_scan.constants import EXIT_CODE_ERROR, OutputFormat
 from phi_scan.exceptions import AuditKeyMissingError, AuditLogError, NotificationError
 from phi_scan.logging_config import get_logger
-from phi_scan.models import ScanConfig, ScanFinding, ScanResult
+from phi_scan.models import ScanConfig, ScanResult
 from phi_scan.notifier import (
     NotificationRequest,
     send_email_notification,
     send_webhook_notification,
 )
 from phi_scan.output import (
-    create_scan_progress,
     display_banner,
     display_file_type_summary,
     display_phase_audit,
@@ -63,14 +59,7 @@ from phi_scan.output import (
     display_scan_header,
     display_status_spinner,
 )
-from phi_scan.scanner import (
-    MAX_WORKER_COUNT,
-    MIN_WORKER_COUNT,
-    build_scan_result,
-    execute_scan,
-    run_parallel_scan,
-    scan_file,
-)
+from phi_scan.scanner import MAX_WORKER_COUNT
 
 _logger = get_logger("cli")
 
@@ -148,70 +137,6 @@ _NOTIFICATION_WEBHOOK_FAILURE_WARNING: str = "Webhook notification failed: {erro
 _VERBOSE_PHASE_COLLECTING: str = "collecting scan targets"
 _VERBOSE_PHASE_SCANNING: str = "scanning {count} file(s)"
 _VERBOSE_PHASE_AUDIT: str = "writing audit record"
-
-
-def _run_sequential_scan_with_progress(
-    scan_context: _ProgressScanContext,
-) -> list[ScanFinding]:
-    """Scan files one at a time, advancing the progress bar after each file."""
-    all_findings: list[ScanFinding] = []
-    for file_path in scan_context.scan_targets:
-        progress_label = _truncate_filename_for_progress(file_path)
-        scan_context.progress.update(scan_context.task_id, description=progress_label)
-        all_findings.extend(scan_file(file_path, scan_context.config))
-        scan_context.progress.update(scan_context.task_id, advance=1)
-    return all_findings
-
-
-def _run_parallel_scan_with_progress(
-    scan_context: _ProgressScanContext,
-) -> list[ScanFinding]:
-    """Scan files concurrently, advancing the progress bar as each file completes."""
-
-    def _advance_progress_bar(completed_file_path: Path) -> None:
-        scan_context.progress.update(
-            scan_context.task_id,
-            description=_PARALLEL_SCAN_PROGRESS_LABEL,
-            advance=1,
-        )
-
-    return run_parallel_scan(
-        list(scan_context.scan_targets),
-        scan_context.config,
-        scan_context.worker_count,
-        on_file_complete=_advance_progress_bar,
-    )
-
-
-def _run_scan_with_progress(
-    scan_context: _ProgressScanContext,
-) -> list[ScanFinding]:
-    """Dispatch to sequential or parallel progress scanning based on worker_count."""
-    if scan_context.worker_count > MIN_WORKER_COUNT:
-        return _run_parallel_scan_with_progress(scan_context)
-    return _run_sequential_scan_with_progress(scan_context)
-
-
-def _execute_scan_with_progress(
-    scan_targets: list[Path],
-    config: ScanConfig,
-    execution_options: _ScanExecutionOptions,
-) -> ScanResult:
-    """Run the scan loop, showing a Rich progress bar when should_show_progress is True."""
-    if not execution_options.should_show_progress:
-        return execute_scan(scan_targets, config, execution_options.worker_count)
-    scan_start = time.monotonic()
-    with create_scan_progress(total_files=len(scan_targets)) as (progress, task_id):
-        progress_scan_context = _ProgressScanContext(
-            scan_targets=tuple(scan_targets),
-            config=config,
-            worker_count=execution_options.worker_count,
-            progress=progress,
-            task_id=task_id,
-        )
-        all_findings = _run_scan_with_progress(progress_scan_context)
-    scan_duration = time.monotonic() - scan_start
-    return build_scan_result(tuple(all_findings), len(scan_targets), scan_duration)
 
 
 def _write_audit_record(
@@ -397,7 +322,7 @@ def scan(
         worker_count=worker_count,
         should_show_progress=is_rich_mode,
     )
-    scan_result = _execute_scan_with_progress(scan_targets, scan_config, execution_options)
+    scan_result = execute_scan_with_progress(scan_targets, scan_config, execution_options)
     framework_annotations = (
         annotate_findings(scan_result.findings, enabled_frameworks) if enabled_frameworks else None
     )
