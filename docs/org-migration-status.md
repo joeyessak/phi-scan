@@ -1,6 +1,7 @@
 # Org Migration Status — `joeyessak/*` → `phiscanhq/*`
 
-**Date:** 2026-04-13
+**Last updated:** 2026-04-13
+**Pre-flight evidence date:** 2026-04-18 (per [`docs/org-migration-preflight-report.md`](org-migration-preflight-report.md); evidence remains valid — refresh before transfer per runbook Appendix A)
 **Purpose:** Single operational source of truth for migration-go readiness.
 **Runbook:** [`docs/org-migration-checklist.md`](org-migration-checklist.md)
 **Pre-flight snapshot:** [`docs/org-migration-preflight-report.md`](org-migration-preflight-report.md)
