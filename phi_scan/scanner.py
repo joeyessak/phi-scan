@@ -641,7 +641,7 @@ def _compose_file_findings(
         scan_inputs.file_content, scan_inputs.file_path, plugin_registry
     )
     filter_inputs = _PostScanFilterInputs(
-        merged_findings=scan_inputs.raw_findings + plugin_findings,
+        merged_findings=tuple(scan_inputs.raw_findings) + tuple(plugin_findings),
         file_content=scan_inputs.file_content,
         plugin_registry=plugin_registry,
     )
@@ -659,7 +659,7 @@ def _execute_plugin_pass_for_file(
 class _PostScanFilterInputs:
     """Bundle of inputs threaded through the post-scan filter chain."""
 
-    merged_findings: list[ScanFinding]
+    merged_findings: tuple[ScanFinding, ...]
     file_content: str
     plugin_registry: PluginRegistry
 
@@ -674,7 +674,9 @@ def _apply_post_scan_filters(
     chain has a single responsibility (filtering) and is trivially
     testable with a synthetic registry.
     """
-    filtered = _apply_suppression_filter(filter_inputs.merged_findings, filter_inputs.file_content)
+    filtered = _apply_suppression_filter(
+        list(filter_inputs.merged_findings), filter_inputs.file_content
+    )
     filtered = apply_suppressor_pass(
         filtered, filter_inputs.plugin_registry, filter_inputs.file_content
     )

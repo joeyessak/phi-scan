@@ -218,7 +218,11 @@ def _classify_entry_points(
 
 
 def _discover_entry_points() -> tuple[EntryPoint, ...]:
-    return tuple(entry_points(group=PLUGIN_ENTRY_POINT_GROUP))
+    return _discover_entry_points_for_group(PLUGIN_ENTRY_POINT_GROUP)
+
+
+def _discover_entry_points_for_group(group: str) -> tuple[EntryPoint, ...]:
+    return tuple(entry_points(group=group))
 
 
 def _sort_entry_points_deterministically(
@@ -267,8 +271,8 @@ def _import_validated_recognizer_class(
     entry_point: EntryPoint,
     reserved_names: set[str],
 ) -> type[BaseRecognizer]:
-    entry_point_target = _import_entry_point_object(entry_point)
-    recognizer_class = _coerce_to_recognizer_class(entry_point_target)
+    imported_entry_point = _import_entry_point_object(entry_point)
+    recognizer_class = _coerce_to_recognizer_class(imported_entry_point)
     _validate_recognizer_class(recognizer_class)
     _reject_reserved_name(recognizer_class.name, reserved_names)
     return recognizer_class
@@ -290,12 +294,12 @@ def _import_entry_point_object(entry_point: EntryPoint) -> object:
         ) from load_error
 
 
-def _coerce_to_recognizer_class(entry_point_target: object) -> type[BaseRecognizer]:
-    if not isinstance(entry_point_target, type):
+def _coerce_to_recognizer_class(imported_entry_point: object) -> type[BaseRecognizer]:
+    if not isinstance(imported_entry_point, type):
         raise PluginValidationError(_NOT_A_CLASS_REASON)
-    if not issubclass(entry_point_target, BaseRecognizer):
+    if not issubclass(imported_entry_point, BaseRecognizer):
         raise PluginValidationError(_NOT_A_RECOGNIZER_REASON)
-    return entry_point_target
+    return imported_entry_point
 
 
 def _validate_recognizer_class(recognizer_class: type[BaseRecognizer]) -> None:
@@ -403,7 +407,7 @@ def _instantiate_recognizer(
 
 
 def _discover_suppressor_entry_points() -> tuple[EntryPoint, ...]:
-    return tuple(entry_points(group=SUPPRESSOR_ENTRY_POINT_GROUP))
+    return _discover_entry_points_for_group(SUPPRESSOR_ENTRY_POINT_GROUP)
 
 
 def _classify_suppressor_entry_points(
@@ -413,14 +417,12 @@ def _classify_suppressor_entry_points(
     skipped_suppressors: list[SkippedPlugin] = []
     reserved_names: set[str] = set()
     for entry_point in sorted_entry_points:
-        loaded_or_skipped_suppressor = _load_or_skip_suppressor_entry_point(
-            entry_point, reserved_names
-        )
-        if isinstance(loaded_or_skipped_suppressor, LoadedSuppressor):
-            loaded_suppressors.append(loaded_or_skipped_suppressor)
-            reserved_names.add(loaded_or_skipped_suppressor.suppressor.name)
+        load_outcome = _load_or_skip_suppressor_entry_point(entry_point, reserved_names)
+        if isinstance(load_outcome, LoadedSuppressor):
+            loaded_suppressors.append(load_outcome)
+            reserved_names.add(load_outcome.suppressor.name)
             continue
-        skipped_suppressors.append(loaded_or_skipped_suppressor)
+        skipped_suppressors.append(load_outcome)
     return loaded_suppressors, skipped_suppressors
 
 
@@ -449,19 +451,19 @@ def _import_validated_suppressor_class(
     entry_point: EntryPoint,
     reserved_names: set[str],
 ) -> type[BaseSuppressor]:
-    entry_point_target = _import_entry_point_object(entry_point)
-    suppressor_class = _coerce_to_suppressor_class(entry_point_target)
+    imported_entry_point = _import_entry_point_object(entry_point)
+    suppressor_class = _coerce_to_suppressor_class(imported_entry_point)
     _validate_suppressor_class(suppressor_class)
     _reject_reserved_name(suppressor_class.name, reserved_names)
     return suppressor_class
 
 
-def _coerce_to_suppressor_class(entry_point_target: object) -> type[BaseSuppressor]:
-    if not isinstance(entry_point_target, type):
+def _coerce_to_suppressor_class(imported_entry_point: object) -> type[BaseSuppressor]:
+    if not isinstance(imported_entry_point, type):
         raise PluginValidationError(_NOT_A_CLASS_REASON)
-    if not issubclass(entry_point_target, BaseSuppressor):
+    if not issubclass(imported_entry_point, BaseSuppressor):
         raise PluginValidationError(_NOT_A_SUPPRESSOR_REASON)
-    return entry_point_target
+    return imported_entry_point
 
 
 def _validate_suppressor_class(suppressor_class: type[BaseSuppressor]) -> None:

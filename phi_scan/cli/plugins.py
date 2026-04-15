@@ -127,11 +127,11 @@ def _build_suppressor_table(registry: PluginRegistry) -> Table:
 
 
 def _add_loaded_suppressor_row(table: Table, loaded_suppressor: LoadedSuppressor) -> None:
-    suppressor = loaded_suppressor.suppressor
+    suppressor_instance = loaded_suppressor.suppressor
     table.add_row(
-        suppressor.name,
-        suppressor.version,
-        suppressor.plugin_api_version,
+        suppressor_instance.name,
+        suppressor_instance.version,
+        suppressor_instance.plugin_api_version,
         f"[green]{_STATUS_LOADED}[/green]",
     )
 

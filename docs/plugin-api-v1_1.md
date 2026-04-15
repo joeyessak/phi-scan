@@ -26,6 +26,11 @@ Host: SUPPRESSOR_API_VERSION = "1.1"
 Plugin: plugin_api_version = "1.1"   # exact match required
 ```
 
+The literal `"1.1"` appears in this prose/table form only. Plugin
+code MUST import and assign `SUPPRESSOR_API_VERSION` rather than
+hard-coding the version string, so a host version bump surfaces as
+an import-time change in the plugin instead of a silent drift.
+
 The v1.0 recognizer `PLUGIN_API_VERSION` and the v1.1 suppressor
 `SUPPRESSOR_API_VERSION` are **independent** version axes. A
 distribution may ship a v1.0 recognizer and a v1.1 suppressor in the
@@ -199,6 +204,24 @@ from phi_scan.plugin_api import (
     SuppressorFindingView,
 )
 
+# Path components that identify a test-fixture tree. Lifted to module
+# scope so the value is never inlined in logic (per project standards)
+# and so the match is performed on structured Path parts rather than
+# on a stringified path.
+_FIXTURE_PATH_COMPONENTS: tuple[str, ...] = ("tests", "fixtures")
+_REASON_IS_FIXTURE = "file under tests/fixtures"
+_REASON_NOT_FIXTURE = "not a fixture"
+
+
+def _is_under_fixture_tree(path_parts: tuple[str, ...]) -> bool:
+    # Structural match on Path.parts — plugins MUST NOT open or stat
+    # finding.file_path, and MUST NOT embed it in SuppressDecision.reason.
+    window = len(_FIXTURE_PATH_COMPONENTS)
+    for start in range(len(path_parts) - window + 1):
+        if path_parts[start : start + window] == _FIXTURE_PATH_COMPONENTS:
+            return True
+    return False
+
 
 class TestFixtureSuppressor(BaseSuppressor):
     """Suppress findings in files under test-fixture directories."""
@@ -213,10 +236,10 @@ class TestFixtureSuppressor(BaseSuppressor):
         finding: SuppressorFindingView,
         line: str,
     ) -> SuppressDecision:
-        is_fixture = "tests/fixtures" in str(finding.file_path)
+        is_fixture = _is_under_fixture_tree(finding.file_path.parts)
         return SuppressDecision(
             is_suppressed=is_fixture,
-            reason="file under tests/fixtures" if is_fixture else "not a fixture",
+            reason=_REASON_IS_FIXTURE if is_fixture else _REASON_NOT_FIXTURE,
         )
 ```
 
