@@ -102,6 +102,6 @@ def test_post_pr_comment_forwards_to_resolved_adapter(
     ci_integration.post_pr_comment(clean_scan, pr_context)
 
     assert fake_adapter.post_pull_request_comment.call_count == 1
-    posted_body, posted_context = fake_adapter.post_pull_request_comment.call_args[0]
+    posted_body, posted_context = fake_adapter.post_pull_request_comment.call_args.args
     assert "No PHI/PII Violations Found" in str(posted_body)
     assert posted_context is pr_context

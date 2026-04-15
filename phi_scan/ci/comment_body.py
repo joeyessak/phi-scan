@@ -27,7 +27,9 @@ _COMMENT_BADGE_VIOLATIONS: str = (
 )
 
 _MAX_COMMENT_LENGTH: int = 60_000
-_COMMENT_BODY_SPLIT_MAX_PARTS: int = 2
+# ``str.split(sep, maxsplit)`` returns at most ``maxsplit + 1`` items. This
+# constant is the ``maxsplit`` argument, not a count of resulting parts.
+_COMMENT_BODY_SPLIT_MAXSPLIT: int = 2
 _COMMENT_MIN_SECTION_COUNT: int = 2
 _BASELINE_CONTEXT_FORMAT: str = (
     "**{new_findings_count} new** | "
@@ -46,32 +48,9 @@ class BaselineComparison:
     resolved_count: int
 
 
-def build_comment_body(scan_result: ScanResult) -> SanitisedCommentBody:
-    """Build a markdown PR/MR comment body from a ``ScanResult``.
-
-    The body contains only counts, file names, and line numbers — never raw
-    entity values. Truncated to ``_MAX_COMMENT_LENGTH`` characters to stay
-    within platform comment size limits.
-    """
-    if scan_result.is_clean:
-        header = _COMMENT_HEADER_CLEAN
-        badge = _COMMENT_BADGE_CLEAN
-        body_lines = [
-            f"{badge}",
-            "",
-            f"**{header}**",
-            "",
-            f"Scanned **{scan_result.files_scanned}** file(s) — no PHI/PII detected.",
-            "",
-            f"*Scan duration: {scan_result.scan_duration:.2f}s*",
-        ]
-        return SanitisedCommentBody("\n".join(body_lines))
-
-    findings_count = len(scan_result.findings)
-    header = _COMMENT_HEADER_VIOLATIONS
-    badge = _COMMENT_BADGE_VIOLATIONS
-
-    severity_summary = ", ".join(
+def _format_severity_summary(scan_result: ScanResult) -> str:
+    """Join non-zero severity counts into a comma-separated summary string."""
+    return ", ".join(
         f"{count} {level.value}"
         for level, count in sorted(
             scan_result.severity_counts.items(),
@@ -80,10 +59,49 @@ def build_comment_body(scan_result: ScanResult) -> SanitisedCommentBody:
         if count > 0
     )
 
-    body_lines = [
-        badge,
+
+def _build_clean_comment_lines(scan_result: ScanResult) -> list[str]:
+    """Lines for the 'no violations' comment body."""
+    return [
+        _COMMENT_BADGE_CLEAN,
         "",
-        f"**{header}**",
+        f"**{_COMMENT_HEADER_CLEAN}**",
+        "",
+        f"Scanned **{scan_result.files_scanned}** file(s) — no PHI/PII detected.",
+        "",
+        f"*Scan duration: {scan_result.scan_duration:.2f}s*",
+    ]
+
+
+def _build_findings_table_lines(scan_result: ScanResult) -> list[str]:
+    """Markdown table rows for the findings section (capped + truncation row)."""
+    findings_count = len(scan_result.findings)
+    rows = [
+        "| File | Line | Type | Severity | Confidence |",
+        "|------|------|------|----------|------------|",
+    ]
+    for finding in scan_result.findings[:_MAX_FINDINGS_IN_COMMENT_TABLE]:
+        rows.append(
+            f"| `{finding.file_path}` | {finding.line_number} "
+            f"| {finding.hipaa_category.value} "
+            f"| {finding.severity.value} "
+            f"| {finding.confidence:.0%} |"
+        )
+    if findings_count > _MAX_FINDINGS_IN_COMMENT_TABLE:
+        rows.append(
+            f"| … and {findings_count - _MAX_FINDINGS_IN_COMMENT_TABLE} more | | | | |"
+        )
+    return rows
+
+
+def _build_violations_comment_lines(scan_result: ScanResult) -> list[str]:
+    """Lines for the 'violations detected' comment body."""
+    findings_count = len(scan_result.findings)
+    severity_summary = _format_severity_summary(scan_result)
+    header_lines = [
+        _COMMENT_BADGE_VIOLATIONS,
+        "",
+        f"**{_COMMENT_HEADER_VIOLATIONS}**",
         "",
         f"phi-scan detected **{findings_count}** PHI/PII finding(s) across "
         f"**{scan_result.files_with_findings}** file(s).",
@@ -93,24 +111,8 @@ def build_comment_body(scan_result: ScanResult) -> SanitisedCommentBody:
         "",
         "### Findings",
         "",
-        "| File | Line | Type | Severity | Confidence |",
-        "|------|------|------|----------|------------|",
     ]
-
-    for finding in scan_result.findings[:_MAX_FINDINGS_IN_COMMENT_TABLE]:
-        body_lines.append(
-            f"| `{finding.file_path}` | {finding.line_number} "
-            f"| {finding.hipaa_category.value} "
-            f"| {finding.severity.value} "
-            f"| {finding.confidence:.0%} |"
-        )
-
-    if findings_count > _MAX_FINDINGS_IN_COMMENT_TABLE:
-        body_lines.append(
-            f"| … and {findings_count - _MAX_FINDINGS_IN_COMMENT_TABLE} more | | | | |"
-        )
-
-    body_lines += [
+    footer_lines = [
         "",
         "> **Action required:** Remove or de-identify all flagged values before merging.",
         "> Run `phi-scan scan . --output table` locally for full details.",
@@ -118,13 +120,27 @@ def build_comment_body(scan_result: ScanResult) -> SanitisedCommentBody:
         f"*Scan duration: {scan_result.scan_duration:.2f}s | "
         f"Files scanned: {scan_result.files_scanned}*",
     ]
+    return header_lines + _build_findings_table_lines(scan_result) + footer_lines
 
-    comment_body = "\n".join(body_lines)
-    if len(comment_body) > _MAX_COMMENT_LENGTH:
-        comment_body = (
-            comment_body[:_MAX_COMMENT_LENGTH] + "\n\n*(comment truncated — too many findings)*"
-        )
-    return SanitisedCommentBody(comment_body)
+
+def _truncate_comment_body(comment_body: str) -> str:
+    """Cap the body at ``_MAX_COMMENT_LENGTH`` and append a truncation note."""
+    if len(comment_body) <= _MAX_COMMENT_LENGTH:
+        return comment_body
+    return comment_body[:_MAX_COMMENT_LENGTH] + "\n\n*(comment truncated — too many findings)*"
+
+
+def build_comment_body(scan_result: ScanResult) -> SanitisedCommentBody:
+    """Build a markdown PR/MR comment body from a ``ScanResult``.
+
+    The body contains only counts, file names, and line numbers — never raw
+    entity values. Truncated to ``_MAX_COMMENT_LENGTH`` characters to stay
+    within platform comment size limits.
+    """
+    if scan_result.is_clean:
+        return SanitisedCommentBody("\n".join(_build_clean_comment_lines(scan_result)))
+    body_lines = _build_violations_comment_lines(scan_result)
+    return SanitisedCommentBody(_truncate_comment_body("\n".join(body_lines)))
 
 
 def _insert_baseline_context_into_comment(
@@ -132,7 +148,7 @@ def _insert_baseline_context_into_comment(
     baseline_line: str,
 ) -> str:
     """Insert a baseline context line after the first header line of a comment body."""
-    lines = comment_body.split("\n", _COMMENT_BODY_SPLIT_MAX_PARTS)
+    lines = comment_body.split("\n", _COMMENT_BODY_SPLIT_MAXSPLIT)
     if len(lines) < _COMMENT_MIN_SECTION_COUNT:
         return baseline_line + "\n\n" + comment_body
     return "\n".join([lines[0], "", baseline_line, "", *lines[1:]])
