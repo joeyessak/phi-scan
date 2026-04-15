@@ -27,40 +27,47 @@ _SHIM_TO_CANONICAL: dict[str, str] = {
 }
 
 _SHIM_DOCSTRING_MARKER: str = "Compatibility shim"
+_MINIMUM_EXPORTED_NAMES: int = 1
 
 
 @pytest.fixture(
     params=list(_SHIM_TO_CANONICAL.items()),
     ids=list(_SHIM_TO_CANONICAL),
 )
-def shim_and_canonical(request: pytest.FixtureRequest) -> tuple[ModuleType, ModuleType]:
+def load_shim_and_canonical_modules(
+    request: pytest.FixtureRequest,
+) -> tuple[ModuleType, ModuleType]:
     shim_path, canonical_path = request.param
     return importlib.import_module(shim_path), importlib.import_module(canonical_path)
 
 
-def test_shim_imports_cleanly(shim_and_canonical: tuple[ModuleType, ModuleType]) -> None:
-    shim, _canonical = shim_and_canonical
+def test_shim_module_loads_without_error(
+    load_shim_and_canonical_modules: tuple[ModuleType, ModuleType],
+) -> None:
+    shim, _canonical = load_shim_and_canonical_modules
     assert shim is not None
 
 
-def test_shim_has_non_empty_all(shim_and_canonical: tuple[ModuleType, ModuleType]) -> None:
-    shim, _canonical = shim_and_canonical
+def test_shim_exports_non_empty_public_names(
+    load_shim_and_canonical_modules: tuple[ModuleType, ModuleType],
+) -> None:
+    shim, _canonical = load_shim_and_canonical_modules
     assert hasattr(shim, "__all__")
-    assert len(shim.__all__) > 0
+    assert len(shim.__all__) >= _MINIMUM_EXPORTED_NAMES
 
 
 def test_shim_docstring_marks_compatibility(
-    shim_and_canonical: tuple[ModuleType, ModuleType],
+    load_shim_and_canonical_modules: tuple[ModuleType, ModuleType],
 ) -> None:
-    shim, _canonical = shim_and_canonical
+    shim, _canonical = load_shim_and_canonical_modules
     assert shim.__doc__ is not None
     assert _SHIM_DOCSTRING_MARKER in shim.__doc__
 
 
-def test_shim_all_names_are_identity_equal_to_canonical(
-    shim_and_canonical: tuple[ModuleType, ModuleType],
+def test_shim_resolves_names_identical_to_canonical(
+    load_shim_and_canonical_modules: tuple[ModuleType, ModuleType],
 ) -> None:
-    shim, canonical = shim_and_canonical
+    shim, canonical = load_shim_and_canonical_modules
     for exported_name in shim.__all__:
         assert hasattr(canonical, exported_name), (
             f"canonical module missing attribute {exported_name!r}"
