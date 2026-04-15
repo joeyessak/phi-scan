@@ -27,8 +27,6 @@ _COMMENT_BADGE_VIOLATIONS: str = (
 )
 
 _MAX_COMMENT_LENGTH: int = 60_000
-# ``str.split(sep, maxsplit)`` returns at most ``maxsplit + 1`` items. This
-# constant is the ``maxsplit`` argument, not a count of resulting parts.
 _COMMENT_BODY_SPLIT_MAXSPLIT: int = 2
 _COMMENT_MIN_SECTION_COUNT: int = 2
 _BASELINE_CONTEXT_FORMAT: str = (
@@ -88,9 +86,7 @@ def _build_findings_table_lines(scan_result: ScanResult) -> list[str]:
             f"| {finding.confidence:.0%} |"
         )
     if findings_count > _MAX_FINDINGS_IN_COMMENT_TABLE:
-        rows.append(
-            f"| … and {findings_count - _MAX_FINDINGS_IN_COMMENT_TABLE} more | | | | |"
-        )
+        rows.append(f"| … and {findings_count - _MAX_FINDINGS_IN_COMMENT_TABLE} more | | | | |")
     return rows
 
 
