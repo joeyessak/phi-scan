@@ -47,8 +47,8 @@ committed configuration shared across the whole team.
 ```yaml
 # .pre-commit-config.yaml
 repos:
-  - repo: https://github.com/joeyessak/phi-scan
-    rev: v0.5.0
+  - repo: https://github.com/phiscanhq/phi-scan
+    rev: v0.6.1
     hooks:
       - id: phi-scan
 ```
@@ -70,8 +70,8 @@ With options:
 
 ```yaml
 repos:
-  - repo: https://github.com/joeyessak/phi-scan
-    rev: v0.5.0
+  - repo: https://github.com/phiscanhq/phi-scan
+    rev: v0.6.1
     hooks:
       - id: phi-scan
         args:

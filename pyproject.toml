@@ -40,10 +40,10 @@ dependencies = [
 phi-scan = "phi_scan.cli:app"
 
 [project.urls]
-Homepage = "https://github.com/joeyessak/phi-scan"
-Repository = "https://github.com/joeyessak/phi-scan"
-Issues = "https://github.com/joeyessak/phi-scan/issues"
-Changelog = "https://github.com/joeyessak/phi-scan/blob/main/CHANGELOG.md"
+Homepage = "https://github.com/phiscanhq/phi-scan"
+Repository = "https://github.com/phiscanhq/phi-scan"
+Issues = "https://github.com/phiscanhq/phi-scan/issues"
+Changelog = "https://github.com/phiscanhq/phi-scan/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
 nlp = ["presidio-analyzer>=2.0", "presidio-anonymizer>=2.0", "spacy>=3.7"]
