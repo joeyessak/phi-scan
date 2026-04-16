@@ -72,39 +72,7 @@ Plugin API v1 / v1.1 surface that motivates the minor-version bump._
 - **Corrected security documentation:** README tagline and Why PhiScan section now
   accurately reflect that the "no external network calls" guarantee applies by
   default; the optional AI review layer is explicitly qualified as an opt-in
-  exception. Archive members are now validated against
-  two guards before being read into memory: an absolute uncompressed size limit
-  (`ARCHIVE_MAX_MEMBER_UNCOMPRESSED_BYTES`, 100 MB) and a compression ratio ceiling
-  (`ARCHIVE_MAX_COMPRESSION_RATIO`, 200:1). Members that exceed either limit are
-  skipped with a `WARNING` log; scanning continues with remaining members.
-- **Webhook SSRF protection:** Webhook URLs are validated before any HTTP request.
-  `http://` scheme is rejected (only `https://` permitted). Requests to RFC1918,
-  loopback, link-local, CGNAT, and cloud metadata IP ranges are blocked by default.
-  Set `notifications.is_private_webhook_url_allowed: true` to permit self-hosted targets
-  on private networks.
-- **HTML email escaping:** All dynamic fields in email notification templates
-  (`repo`, `branch`, `file_path`, `category`, `severity`, `risk_level`) are now
-  escaped with `html.escape()` before interpolation, preventing XSS via crafted
-  branch or repository names.
-- **Corrected security documentation:** README tagline and Why PhiScan section now
-  accurately reflect that the "no external network calls" guarantee applies by
-  default; the optional AI review layer is explicitly qualified as an opt-in
   exception.
-
-### Added
-
-- **Multi-provider AI support:** AI confidence review now supports Anthropic, OpenAI, and
-  Google AI providers. Provider is inferred automatically from the model name:
-  `claude-*` → Anthropic, `gpt-*`/`o1`/`o3`/`o4` → OpenAI, `gemini-*` → Google.
-  Install the matching extra: `phi-scan[ai-anthropic]`, `phi-scan[ai-openai]`, or
-  `phi-scan[ai-google]`. The existing `phi-scan[ai]` meta-extra continues to install Anthropic.
-- **Provider-neutral configuration:** New `ai.enable_ai_review` key replaces the deprecated
-  `ai.enable_claude_review`; new `ai.model` field selects the model and determines the provider.
-  API keys are read from `ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or `GOOGLE_API_KEY` environment
-  variables — storing keys in `.phi-scanner.yml` is explicitly rejected with a clear error.
-- **AI token usage in audit log:** Each scan that uses AI review records `prompt_tokens`,
-  `completion_tokens`, and `estimated_cost_usd` in the SQLite audit trail for cost tracking
-  and compliance reporting.
 
 ### Deprecated
 
