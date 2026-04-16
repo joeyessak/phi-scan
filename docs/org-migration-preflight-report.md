@@ -207,8 +207,12 @@ confirmed by the maintainer out-of-band (maintainer-run check).
 
 - Current signing subject derived from OIDC claim issued to workflow
   runs: `repo:joeyessak/phi-scan:…`.
-- Verification command per `docs/supply-chain.md` line 246 (maintainer
-  may run against the latest `.sigstore.json` bundle before transfer):
+- Verification command per `docs/supply-chain.md` line 246. Note:
+  `v0.5.0` was built before the S11 Sigstore signing step was added
+  (PR #123, 2026-04-11) and therefore has no `.sigstore.json` bundle.
+  This command must be run against the first release ≥ v0.6.0 whose
+  workflow run executed the `Sign wheel and sdist with Sigstore (S11)`
+  step and whose GitHub Release assets include the bundle:
 
   ```bash
   cosign verify-blob \
@@ -244,15 +248,16 @@ confirmed by the maintainer out-of-band (maintainer-run check).
 | 6 | Collaborators / teams / `CODEOWNERS` enumerated | **READY** | §3.6 — solo admin, no `CODEOWNERS` |
 | 7 | PyPI owner + 2FA confirmed | **PENDING MAINTAINER** | Owner email confirmed via public API; 2FA status needs out-of-band check |
 | 8 | GHCR manifest reachable and current | **DEFERRED** | Out-of-scope for migration-go — see [`docs/org-migration-status.md`](org-migration-status.md). Post-migration hardening only. |
-| 9 | Sigstore bundle verifies under current subject | **PENDING MAINTAINER** | Commands listed in §4.3 |
+| 9 | Sigstore bundle verifies under current subject | **PENDING-UNTIL-SIGNED-RELEASE** | `v0.5.0` (2026-04-04) pre-dates S11 signing (PR #123, merged 2026-04-11) and has no `.sigstore.json` asset; gate bound to first release ≥ v0.6.0. Commands listed in §4.3. |
 | 10 | Draft migration notice prepared | **DONE** | [`docs/migration/communication-draft.md §1`](migration/communication-draft.md) |
 | 11 | Draft release-notes entry prepared | **DONE** | [`docs/migration/communication-draft.md §2`](migration/communication-draft.md) |
 | 12 | Migration ticket opened | **NOT STARTED** | §1.6 of checklist |
 | 13 | Maintainer "migration go" approval | **NOT GIVEN** | §1.6 of checklist — requested after this report is merged |
 
-**Overall:** No P0 blockers found. Six automated gates READY; two
-require maintainer-run verification (PyPI 2FA, Sigstore) before
-transfer; GHCR is **deferred** as out-of-scope for migration-go;
+**Overall:** No P0 blockers found. Six automated gates READY;
+PyPI 2FA cleared 2026-04-14; the Sigstore gate is **pending-until-
+signed-release** (bound to the first release ≥ v0.6.0 — see row 9 /
+§4.3); GHCR is **deferred** as out-of-scope for migration-go;
 drafts (rows 10, 11) are complete; the remaining operational tasks
 (rows 12, 13) are executed during §1.5–§1.6 of the checklist. Live
 status tracked in [`docs/org-migration-status.md`](org-migration-status.md).
