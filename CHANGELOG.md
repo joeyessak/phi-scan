@@ -9,6 +9,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 _No changes yet._
 
+## [0.6.2] - TBD
+
+### Changed
+
+- **README project description:** Softened compliance language throughout the
+  README and the `pyproject.toml` short description. Removed the "HIPAA & FHIR
+  compliant" phrasing from both the README tagline and the PyPI short
+  description; replaced with language that describes PhiScan as designed for
+  HIPAA-aligned and FHIR-based environments rather than claiming certification
+  or guaranteed compliance. The "HIPAA audit trail" feature bullet is now
+  "Audit trail designed for HIPAA-sensitive environments." No functional or
+  API changes — PyPI long description and short summary will be refreshed on
+  the next tagged release.
+
 ## [0.6.1] - TBD
 
 ### Fixed
@@ -223,7 +237,8 @@ Plugin API v1 / v1.1 surface that motivates the minor-version bump._
 - Git diff file extraction (`--diff` mode)
 - `.phi-scanignore` exclusion pattern support (gitignore-style via pathspec)
 
-[Unreleased]: https://github.com/phiscanhq/phi-scan/compare/v0.6.1...HEAD
+[Unreleased]: https://github.com/phiscanhq/phi-scan/compare/v0.6.2...HEAD
+[0.6.2]: https://github.com/phiscanhq/phi-scan/compare/v0.6.1...v0.6.2
 [0.6.1]: https://github.com/phiscanhq/phi-scan/compare/v0.6.0...v0.6.1
 [0.6.0]: https://github.com/phiscanhq/phi-scan/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/phiscanhq/phi-scan/compare/v0.3.0...v0.5.0

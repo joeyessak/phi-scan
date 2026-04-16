@@ -4,7 +4,7 @@ import phi_scan
 
 
 def test_version_is_defined() -> None:
-    assert phi_scan.__version__ == "0.6.1"
+    assert phi_scan.__version__ == "0.6.2"
 
 
 def test_app_name_is_defined() -> None:

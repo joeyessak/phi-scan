@@ -1,7 +1,7 @@
 [project]
 name = "phi-scan"
-version = "0.6.1"
-description = "PHI/PII Scanner for CI/CD pipelines. HIPAA & FHIR compliant. Local execution only."
+version = "0.6.2"
+description = "PHI/PII scanner for HIPAA-aligned and FHIR-based environments. Local-first execution for CI/CD pipelines."
 readme = "README.md"
 license = {file = "LICENSE"}
 requires-python = ">=3.12"
