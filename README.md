@@ -5,9 +5,7 @@
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 [![CI](https://github.com/phiscanhq/phi-scan/actions/workflows/ci.yml/badge.svg)](https://github.com/phiscanhq/phi-scan/actions/workflows/ci.yml)
 
-**HIPAA & FHIR compliant PHI/PII scanner for CI/CD pipelines. Local execution only — no PHI ever leaves your infrastructure (unless AI review is explicitly enabled).**
-
-PhiScan scans source code, configuration files, and structured data for Protected Health Information (PHI) and Personally Identifiable Information (PII) before it reaches your main branch. It integrates into any CI/CD pipeline and blocks pull requests that expose patient data.
+PHI/PII scanner designed for HIPAA-aligned and FHIR-based environments. Built for CI/CD pipelines with local-first execution—no PHI ever leaves your infrastructure unless explicitly configured. PhiScan analyzes source code, configuration files, and structured data to detect sensitive information before it reaches your main branch, helping teams reduce compliance risk and prevent accidental data exposure.
 
 ---
 
@@ -36,7 +34,7 @@ PHI found → exit code 1 → commit blocked.
 - **Baseline mode.** Adopt incrementally in existing codebases — only new findings block CI.
 - **9 output formats.** Table, JSON, SARIF, CSV, JUnit, GitLab Code Quality, GitLab SAST, PDF, and HTML enterprise reports.
 - **Inline suppression.** `# phi-scan:ignore` comments let developers acknowledge false positives without disabling the scanner.
-- **HIPAA audit trail.** Every scan is recorded in an immutable SQLite log. SHA-256 hashes only — raw PHI values are never stored.
+- **Audit trail designed for HIPAA-sensitive environments.** Every scan is recorded in an immutable SQLite log. SHA-256 hashes only — raw PHI values are never stored.
 - **Free forever.** All detection layers, output formats, CI integrations, compliance annotations, baseline mode, audit trail, and the plugin API ship in the MIT-licensed Community tier and will never be paywalled or intentionally degraded. See [docs/community-pro-cloud-matrix.md](docs/community-pro-cloud-matrix.md) for the full feature boundary.
 
 ---
