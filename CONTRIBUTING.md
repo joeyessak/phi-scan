@@ -26,7 +26,7 @@ setup, code standards, testing requirements, and pull request process.
 ### Clone and Install
 
 ```bash
-git clone https://github.com/joeyessak/phi-scan.git
+git clone https://github.com/phiscanhq/phi-scan.git
 cd phi-scan
 uv sync --extra nlp --extra hl7      # install with optional layers
 phi-scan setup                        # download spaCy model

@@ -236,14 +236,17 @@ the `sigstore` CLI:
 
 ```bash
 # Fetch the artifacts and bundles from the release
-gh release download v<version> --repo joeyessak/phi-scan \
+gh release download v<version> --repo phiscanhq/phi-scan \
     --pattern "*.whl" \
     --pattern "*.tar.gz" \
     --pattern "*.sigstore.json"
 
 # Verify each wheel against the expected GitHub Actions workload identity
+# Note: releases signed before the repository transfer (≤ v0.6.1) verify
+# under the old subject repo:joeyessak/phi-scan:…; releases signed after
+# transfer verify under repo:phiscanhq/phi-scan:…
 sigstore verify github \
-    --cert-identity "https://github.com/joeyessak/phi-scan/.github/workflows/release.yml@refs/tags/v<version>" \
+    --cert-identity "https://github.com/phiscanhq/phi-scan/.github/workflows/release.yml@refs/tags/v<version>" \
     --cert-oidc-issuer "https://token.actions.githubusercontent.com" \
     phi_scan-<version>-py3-none-any.whl
 ```

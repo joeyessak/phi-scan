@@ -3,7 +3,7 @@
 [![PyPI version](https://img.shields.io/pypi/v/phi-scan.svg)](https://pypi.org/project/phi-scan/)
 [![Python 3.12+](https://img.shields.io/badge/python-3.12%2B-blue.svg)](https://www.python.org/downloads/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![CI](https://github.com/joeyessak/phi-scan/actions/workflows/ci.yml/badge.svg)](https://github.com/joeyessak/phi-scan/actions/workflows/ci.yml)
+[![CI](https://github.com/phiscanhq/phi-scan/actions/workflows/ci.yml/badge.svg)](https://github.com/phiscanhq/phi-scan/actions/workflows/ci.yml)
 
 **HIPAA & FHIR compliant PHI/PII scanner for CI/CD pipelines. Local execution only — no PHI ever leaves your infrastructure (unless AI review is explicitly enabled).**
 
@@ -226,8 +226,8 @@ Full syntax: [docs/ignore-patterns.md](docs/ignore-patterns.md)
 ```yaml
 # .pre-commit-config.yaml
 repos:
-  - repo: https://github.com/joeyessak/phi-scan
-    rev: v0.5.0
+  - repo: https://github.com/phiscanhq/phi-scan
+    rev: v0.6.1
     hooks:
       - id: phi-scan
 ```
@@ -263,7 +263,7 @@ repos:
 
 Copy-paste templates for all CI platforms: [docs/ci-cd-integration.md](docs/ci-cd-integration.md)
 
-> **GitHub Action:** The [`phi-scan-action`](https://github.com/joeyessak/phi-scan-action)
+> **GitHub Action:** The [`phi-scan-action`](https://github.com/phiscanhq/phi-scan-action)
 > composite action provides one-liner GitHub CI/CD integration with SARIF upload,
 > PR comment, diff-only scanning, and AI review support. GitHub Marketplace
 > publication is deferred pending org migration completion + post-pristine signoff.

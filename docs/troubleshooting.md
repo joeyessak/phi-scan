@@ -341,7 +341,7 @@ phi-scan explain config      # configuration reference
 ## Reporting a Bug
 
 If you encounter a bug not covered here, open an issue at
-[github.com/joeyessak/phi-scan/issues](https://github.com/joeyessak/phi-scan/issues)
+[github.com/phiscanhq/phi-scan/issues](https://github.com/phiscanhq/phi-scan/issues)
 and include:
 
 - PhiScan version: `phi-scan --version`

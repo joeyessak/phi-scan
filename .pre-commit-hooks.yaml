@@ -4,7 +4,7 @@
 # Add the hook to your project by creating or editing .pre-commit-config.yaml:
 #
 #   repos:
-#     - repo: https://github.com/joeyessak/phi-scan
+#     - repo: https://github.com/phiscanhq/phi-scan
 #       rev: v0.1.0
 #       hooks:
 #         - id: phi-scan

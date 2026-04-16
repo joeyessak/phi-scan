@@ -223,7 +223,9 @@ Plugin API v1 / v1.1 surface that motivates the minor-version bump._
 - Git diff file extraction (`--diff` mode)
 - `.phi-scanignore` exclusion pattern support (gitignore-style via pathspec)
 
-[Unreleased]: https://github.com/joeyessak/phi-scan/compare/v0.5.0...HEAD
-[0.5.0]: https://github.com/joeyessak/phi-scan/compare/v0.3.0...v0.5.0
-[0.3.0]: https://github.com/joeyessak/phi-scan/compare/v0.1.0...v0.3.0
-[0.1.0]: https://github.com/joeyessak/phi-scan/releases/tag/v0.1.0
+[Unreleased]: https://github.com/phiscanhq/phi-scan/compare/v0.6.1...HEAD
+[0.6.1]: https://github.com/phiscanhq/phi-scan/compare/v0.6.0...v0.6.1
+[0.6.0]: https://github.com/phiscanhq/phi-scan/compare/v0.5.0...v0.6.0
+[0.5.0]: https://github.com/phiscanhq/phi-scan/compare/v0.3.0...v0.5.0
+[0.3.0]: https://github.com/phiscanhq/phi-scan/compare/v0.1.0...v0.3.0
+[0.1.0]: https://github.com/phiscanhq/phi-scan/releases/tag/v0.1.0

@@ -110,7 +110,7 @@ Drop-in CI/CD templates for all major platforms and a production Docker image.
 
 - Native templates: GitHub Actions, GitLab CI, Azure Pipelines, Bitbucket Pipelines,
   CircleCI orb, AWS CodeBuild — each with native report group and annotation support
-- `joeyessak/phi-scan-action` composite action — one-liner GitHub CI/CD integration
+- `phiscanhq/phi-scan-action` composite action — one-liner GitHub CI/CD integration
   with SARIF upload, PR comment, diff-only scanning, and AI review support
 - Multi-arch Docker image (`ghcr.io/joeyessak/phi-scan`, amd64/arm64)
 
@@ -130,7 +130,7 @@ operates at full capability without this phase.
 - ✅ Disabled by default; opt-in via `ai.enable_ai_review: true` in `.phi-scanner.yml`
 
 > **Note:** GitHub Marketplace publication of
-> [`phi-scan-action`](https://github.com/joeyessak/phi-scan-action) is deferred
+> [`phi-scan-action`](https://github.com/phiscanhq/phi-scan-action) is deferred
 > until the GitHub org migration is complete. The composite action is fully
 > functional; only the Marketplace listing is pending.
 
