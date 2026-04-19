@@ -4,7 +4,12 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from phi_scan.constants import SEVERITY_RANK, PhiCategory, SeverityLevel
+from phi_scan.constants import (
+    CODE_CONTEXT_REDACTED_VALUE,
+    SEVERITY_RANK,
+    PhiCategory,
+    SeverityLevel,
+)
 from phi_scan.models import ScanFinding
 from phi_scan.report.v2.models import FileAggregate, LineAggregate, RemediationAction
 
@@ -12,6 +17,7 @@ _TOP_ACTIONS_COUNT: int = 5
 _HOTSPOT_CATEGORY_THRESHOLD: int = 2
 _QUASI_COMBO_THRESHOLD: int = 5
 _HINT_TRUNCATION_LENGTH: int = 60
+_COLLAPSED_INFILL: str = " … "
 
 _ACTION_TITLE_MAP: dict[PhiCategory, str] = {
     PhiCategory.SSN: "Remove Social Security Numbers",
@@ -66,6 +72,54 @@ def _combine_remediation_hints(findings: tuple[ScanFinding, ...]) -> str:
     return "; ".join(seen)
 
 
+def _split_context(context: str) -> tuple[str, str] | None:
+    """Split a code_context into (prefix, suffix) around the [REDACTED] marker."""
+    marker = CODE_CONTEXT_REDACTED_VALUE
+    marker_position = context.find(marker)
+    if marker_position == -1:
+        return None
+    prefix = context[:marker_position]
+    suffix = context[marker_position + len(marker) :]
+    return (prefix, suffix)
+
+
+def _build_merged_display_context(findings: tuple[ScanFinding, ...]) -> str:
+    """Build a preview that redacts every finding's span on the line.
+
+    Each ``code_context`` is the source line with one match span replaced by
+    [REDACTED]; its prefix and suffix therefore contain raw source text,
+    including any OTHER findings' raw values. Using a single finding's
+    context would leak those other spans.
+
+    To stay invariant-safe without re-reading disk, we pick the finding with
+    the shortest prefix (earliest span) — its prefix contains no other
+    finding's span — and the finding with the shortest suffix (latest
+    span) — same property for the suffix — and join them around a
+    collapsed ``[REDACTED] … [REDACTED]`` middle. We lose in-between
+    context, but never leak raw PHI.
+    """
+    first_context = findings[0].code_context
+    if len(findings) == 1:
+        return first_context
+
+    split_parts: list[tuple[str, str]] = []
+    for finding in findings:
+        parts = _split_context(finding.code_context)
+        if parts is None:
+            return first_context
+        split_parts.append(parts)
+
+    earliest_prefix = min(split_parts, key=lambda pair: len(pair[0]))[0]
+    latest_suffix = min(split_parts, key=lambda pair: len(pair[1]))[1]
+
+    distinct_spans = {(prefix, suffix) for prefix, suffix in split_parts}
+    if len(distinct_spans) == 1:
+        return first_context
+
+    marker = CODE_CONTEXT_REDACTED_VALUE
+    return f"{earliest_prefix}{marker}{_COLLAPSED_INFILL}{marker}{latest_suffix}"
+
+
 def group_by_line(findings: tuple[ScanFinding, ...]) -> list[LineAggregate]:
     """Group findings by (file_path, line_number) into LineAgggregates."""
     buckets: dict[tuple[Path, int], list[ScanFinding]] = {}
@@ -85,7 +139,7 @@ def group_by_line(findings: tuple[ScanFinding, ...]) -> list[LineAggregate]:
                 findings=frozen_findings,
                 highest_severity=_highest_severity(line_findings),
                 category_counts=_build_category_counts(frozen_findings),
-                display_context=line_findings[0].code_context,
+                display_context=_build_merged_display_context(frozen_findings),
                 combined_fix=_combine_remediation_hints(frozen_findings),
             )
         )
@@ -119,18 +173,24 @@ def group_by_file(line_aggregates: list[LineAggregate]) -> list[FileAggregate]:
 
 
 def dedupe_remediations(findings: tuple[ScanFinding, ...]) -> list[RemediationAction]:
-    """Group findings by remediation_hint into deduplicated RemediationActions."""
-    buckets: dict[str, list[ScanFinding]] = {}
+    """Group findings by HIPAA category into deduplicated RemediationActions.
+
+    Keying by hipaa_category (rather than the raw hint string) collapses
+    per-invocation variations — e.g., QUASI_IDENTIFIER_COMBINATION emits a
+    differently worded hint for each combination it sees, but the action
+    ("Break up the combination") is the same and belongs on one card.
+    """
+    buckets: dict[PhiCategory, list[ScanFinding]] = {}
     for finding in findings:
-        hint = finding.remediation_hint
-        if not hint:
+        if not finding.remediation_hint:
             continue
-        if hint not in buckets:
-            buckets[hint] = []
-        buckets[hint].append(finding)
+        category = finding.hipaa_category
+        if category not in buckets:
+            buckets[category] = []
+        buckets[category].append(finding)
 
     actions: list[RemediationAction] = []
-    for hint, grouped_findings in buckets.items():
+    for category, grouped_findings in buckets.items():
         highest_sev = _highest_severity(grouped_findings)
         mean_confidence = sum(f.confidence for f in grouped_findings) / len(grouped_findings)
         affected: list[tuple[Path, int]] = []
@@ -141,14 +201,14 @@ def dedupe_remediations(findings: tuple[ScanFinding, ...]) -> list[RemediationAc
                 seen_lines.add(key)
                 affected.append(key)
         affected.sort(key=lambda pair: (pair[0], pair[1]))
-        primary_category = grouped_findings[0].hipaa_category
-        title = _ACTION_TITLE_MAP.get(primary_category, hint[:_HINT_TRUNCATION_LENGTH])
+        representative_hint = max((f.remediation_hint for f in grouped_findings), key=len)
+        title = _ACTION_TITLE_MAP.get(category, representative_hint[:_HINT_TRUNCATION_LENGTH])
 
         actions.append(
             RemediationAction(
-                remediation_hint=hint,
+                remediation_hint=representative_hint,
                 title=title,
-                hipaa_category=primary_category,
+                hipaa_category=category,
                 finding_count=len(grouped_findings),
                 highest_severity=highest_sev,
                 mean_confidence=mean_confidence,
