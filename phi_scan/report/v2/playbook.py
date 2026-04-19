@@ -5,6 +5,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from rich import box as rich_box
+from rich.columns import Columns
 from rich.console import Console
 from rich.markup import escape as escape_markup
 from rich.panel import Panel
@@ -105,26 +106,43 @@ def _render_action_card(
     action: RemediationAction,
     index: int,
 ) -> None:
-    """Render a single remediation action card."""
+    """Render a remediation action card with count and severity on the right."""
     border_style = _SEVERITY_BORDER_STYLE[action.highest_severity]
     pill_style = _SEVERITY_PILL_STYLE[action.highest_severity]
     pill = f"[{pill_style}] {action.highest_severity.value.upper()} [/{pill_style}]"
     dots = _render_confidence_dots(action.mean_confidence)
-
     lines_str = _format_lines_compact(action.affected_lines)
-
     finding_word = "findings" if action.finding_count != 1 else "finding"
-    count_label = f"[bold]{action.finding_count}[/bold] {finding_word}"
+    hint_display = action.remediation_hint[:_MAX_HINT_DISPLAY_LENGTH]
 
-    body = (
-        f" ({index})  [bold]{escape_markup(action.title)}[/bold]"
-        f"     {count_label}  {pill}\n"
-        f"      [dim]{escape_markup(action.remediation_hint[:_MAX_HINT_DISPLAY_LENGTH])}[/dim]\n"
-        f"      [dim]{lines_str}[/dim]\n"
-        f"      {dots}"
+    left_body = (
+        f" ({index})  [bold]{escape_markup(action.title)}[/bold]\n"
+        f"      [dim]{escape_markup(hint_display)}[/dim]\n"
+        f"      [dim]{lines_str}[/dim]"
+    )
+    right_body = f"[bold]{action.finding_count}[/bold]\n[dim]{finding_word}[/dim]\n{dots}\n{pill}"
+
+    left_panel = Panel(
+        left_body,
+        box=rich_box.SIMPLE,
+        expand=True,
+        padding=(0, 0),
+    )
+    right_panel = Panel(
+        right_body,
+        box=rich_box.SIMPLE,
+        expand=False,
+        padding=(0, 1),
     )
 
-    console.print(Panel(body, box=rich_box.ROUNDED, border_style=border_style, padding=(0, 1)))
+    console.print(
+        Panel(
+            Columns([left_panel, right_panel], expand=True),
+            box=rich_box.ROUNDED,
+            border_style=border_style,
+            padding=(0, 0),
+        )
+    )
 
 
 def render_remediation_playbook(

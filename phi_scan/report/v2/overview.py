@@ -24,6 +24,7 @@ from phi_scan.report.v2.glyphs import (
     BAR_FILLED,
     CLEAN_MARKER,
     EM_DASH,
+    MULTIPLIER,
     SECTION_BAR,
     SEPARATOR,
     VIOLATION_MARKER,
@@ -128,10 +129,14 @@ def render_status_banner(
     )
 
 
+_STAT_BAR_WIDTH: int = 6
+
+
 def _render_stat_tile(label: str, value: int, color: str, subtitle: str = "") -> Panel:
-    """Build a single stat tile panel."""
+    """Build a single stat tile panel with colored accent bar."""
     value_text = f"[{color}]{value}[/{color}]"
-    body = f"[dim]{label}[/dim]\n[bold]{value_text}[/bold]"
+    accent_bar = f"[{color}]{BAR_FILLED * _STAT_BAR_WIDTH}[/{color}]"
+    body = f"[dim]{label}[/dim]\n[bold]{value_text}[/bold]\n{accent_bar}"
     if subtitle:
         body += f"\n[dim]{subtitle}[/dim]"
     return Panel(body, box=rich_box.ROUNDED, expand=True, padding=(0, 1))
@@ -182,12 +187,12 @@ def render_top_actions(
         pill = f"[{pill_style}] {action.highest_severity.value.upper()} [/{pill_style}]"
 
         lines_str = _format_affected_lines_compact(action.affected_lines)
-        title_with_count = action.title
+        title_display = action.title
         if action.finding_count > 1:
-            title_with_count = f"{action.title}"
+            title_display = f"{action.title} ({MULTIPLIER}{action.finding_count})"
 
         body = (
-            f" [{index}]  [bold]{escape_markup(title_with_count)}[/bold]"
+            f" [{index}]  [bold]{escape_markup(title_display)}[/bold]"
             f"     {pill}\n      [dim]{lines_str}[/dim]"
         )
         console.print(Panel(body, box=rich_box.ROUNDED, padding=(0, 1)))

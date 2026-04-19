@@ -75,6 +75,7 @@ def display_rich_scan_results_v2(
             total_line_count=total_line_count,
             severity_threshold=expand_cutoff,
             is_verbose=is_verbose,
+            scan_target=scan_target,
         )
 
         render_remediation_playbook(

@@ -100,6 +100,7 @@ def render_findings_by_line(
     total_line_count: int,
     severity_threshold: SeverityLevel,
     is_verbose: bool,
+    scan_target: str = "",
 ) -> None:
     """Render the FINDINGS BY LINE section with file grouping."""
     console.print()
@@ -108,8 +109,11 @@ def render_findings_by_line(
         f"[{_SECTION_BAR_STYLE}]{SECTION_BAR}[/{_SECTION_BAR_STYLE}] "
         f"[{_SECTION_HEADER_STYLE}]FINDINGS BY LINE[/{_SECTION_HEADER_STYLE}]"
     )
+    target_prefix = f"{escape_markup(scan_target)}  {SEPARATOR}  " if scan_target else ""
     console.print(
-        f"[dim]{total_finding_count} findings collapsed into {total_line_count} unique lines[/dim]"
+        f"[dim]{target_prefix}"
+        f"{total_finding_count} findings collapsed into "
+        f"{total_line_count} unique lines[/dim]"
     )
     console.print()
 

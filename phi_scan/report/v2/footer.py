@@ -53,15 +53,14 @@ def _build_violation_right(report_path: Path | None) -> str:
         next_steps += f"  {ARROW}  open   {report_path}\n"
 
     next_steps += (
-        f"  {ARROW}  run    phi-scan fix --interactive\n"
-        f"  {ARROW}  rerun  phi-scan scan . --verbose\n"
+        f"  {ARROW}  run    phi-scan fix --interactive\n  {ARROW}  view   phi-scan show --line 6\n"
     )
 
     exit_panel = (
         "\n[bold red]EXIT 1[/bold red]\n"
         "[dim]Pipeline blocked until findings are\n"
-        "remediated or explicitly suppressed with\n"
-        "[bold yellow]# phi-scan:ignore[/bold yellow] comments.[/dim]"
+        "remediated or explicitly waived with\n"
+        "[bold yellow]--allow-findings <id,id,...>[/bold yellow][/dim]"
     )
 
     return next_steps + exit_panel
