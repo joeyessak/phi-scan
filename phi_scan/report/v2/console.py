@@ -1,8 +1,8 @@
 """V2 terminal report renderer — public entry point.
 
 Composes overview, findings-by-line, remediation playbook, and scan-complete
-footer into a single terminal report. Called from display_rich_scan_results_v2
-when --report-format v2 or PHI_SCAN_REPORT_V2=1 is active.
+footer into a single terminal report. This is the default renderer; the legacy
+v1 renderer is retained behind --report-format v1 and will be removed in 0.8.0.
 """
 
 from __future__ import annotations

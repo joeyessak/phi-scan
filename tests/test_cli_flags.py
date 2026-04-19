@@ -29,6 +29,7 @@ from phi_scan.cli import app
 from phi_scan.constants import (
     DEFAULT_BASELINE_FILENAME,
     EXIT_CODE_CLEAN,
+    EXIT_CODE_ERROR,
     EXIT_CODE_VIOLATION,
     OutputFormat,
 )
@@ -49,6 +50,12 @@ _SARIF_VERSION_VALUE: str = "2.1.0"
 _JUNIT_TESTSUITE_TAG: str = "testsuite"
 _CSV_HEADER_FRAGMENT: str = "file_path"
 _JSON_FINDINGS_KEY: str = "findings"
+
+# The v2 footer section is labelled "SCAN COMPLETE"; this string appears
+# exclusively in the v2 renderer and is a reliable marker for v2 output.
+_V2_FOOTER_MARKER: str = "SCAN COMPLETE"
+_DEPRECATION_WARNING_FRAGMENT: str = "DeprecationWarning"
+_DEPRECATION_REMOVAL_TARGET: str = "0.8.0"
 
 
 # ---------------------------------------------------------------------------
@@ -326,3 +333,141 @@ class TestSeverityThresholdWithOutput:
         assert result.exit_code == EXIT_CODE_CLEAN
         parsed = json.loads(result.output)
         assert _JSON_FINDINGS_KEY in parsed
+
+
+# ---------------------------------------------------------------------------
+# --report-format default and v1 deprecation
+# ---------------------------------------------------------------------------
+
+
+class TestReportFormatDefaultAndV1Deprecation:
+    """v2 is the default terminal renderer; v1 is a deprecated escape hatch.
+
+    These tests pin the graduation contract established in 0.7.0:
+      - Default ``scan`` invocation uses v2 (no flag required)
+      - Passing ``--report-format v1`` emits a DeprecationWarning to stderr
+        naming the 0.8.0 removal target — regardless of ``--output`` mode, so
+        CI pipelines using ``--report-format v1 --output json`` still see it
+      - ``--quiet`` suppresses the deprecation line alongside all other output
+      - Unknown ``--report-format`` values are rejected with a clear stderr
+        message and a non-zero exit code (no silent fall-through to v2)
+      - JSON/SARIF/exit-code contracts are unaffected by renderer choice
+    """
+
+    def test_default_scan_renders_v2_output(self, tmp_path: Path) -> None:
+        """Scanning without --report-format produces v2 output."""
+        _write_phi_file(tmp_path)
+        runner = CliRunner()
+
+        result = runner.invoke(app, ["scan", str(tmp_path)])
+
+        assert result.exit_code == EXIT_CODE_VIOLATION
+        assert _V2_FOOTER_MARKER in result.stdout
+
+    def test_default_scan_does_not_emit_deprecation_warning(self, tmp_path: Path) -> None:
+        """No deprecation notice is printed when v2 (the default) is used.
+
+        Writes a PHI fixture so the full rendering path executes — a test
+        against an empty directory would pass vacuously even if the gate logic
+        were broken.
+        """
+        _write_phi_file(tmp_path)
+        runner = CliRunner()
+
+        result = runner.invoke(app, ["scan", str(tmp_path)])
+
+        assert _DEPRECATION_WARNING_FRAGMENT not in result.stdout
+        assert _DEPRECATION_WARNING_FRAGMENT not in result.stderr
+
+    def test_explicit_v1_flag_emits_deprecation_warning_on_stderr(self, tmp_path: Path) -> None:
+        """``--report-format v1`` prints a DeprecationWarning to stderr naming 0.8.0."""
+        _write_phi_file(tmp_path)
+        runner = CliRunner()
+
+        result = runner.invoke(
+            app,
+            ["scan", str(tmp_path), "--report-format", "v1"],
+        )
+
+        assert _DEPRECATION_WARNING_FRAGMENT in result.stderr
+        assert _DEPRECATION_REMOVAL_TARGET in result.stderr
+        # stdout carries the rendered report, never the deprecation line
+        assert _DEPRECATION_WARNING_FRAGMENT not in result.stdout
+
+    def test_v1_deprecation_warning_fires_in_json_mode(self, tmp_path: Path) -> None:
+        """CI pipelines using ``--report-format v1 --output json`` still see the
+        notice — the deprecation must not be gated on rich-terminal mode."""
+        _write_phi_file(tmp_path)
+        runner = CliRunner()
+
+        result = runner.invoke(
+            app,
+            [
+                "scan",
+                str(tmp_path),
+                "--report-format",
+                "v1",
+                "--output",
+                OutputFormat.JSON.value,
+            ],
+        )
+
+        assert _DEPRECATION_WARNING_FRAGMENT in result.stderr
+        # stdout stays pure JSON — the deprecation goes to stderr, not stdout
+        parsed = json.loads(result.stdout)
+        assert _JSON_FINDINGS_KEY in parsed
+
+    def test_quiet_suppresses_v1_deprecation_warning(self, tmp_path: Path) -> None:
+        """``--quiet`` suppresses the v1 deprecation line alongside all other output."""
+        _write_phi_file(tmp_path)
+        runner = CliRunner()
+
+        result = runner.invoke(
+            app,
+            ["scan", str(tmp_path), "--report-format", "v1", "--quiet"],
+        )
+
+        assert _DEPRECATION_WARNING_FRAGMENT not in result.stdout
+        assert _DEPRECATION_WARNING_FRAGMENT not in result.stderr
+
+    def test_unknown_report_format_exits_with_error(self, tmp_path: Path) -> None:
+        """Unknown --report-format values are rejected with a clear stderr
+        message and a non-zero exit code — no silent fall-through to v2."""
+        runner = CliRunner()
+
+        result = runner.invoke(
+            app,
+            ["scan", str(tmp_path), "--report-format", "v3"],
+        )
+
+        assert result.exit_code == EXIT_CODE_ERROR
+        assert "v3" in result.stderr
+        assert "v1" in result.stderr
+        assert "v2" in result.stderr
+
+    def test_renderer_choice_does_not_affect_json_output(self, tmp_path: Path) -> None:
+        """JSON output is identical whether v1 or v2 is selected — structured
+        contracts are independent of the terminal renderer."""
+        _write_phi_file(tmp_path)
+        runner = CliRunner()
+
+        v2_result = runner.invoke(
+            app,
+            ["scan", str(tmp_path), "--output", OutputFormat.JSON.value],
+        )
+        v1_result = runner.invoke(
+            app,
+            [
+                "scan",
+                str(tmp_path),
+                "--output",
+                OutputFormat.JSON.value,
+                "--report-format",
+                "v1",
+            ],
+        )
+
+        assert v2_result.exit_code == v1_result.exit_code == EXIT_CODE_VIOLATION
+        v2_parsed = json.loads(v2_result.stdout)
+        v1_parsed = json.loads(v1_result.stdout)
+        assert len(v2_parsed[_JSON_FINDINGS_KEY]) == len(v1_parsed[_JSON_FINDINGS_KEY])

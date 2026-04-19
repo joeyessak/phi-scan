@@ -9,6 +9,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 _No changes yet._
 
+## [0.7.0] - TBD
+
+### Changed
+
+- **v2 terminal renderer is now the default.** The redesigned grouped-output
+  renderer (introduced behind `--report-format v2` in 0.6.x) is now the default
+  `table` output. v2 aggregates findings by line, deduplicates remediation
+  hints into a single playbook, and degrades cleanly under `NO_COLOR`, `CI=true`,
+  and non-TTY (piped) environments — verified before release.
+- **Non-breaking for CI pipelines.** This change is user-visible but non-breaking
+  for anything parsing `--output json`, `--output sarif`, or exit codes. The
+  `table` renderer's visual layout is not a stable contract and has never been;
+  CI owners relying on structured output are safe.
+- **Documentation:** Added an explicit "terminal output is not a stable
+  interface" note to the README and `--report-format` help text, directing
+  programmatic consumers to JSON or SARIF.
+
+### Deprecated
+
+- **`--report-format v1` is deprecated** and will be **removed in phi-scan
+  0.8.0** (scheduled 2026-07). Passing `--report-format v1` continues to render
+  the legacy output for one release but now prints a `DeprecationWarning` line
+  to stderr pointing at `--output json` / `--output sarif` for stable
+  machine-readable output. The `PHI_SCAN_REPORT_V2` environment variable has
+  been removed — it was an opt-in for v2 during the flagged-preview period and
+  is redundant now that v2 is the default.
+
 ## [0.6.2] - TBD
 
 ### Changed

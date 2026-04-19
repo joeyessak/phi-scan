@@ -121,6 +121,13 @@ phi-scan scan . --output sarif --report-path phi-scan-results.sarif
 
 PDF and HTML reports include a compliance control matrix when `--framework` is specified.
 
+> **Terminal output is not a stable interface.** The default `table` renderer is
+> designed for human consumption and may change between releases without a
+> deprecation cycle. For programmatic consumption — CI gates, dashboards,
+> anything that greps or parses scan output — use `--output json` or
+> `--output sarif`. Exit codes, JSON schemas, and SARIF payloads are the stable
+> machine-readable contracts.
+
 ---
 
 ## Compliance Framework Annotation

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from typing import Annotated
 
@@ -128,13 +127,22 @@ _SCAN_WORKERS_HELP: str = (
     "Output ordering is deterministic regardless of thread completion order."
 )
 _SCAN_REPORT_FORMAT_HELP: str = (
-    "Terminal report format: v1 (current default) or v2 (redesigned grouped output). "
-    "Also settable via PHI_SCAN_REPORT_V2=1 environment variable."
+    "Terminal report format: v2 (default, redesigned grouped output) or v1 "
+    "(deprecated, removed in 0.8.0). Terminal output is not a stable interface — "
+    "use --output json or --output sarif for programmatic consumption."
 )
 _REPORT_FORMAT_V2: str = "v2"
 _REPORT_FORMAT_V1: str = "v1"
-_REPORT_FORMAT_ENV_VAR: str = "PHI_SCAN_REPORT_V2"
-_REPORT_FORMAT_ENV_TRUTHY: str = "1"
+_VALID_REPORT_FORMATS: frozenset[str] = frozenset({_REPORT_FORMAT_V1, _REPORT_FORMAT_V2})
+_REPORT_FORMAT_INVALID_ERROR: str = (
+    "Invalid --report-format value: {value!r}. Expected one of: {valid}."
+)
+_REPORT_FORMAT_V1_DEPRECATION_NOTICE: str = (
+    "DeprecationWarning: --report-format v1 is deprecated and will be removed in "
+    "phi-scan 0.8.0. The v2 renderer is now the default. Terminal output is not a "
+    "stable interface — use --output json or --output sarif for programmatic "
+    "consumption.\n"
+)
 
 _AUDIT_WRITE_FAILURE_WARNING: str = "Audit log write failed — scan result not persisted: {error}"
 _AUDIT_KEY_MISSING_DEBUG: str = (
@@ -214,6 +222,23 @@ def _resolve_framework_flag(framework_flag_value: str | None) -> frozenset[Compl
     except InvalidFrameworkError as framework_error:
         typer.echo(_FRAMEWORK_PARSE_ERROR.format(error=framework_error), err=True)
         raise typer.Exit(code=EXIT_CODE_ERROR) from framework_error
+
+
+def _resolve_report_format(report_format_value: str) -> bool:
+    """Validate ``--report-format`` and return whether v2 rendering is selected.
+
+    Unknown values are rejected with a clear stderr message and a non-zero exit
+    code rather than silently resolving to a default; this keeps typos like
+    ``--report-format v3`` from masquerading as a valid v2 request.
+    """
+    if report_format_value not in _VALID_REPORT_FORMATS:
+        valid = ", ".join(sorted(_VALID_REPORT_FORMATS))
+        typer.echo(
+            _REPORT_FORMAT_INVALID_ERROR.format(value=report_format_value, valid=valid),
+            err=True,
+        )
+        raise typer.Exit(code=EXIT_CODE_ERROR)
+    return report_format_value == _REPORT_FORMAT_V2
 
 
 def _collect_scan_targets_for_phase(
@@ -307,7 +332,7 @@ def scan(
     ] = _DEFAULT_WORKER_COUNT,
     report_format: Annotated[
         str, typer.Option("--report-format", help=_SCAN_REPORT_FORMAT_HELP)
-    ] = _REPORT_FORMAT_V1,
+    ] = _REPORT_FORMAT_V2,
 ) -> None:
     """Scan a directory or file for PHI/PII.
 
@@ -321,10 +346,9 @@ def scan(
     output_format_enum = resolve_output_format(output_format)
     enabled_frameworks = _resolve_framework_flag(framework)
     is_rich_mode = not is_quiet and output_format_enum is OutputFormat.TABLE
-    is_v2 = (
-        report_format == _REPORT_FORMAT_V2
-        or os.environ.get(_REPORT_FORMAT_ENV_VAR) == _REPORT_FORMAT_ENV_TRUTHY
-    )
+    is_v2 = _resolve_report_format(report_format)
+    if report_format == _REPORT_FORMAT_V1 and not is_quiet:
+        typer.echo(_REPORT_FORMAT_V1_DEPRECATION_NOTICE, err=True)
     with display_status_spinner(_SPINNER_CONFIG_LOAD_MESSAGE, is_active=is_rich_mode):
         scan_config = load_scan_config(config_path, severity_threshold)
     if is_rich_mode and not is_v2:
