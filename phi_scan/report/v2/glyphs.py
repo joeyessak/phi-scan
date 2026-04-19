@@ -1,25 +1,37 @@
 """Platform-aware glyph constants for the v2 terminal renderer.
 
 Windows legacy consoles use codepage 1252 which cannot encode most Unicode
-box-drawing and symbol characters.  This module detects the platform at
-import time and exposes ASCII-safe fallbacks on Windows.
+box-drawing and symbol characters.  This module checks the stdout encoding
+at import time: if it supports UTF-8 (Linux, macOS, or Windows Terminal
+with PYTHONUTF8=1) the full Unicode glyphs are used; otherwise ASCII-safe
+fallbacks are selected.
 """
 
 from __future__ import annotations
 
 import sys
 
-_IS_WINDOWS: bool = sys.platform == "win32"
 
-VIOLATION_MARKER: str = "[!]" if _IS_WINDOWS else "\u26a0"
-CLEAN_MARKER: str = "[ok]" if _IS_WINDOWS else "\u2713"
-SECTION_BAR: str = "|" if _IS_WINDOWS else "\u258e"
-PREVIEW_MARKER: str = ">" if _IS_WINDOWS else "\u25b8"
-BAR_FILLED: str = "#" if _IS_WINDOWS else "\u2588"
-CONFIDENCE_DOT_FILLED: str = "*" if _IS_WINDOWS else "\u25cf"
-CONFIDENCE_DOT_EMPTY: str = "." if _IS_WINDOWS else "\u25cb"
-SEPARATOR: str = "-" if _IS_WINDOWS else "\u00b7"
-MULTIPLIER: str = "x" if _IS_WINDOWS else "\u00d7"
-ARROW: str = "->" if _IS_WINDOWS else "\u2192"
-EM_DASH: str = "--" if _IS_WINDOWS else "\u2014"
-EN_DASH: str = "-" if _IS_WINDOWS else "\u2013"
+def _stdout_supports_utf8() -> bool:
+    """Return True when stdout can encode Unicode glyphs."""
+    try:
+        encoding = (sys.stdout.encoding or "").lower().replace("-", "")
+        return encoding in ("utf8", "utf_8")
+    except (AttributeError, LookupError):
+        return False
+
+
+_USE_UNICODE: bool = _stdout_supports_utf8()
+
+VIOLATION_MARKER: str = "\u26a0" if _USE_UNICODE else "[!]"
+CLEAN_MARKER: str = "\u2713" if _USE_UNICODE else "[ok]"
+SECTION_BAR: str = "\u258e" if _USE_UNICODE else "|"
+PREVIEW_MARKER: str = "\u25b8" if _USE_UNICODE else ">"
+BAR_FILLED: str = "\u2588" if _USE_UNICODE else "#"
+CONFIDENCE_DOT_FILLED: str = "\u25cf" if _USE_UNICODE else "*"
+CONFIDENCE_DOT_EMPTY: str = "\u25cb" if _USE_UNICODE else "."
+SEPARATOR: str = "\u00b7" if _USE_UNICODE else "-"
+MULTIPLIER: str = "\u00d7" if _USE_UNICODE else "x"
+ARROW: str = "\u2192" if _USE_UNICODE else "->"
+EM_DASH: str = "\u2014" if _USE_UNICODE else "--"
+EN_DASH: str = "\u2013" if _USE_UNICODE else "-"
