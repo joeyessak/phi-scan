@@ -49,11 +49,14 @@ _STAT_HOTSPOTS: str = "HOTSPOTS"
 
 _BAR_MAX_WIDTH: int = 40
 _BAR_DENOMINATOR_FLOOR: int = 1
+_BAR_MIN_FILLED: int = 0
 _MAX_DISPLAYED_AFFECTED_LINES: int = 8
 _NAME_COLUMN_WIDTH: int = 16
 _COUNT_COLUMN_WIDTH: int = 5
 _STAT_TILE_COUNT: int = 5
 _STAT_TILE_BAR_WIDTH: int = 12
+
+_KNOWN_PHI_CATEGORY_VALUES: frozenset[str] = frozenset(member.value for member in PhiCategory)
 
 _SEVERITY_BAR_COLORS: dict[SeverityLevel, str] = {
     SeverityLevel.HIGH: "red",
@@ -164,7 +167,7 @@ def _render_proportional_bar(value: int, max_value: int, color: str) -> str:
     denominator = max(max_value, _BAR_DENOMINATOR_FLOOR)
     ratio = value / denominator
     filled = round(ratio * _STAT_TILE_BAR_WIDTH)
-    filled = max(0, min(_STAT_TILE_BAR_WIDTH, filled))
+    filled = max(_BAR_MIN_FILLED, min(_STAT_TILE_BAR_WIDTH, filled))
     empty = _STAT_TILE_BAR_WIDTH - filled
     filled_segment = f"[{color}]{BAR_FILLED * filled}[/{color}]"
     empty_segment = f"[dim]{BAR_FILLED * empty}[/dim]"
@@ -262,7 +265,7 @@ def _format_affected_lines_compact(
     affected_lines: tuple[tuple[Path, int], ...],
 ) -> str:
     """Format affected lines as a compact string like 'lines 7, 24, 40, 54'."""
-    line_numbers = [pair[1] for pair in affected_lines]
+    line_numbers = [path_line_pair[1] for path_line_pair in affected_lines]
     if len(line_numbers) <= _MAX_DISPLAYED_AFFECTED_LINES:
         return "lines " + ", ".join(str(ln) for ln in line_numbers)
     shown = ", ".join(str(ln) for ln in line_numbers[:_MAX_DISPLAYED_AFFECTED_LINES])
@@ -272,18 +275,16 @@ def _format_affected_lines_compact(
 
 def _resolve_category_color(category_name: str) -> str:
     """Map a category name (enum value) to its display color."""
-    try:
-        return _CATEGORY_BAR_COLORS[PhiCategory(category_name)]
-    except ValueError:
+    if category_name not in _KNOWN_PHI_CATEGORY_VALUES:
         return _CATEGORY_BAR_DEFAULT
+    return _CATEGORY_BAR_COLORS[PhiCategory(category_name)]
 
 
 def _resolve_category_display(category_name: str) -> str:
     """Abbreviate long category names for the breakdown label column."""
-    try:
-        return _CATEGORY_DISPLAY_NAMES.get(PhiCategory(category_name), category_name)
-    except ValueError:
+    if category_name not in _KNOWN_PHI_CATEGORY_VALUES:
         return category_name
+    return _CATEGORY_DISPLAY_NAMES.get(PhiCategory(category_name), category_name)
 
 
 def render_category_breakdown(
