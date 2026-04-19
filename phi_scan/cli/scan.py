@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from typing import Annotated
 
@@ -128,13 +127,18 @@ _SCAN_WORKERS_HELP: str = (
     "Output ordering is deterministic regardless of thread completion order."
 )
 _SCAN_REPORT_FORMAT_HELP: str = (
-    "Terminal report format: v1 (current default) or v2 (redesigned grouped output). "
-    "Also settable via PHI_SCAN_REPORT_V2=1 environment variable."
+    "Terminal report format: v2 (default, redesigned grouped output) or v1 "
+    "(deprecated, removed in 0.8.0). Terminal output is not a stable interface — "
+    "use --output json or --output sarif for programmatic consumption."
 )
 _REPORT_FORMAT_V2: str = "v2"
 _REPORT_FORMAT_V1: str = "v1"
-_REPORT_FORMAT_ENV_VAR: str = "PHI_SCAN_REPORT_V2"
-_REPORT_FORMAT_ENV_TRUTHY: str = "1"
+_REPORT_FORMAT_V1_DEPRECATION_NOTICE: str = (
+    "DeprecationWarning: --report-format v1 is deprecated and will be removed in "
+    "phi-scan 0.8.0. The v2 renderer is now the default. Terminal output is not a "
+    "stable interface — use --output json or --output sarif for programmatic "
+    "consumption.\n"
+)
 
 _AUDIT_WRITE_FAILURE_WARNING: str = "Audit log write failed — scan result not persisted: {error}"
 _AUDIT_KEY_MISSING_DEBUG: str = (
@@ -307,7 +311,7 @@ def scan(
     ] = _DEFAULT_WORKER_COUNT,
     report_format: Annotated[
         str, typer.Option("--report-format", help=_SCAN_REPORT_FORMAT_HELP)
-    ] = _REPORT_FORMAT_V1,
+    ] = _REPORT_FORMAT_V2,
 ) -> None:
     """Scan a directory or file for PHI/PII.
 
@@ -321,10 +325,9 @@ def scan(
     output_format_enum = resolve_output_format(output_format)
     enabled_frameworks = _resolve_framework_flag(framework)
     is_rich_mode = not is_quiet and output_format_enum is OutputFormat.TABLE
-    is_v2 = (
-        report_format == _REPORT_FORMAT_V2
-        or os.environ.get(_REPORT_FORMAT_ENV_VAR) == _REPORT_FORMAT_ENV_TRUTHY
-    )
+    is_v2 = report_format != _REPORT_FORMAT_V1
+    if report_format == _REPORT_FORMAT_V1 and is_rich_mode:
+        typer.echo(_REPORT_FORMAT_V1_DEPRECATION_NOTICE, err=True)
     with display_status_spinner(_SPINNER_CONFIG_LOAD_MESSAGE, is_active=is_rich_mode):
         scan_config = load_scan_config(config_path, severity_threshold)
     if is_rich_mode and not is_v2:
